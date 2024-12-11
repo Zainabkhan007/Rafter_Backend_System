@@ -1,9 +1,9 @@
 ﻿alembic==1.13.2
-amqp==5.2.0
+amqp>=5.2.0
 asgiref==3.8.1
 billiard==4.2.0
 blinker==1.9.0
-celery==5.4.0
+celery>=5.4.0
 certifi==2024.8.30
 cffi==1.17.1
 chardet==5.2.0
@@ -79,7 +79,7 @@ tornado==6.2
 typing-extensions==4.5.0
 tzdata==2023.3
 urllib3==1.26.13
-vine==5.0.0
+vine>=5.0.0,<6.0.0
 virtualenv==20.16.7
 wcwidth==0.2.5
 Werkzeug==2.1.2
