@@ -1,0 +1,49 @@
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      # Step 1: Checkout the latest code from the repository
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      # Step 2: Set up Python (adjust to your required version)
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'  # Set the correct Python version for your Django project
+
+      # Step 3: Install dependencies
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt  # Assumes requirements.txt is in the root of the repo
+
+      # Step 4: Run Django migrations
+      - name: Run migrations
+        run: |
+          python manage.py migrate
+
+      # Step 5: Deploy to EC2 Instance
+      - name: Deploy to EC2
+        run: |
+          ssh -o StrictHostKeyChecking=no -i ${{ secrets.EC2_SSH_KEY }} ubuntu@${{ secrets.EC2_PUBLIC_IP }} << 'EOF'
+            # Navigate to the project directory (adjust the path to your working directory)
+            cd /home/ubuntu/project/Rafter_Backend_System || exit  # Update the path as per your EC2 setup
+            # Pull the latest code from the repository
+            git pull origin master || exit
+            # Install/update Python dependencies
+            pip install -r requirements.txt || exit
+            # Run database migrations
+            python manage.py migrate || exit
+            # Restart the application (adjust to your process manager)
+            sudo systemctl restart gunicorn || exit  # Adjust service name if you're using a different process manager
+          EOF
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
+          EC2_PUBLIC_IP: ${{ secrets.EC2_PUBLIC_IP }}
