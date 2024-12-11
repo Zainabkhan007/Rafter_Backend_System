@@ -1,4 +1,4 @@
-FROM python:3.10-slim as base
+FROM python:3.9-slim as base
 
 # Install system dependencies and build tools
 RUN apt-get update && apt-get install -y \
@@ -12,13 +12,17 @@ RUN apt-get update && apt-get install -y \
     cython3 \
     && rm -rf /var/lib/apt/lists/*
 
+# Upgrade pip, install setuptools, and wheel
+RUN pip install --upgrade pip
+RUN pip install setuptools wheel
+
 # Set the working directory
 WORKDIR /app
 
 # Copy the requirements file
 COPY requirements.txt .
 
-# Install dependencies
+# Install dependencies with verbose logging
 RUN pip install -r requirements.txt
 
 # Copy the rest of the application code
