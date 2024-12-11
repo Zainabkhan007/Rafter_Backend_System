@@ -23,7 +23,7 @@ WORKDIR /app
 COPY requirements.txt .
 
 # Install dependencies with verbose logging
-RUN pip install -r requirements.txt
+RUN pip install -v --no-cache-dir -r requirements.txt
 
 # Copy the rest of the application code
 COPY . .
