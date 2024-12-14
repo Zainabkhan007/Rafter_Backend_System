@@ -1,6 +1,7 @@
 from .models import *
 from rest_framework import serializers
 from django.contrib.auth import authenticate
+from django.contrib.auth.hashers import check_password 
 
 from django.contrib.auth.tokens import default_token_generator
 
@@ -25,7 +26,7 @@ class StaffRegisterationSerializer(serializers.ModelSerializer):
     class Meta:
         model = StaffRegisteration
         fields = "__all__"
-   
+ 
 class LoginSerializer(serializers.Serializer):
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True, min_length=8, max_length=65)
@@ -56,7 +57,9 @@ class LoginSerializer(serializers.Serializer):
                 user_type = 'student'
             except StudentRegisteration.DoesNotExist:
                 pass
-        if user and user.password == password:  
+
+        # Validate password with Django's check_password function
+        if user and check_password(password, user.password):  # Use check_password to compare hashed password
             attrs['user'] = user
             attrs['user_type'] = user_type
         else:

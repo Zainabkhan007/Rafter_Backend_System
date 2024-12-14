@@ -1,5 +1,6 @@
 from django.urls import path
 from . import views
+# from .views import StudentSearchView
 urlpatterns = [
     # Primary School Urls
     path("add_primary_school/",views.add_primary_school,name='add_primary_school'),
@@ -22,6 +23,16 @@ urlpatterns = [
     path('add_secondary_student/<int:school_id>/', views.add_secondary_student, name='add_secondary_student'),
     path('secondary_school/<int:school_id>/student/<int:student_id>/', views.update_delete_secondary_student, name='update_delete_secondary_student'),
 
+#    Menu
+    path("add_menu/",views.add_menu,name='add_menu'),
+    path("get_complete_menu/",views.get_complete_menu,name='get_complete_menu'),
+    path("edit_menu/<int:id>/",views.edit_menu,name='edit_menu'),
+    path("add_menu_item/",views.add_menu_item,name='add_menu_item'),
+
+    # View Registered Students
+    path("view_students/",views.view_students,name='view_students'),
+    path("edit_student/<int:student_id>/",views.edit_student,name='edit_student'),
+   
 
 
 

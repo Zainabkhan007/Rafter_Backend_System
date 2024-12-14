@@ -8,14 +8,27 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.permissions import IsAdminUser
 from rest_framework.authentication import SessionAuthentication
 from django.conf import settings
+from django.contrib.auth.hashers import make_password
 
 # Create your views here.
 
- 
 @api_view(["POST"])
 def register(request):
     user_type = request.data.get('user_type')
     serializer = None
+
+    # Check if the user with the provided email already exists in any model
+    email = request.data.get('email')
+    if not email:
+        return Response({"error": "Email is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Check for duplicate email in each user type's model
+    if StaffRegisteration.objects.filter(email=email).exists():
+        return Response({"error": "Email already registered as staff."}, status=status.HTTP_400_BAD_REQUEST)
+    if ParentRegisteration.objects.filter(email=email).exists():
+        return Response({"error": "Email already registered as parent."}, status=status.HTTP_400_BAD_REQUEST)
+    if StudentRegisteration.objects.filter(email=email).exists():
+        return Response({"error": "Email already registered as student."}, status=status.HTTP_400_BAD_REQUEST)
 
     # Choose the correct serializer based on user type
     if user_type == "parent":
@@ -27,13 +40,17 @@ def register(request):
     else:
         return Response({"error": "Invalid user type"}, status=status.HTTP_400_BAD_REQUEST)
 
-   
+    # Retrieve and validate the password fields
     password = request.data.get('password')
     password_confirmation = request.data.get('password_confirmation')
 
     # Check if passwords match
     if password != password_confirmation:
         return Response({"error": "Passwords do not match."}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Hash the password before saving (using Django's password hashing method)
+    hashed_password = make_password(password)
+    request.data['password'] = hashed_password  # Replace plain password with hashed password
 
     # Check if serializer data is valid
     if serializer.is_valid():
@@ -43,7 +60,7 @@ def register(request):
     else:
         # If serializer data is invalid, return errors
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-       
+    
 @api_view(["POST"])
 def login(request):
 

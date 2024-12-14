@@ -10,7 +10,11 @@ class ParentRegisteration(models.Model):
     phone_no = models.IntegerField( blank=True, null=True)
     password=models.CharField(max_length=30)
     password_confirmation=models.CharField(max_length=30)
-   
+    def save(self, *args, **kwargs):
+        # Hash the password before saving it
+        if self.password:
+            self.password = make_password(self.password)
+        super().save(*args, **kwargs)
 class StudentRegisteration(models.Model):
     first_name=models.CharField(max_length=30 )
     last_name=models.CharField(max_length=30)
@@ -19,7 +23,12 @@ class StudentRegisteration(models.Model):
     phone_no = models.IntegerField( blank=True, null=True)
     password=models.CharField(max_length=30)
     password_confirmation=models.CharField(max_length=30)
-  
+    def save(self, *args, **kwargs):
+        # Hash the password before saving it
+        if self.password:
+            self.password = make_password(self.password)
+        super().save(*args, **kwargs)
+
 class StaffRegisteration(models.Model):
     first_name=models.CharField(max_length=30)
     last_name=models.CharField(max_length=30)
@@ -28,8 +37,8 @@ class StaffRegisteration(models.Model):
     phone_no = models.IntegerField( blank=True, null=True)
     password=models.CharField(max_length=30)
     password_confirmation=models.CharField(max_length=30)
-<<<<<<< HEAD
-
-=======
-   
->>>>>>> 6546219430c712d1c24fe84b4807f8a739ac493e
+    def save(self, *args, **kwargs):
+        # Hash the password before saving it
+        if self.password:
+            self.password = make_password(self.password)
+        super().save(*args, **kwargs)
