@@ -48,9 +48,7 @@ def register(request):
     if password != password_confirmation:
         return Response({"error": "Passwords do not match."}, status=status.HTTP_400_BAD_REQUEST)
 
-    # Hash the password before saving (using Django's password hashing method)
-    hashed_password = make_password(password)
-    request.data['password'] = hashed_password  # Replace plain password with hashed password
+  
 
     # Check if serializer data is valid
     if serializer.is_valid():
