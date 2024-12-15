@@ -8,8 +8,8 @@ class ParentRegisteration(models.Model):
     username=models.CharField(max_length=30)
     email=models.EmailField(max_length=254,unique=True)
     phone_no = models.IntegerField( blank=True, null=True)
-    password=models.CharField(max_length=30)
-    password_confirmation=models.CharField(max_length=30)
+    password=models.CharField(max_length=128)
+ 
     def save(self, *args, **kwargs):
         # Hash the password before saving it
         if self.password:
@@ -21,8 +21,8 @@ class StudentRegisteration(models.Model):
     username=models.CharField(max_length=30)
     email=models.EmailField(max_length=254,unique=True)
     phone_no = models.IntegerField( blank=True, null=True)
-    password=models.CharField(max_length=30)
-    password_confirmation=models.CharField(max_length=30)
+    password=models.CharField(max_length=128)
+   
     def save(self, *args, **kwargs):
         # Hash the password before saving it
         if self.password:
@@ -35,8 +35,8 @@ class StaffRegisteration(models.Model):
     username=models.CharField(max_length=30)
     email=models.EmailField(max_length=254,unique=True)
     phone_no = models.IntegerField( blank=True, null=True)
-    password=models.CharField(max_length=30)
-    password_confirmation=models.CharField(max_length=30)
+    password=models.CharField(max_length=128)
+   
     def save(self, *args, **kwargs):
         # Hash the password before saving it
         if self.password:
