@@ -29,7 +29,7 @@ class StaffRegisterationSerializer(serializers.ModelSerializer):
  
 class LoginSerializer(serializers.Serializer):
     email = serializers.EmailField()
-    password = serializers.CharField(write_only=True, min_length=8, max_length=65)
+    password = serializers.CharField(write_only=True, min_length=8, max_length=128)
     
     def validate(self, attrs):
         email = attrs.get('email')
