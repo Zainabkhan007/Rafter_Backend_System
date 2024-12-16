@@ -4,7 +4,7 @@ from django.utils import timezone
 # Create your models here.
 class PrimarySchool(models.Model):
     school_name=models.CharField(max_length=30)
-    school_email=models.EmailField(max_length=254)   
+    school_email=models.EmailField(max_length=254,unique=True)   
     school_eircode=models.CharField(max_length=30,unique=True)
     def __str__(self):
         return f"{self.school_name}{self.id}" 
@@ -30,7 +30,7 @@ class Student(models.Model):
 
 class SecondarySchool(models.Model):
     secondary_school_name=models.CharField(max_length=30)
-    secondary_school_email=models.EmailField(max_length=254)   
+    secondary_school_email=models.EmailField(max_length=254,unique=True)   
     secondary_school_eircode=models.CharField(max_length=30,unique=True)
     def __str__(self):
         return f"{self.secondary_school_name}-{self.id}"
