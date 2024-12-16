@@ -7,7 +7,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.shortcuts import get_object_or_404
 from rest_framework.views import APIView
 from rest_framework.filters import SearchFilter
-
+from django.db.models import Count
 # Create your views here.
   
 # Primary School Sction
@@ -22,38 +22,48 @@ def add_primary_school(request):
         else:
             return Response({ "error" : serializer.errors},status = status.HTTP_400_BAD_REQUEST)
         
+
 @csrf_exempt
 @api_view(['GET',])
 def primary_school(request):
-    if request.method=="GET":
-     try:
-      detail=PrimarySchool.objects.all()
-     except:
-        return Response(status=status.HTTP_404_NOT_FOUND)
-     serializer=PrimarySchoolSerializer(detail, many=True)
-     return Response(serializer.data)
+    if request.method == "GET":
+        try:
+           
+            details = PrimarySchool.objects.annotate(student_count=Count('student'))
+        except:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+    
+        serializer = PrimarySchoolSerializer(details, many=True)
+    
+        for school_data in serializer.data:
+    
+            school_data['student_count'] = school_data.get('student_count', 0)
+        
+        return Response(serializer.data)
 
-@api_view(['GET','DELETE','PUT'])
-def delete_primary_school(request,pk):
+@api_view(['GET', 'DELETE', 'PUT'])
+def delete_primary_school(request, pk):
     try:
-        school = PrimarySchool.objects.get(pk=pk)  
+        school = PrimarySchool.objects.annotate(student_count=Count('student')).get(pk=pk)
     except PrimarySchool.DoesNotExist:
         return Response({"error": "PrimarySchool not found."}, status=status.HTTP_404_NOT_FOUND)
-    
-    if request.method=="PUT":
-        school=PrimarySchool.objects.get(pk=pk)
-        serializer=PrimarySchoolSerializer(school,data=request.data) 
+
+    if request.method == "PUT":
+        serializer = PrimarySchoolSerializer(school, data=request.data)
         if serializer.is_valid():
             serializer.save()
-            return Response( serializer.data,status=status.HTTP_204_NO_CONTENT)
+            return Response(serializer.data, status=status.HTTP_204_NO_CONTENT)
         else:
-            return Response(status = status.HTTP_400_BAD_REQUEST)
-        
+            return Response(status=status.HTTP_400_BAD_REQUEST)
+
     if request.method == "DELETE":
-        school.delete() 
-        return Response(status=status.HTTP_204_NO_CONTENT) 
+        school.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
     serializer = PrimarySchoolSerializer(school)
-    return Response(serializer.data, status=status.HTTP_200_OK)
+    response_data = serializer.data
+    response_data['student_count'] = school.student_count
+    return Response(response_data, status=status.HTTP_200_OK)
 
 class PrimarySearch(ListAPIView):
 
