@@ -48,7 +48,6 @@ def register(request):
     if password != password_confirmation:
         return Response({"error": "Passwords do not match."}, status=status.HTTP_400_BAD_REQUEST)
 
-    
     # Check if serializer data is valid
     if serializer.is_valid():
         # Save the new user
