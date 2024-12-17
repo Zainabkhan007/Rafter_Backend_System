@@ -183,7 +183,6 @@ class StudentSearch(ListAPIView):
 
 
 # Secondary School Section
-
 @csrf_exempt
 @api_view(['POST'])
 def add_secondary_school(request):
@@ -239,7 +238,6 @@ def delete_secondary_school(request,pk):
     return Response(response_data, status=status.HTTP_200_OK)
 
 # For Secondary Student
-
 @csrf_exempt
 @api_view(['POST'])
 def add_secondary_student(request, school_id):
@@ -283,6 +281,16 @@ def update_delete_secondary_student(request, school_id, student_id):
     elif request.method == 'DELETE':
         student.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+# Category
+@csrf_exempt
+@api_view(['GET',])
+def get_category(request):
+   if request.method == "GET":
+        category = Categories.objects.all()
+        serializer = CategoriesSerializer(category,many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+     
 # MENU
 @api_view(['POST'])
 def add_menu(request):
