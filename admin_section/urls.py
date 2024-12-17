@@ -23,6 +23,8 @@ urlpatterns = [
     path('add_secondary_student/<int:school_id>/', views.add_secondary_student, name='add_secondary_student'),
     path('secondary_school/<int:school_id>/student/<int:student_id>/', views.update_delete_secondary_student, name='update_delete_secondary_student'),
 
+# Category
+    path("get_category/",views.get_category,name='get_category'),
 #    Menu
     path("add_menu/",views.add_menu,name='add_menu'),
     path("get_complete_menu/",views.get_complete_menu,name='get_complete_menu'),
@@ -32,6 +34,11 @@ urlpatterns = [
     # View Registered Students
     path("view_students/",views.view_students,name='view_students'),
     path("edit_student/<int:student_id>/",views.edit_student,name='edit_student'),
+
+
+#    Order
+    path("create_order/",views. create_order,name=' create_order'),
+    path("add_order_item/",views. add_order_item,name=' add_order_item'),
    
 
 

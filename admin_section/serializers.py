@@ -2,10 +2,11 @@ from .models import *
 from rest_framework import serializers
 
 class PrimarySchoolSerializer(serializers.ModelSerializer):
-    
+    student_count = serializers.IntegerField(read_only=True)
     class Meta:
         model = PrimarySchool
-        fields = '__all__'
+        fields =  ['id', 'school_name', 'school_email', 'school_eircode', 'student_count']
+
 
 class TeacherSerializer(serializers.ModelSerializer):
     class Meta:
@@ -22,9 +23,10 @@ class StudentSerializer(serializers.ModelSerializer):
 
 
 class SecondarySchoolSerializer(serializers.ModelSerializer):
+    student_count = serializers.IntegerField(read_only=True)
     class Meta:
         model = SecondarySchool
-        fields = '__all__'
+        fields =  ['id', 'secondary_school_name', 'secondary_school_email', 'secondary_school_eircode', 'student_count']
 
 
 class SecondaryStudentSerializer(serializers.ModelSerializer):
@@ -33,6 +35,13 @@ class SecondaryStudentSerializer(serializers.ModelSerializer):
         fields = ['secondary_student_name', 'secondary_class_year','secondary_school','seconadry_student_email', ]
 
 
+class CategoriesSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Categories
+        fields = '__all__'
+
+
+    
 class MenuSerializer(serializers.ModelSerializer):
     # Ensure that we display the is_active field
     is_active = serializers.BooleanField(read_only=True)  # Computed from is_active_time
@@ -53,6 +62,17 @@ class MenuSerializer(serializers.ModelSerializer):
         return representation
 
 class MenuItemsSerializer(serializers.ModelSerializer):
+    category = serializers.SlugRelatedField(queryset=Categories.objects.all(), slug_field='name_category')
     class Meta:
         model = MenuItems
+        fields = ['category', 'item_name', 'item_description', 'nutrients', 'ingredients']
+
+class OrderSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Order
+        fields = '__all__'
+
+class OrderItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = OrderItem
         fields = '__all__'

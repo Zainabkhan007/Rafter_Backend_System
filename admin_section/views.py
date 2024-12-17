@@ -7,6 +7,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.shortcuts import get_object_or_404
 from rest_framework.views import APIView
 from rest_framework.filters import SearchFilter
+from django.db.models import Count
 
 # Create your views here.
   
@@ -25,35 +26,44 @@ def add_primary_school(request):
 @csrf_exempt
 @api_view(['GET',])
 def primary_school(request):
-    if request.method=="GET":
-     try:
-      detail=PrimarySchool.objects.all()
-     except:
-        return Response(status=status.HTTP_404_NOT_FOUND)
-     serializer=PrimarySchoolSerializer(detail, many=True)
-     return Response(serializer.data)
+    if request.method == "GET":
+        try:
+           
+            details = PrimarySchool.objects.annotate(student_count=Count('student'))
+        except:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+    
+        serializer = PrimarySchoolSerializer(details, many=True)
+    
+        for school_data in serializer.data:
+    
+            school_data['student_count'] = school_data.get('student_count', 0)
+        
+        return Response(serializer.data)
 
-@api_view(['GET','DELETE','PUT'])
-def delete_primary_school(request,pk):
+@api_view(['GET', 'DELETE', 'PUT'])
+def delete_primary_school(request, pk):
     try:
-        school = PrimarySchool.objects.get(pk=pk)  
+        school = PrimarySchool.objects.annotate(student_count=Count('student')).get(pk=pk)
     except PrimarySchool.DoesNotExist:
         return Response({"error": "PrimarySchool not found."}, status=status.HTTP_404_NOT_FOUND)
-    
-    if request.method=="PUT":
-        school=PrimarySchool.objects.get(pk=pk)
-        serializer=PrimarySchoolSerializer(school,data=request.data) 
+
+    if request.method == "PUT":
+        serializer = PrimarySchoolSerializer(school, data=request.data)
         if serializer.is_valid():
             serializer.save()
-            return Response( serializer.data,status=status.HTTP_204_NO_CONTENT)
+            return Response(serializer.data, status=status.HTTP_204_NO_CONTENT)
         else:
-            return Response(status = status.HTTP_400_BAD_REQUEST)
-        
+            return Response(status=status.HTTP_400_BAD_REQUEST)
+
     if request.method == "DELETE":
-        school.delete() 
-        return Response(status=status.HTTP_204_NO_CONTENT) 
+        school.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
     serializer = PrimarySchoolSerializer(school)
-    return Response(serializer.data, status=status.HTTP_200_OK)
+    response_data = serializer.data
+    response_data['student_count'] = school.student_count
+    return Response(response_data, status=status.HTTP_200_OK)
 
 class PrimarySearch(ListAPIView):
 
@@ -188,35 +198,45 @@ def add_secondary_school(request):
 @csrf_exempt
 @api_view(['GET',])
 def secondary_school(request):
-    if request.method=="GET":
-     try:
-      detail=SecondarySchool.objects.all()
-     except:
-        return Response(status=status.HTTP_404_NOT_FOUND)
-     serializer=SecondarySchoolSerializer(detail, many=True)
-     return Response(serializer.data)
+   if request.method == "GET":
+        try:
+           
+            details = SecondarySchool.objects.annotate(student_count=Count('student'))
+        except:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+    
+        serializer = SecondarySchoolSerializer(details, many=True)
+    
+        for school_data in serializer.data:
+    
+            school_data['student_count'] = school_data.get('student_count', 0)
+        
+        return Response(serializer.data)
+
 
 @api_view(['GET','DELETE','PUT'])
 def delete_secondary_school(request,pk):
     try:
-        school = SecondarySchool.objects.get(pk=pk)  
+        school = SecondarySchool.objects.annotate(student_count=Count('student')).get(pk=pk)
     except SecondarySchool.DoesNotExist:
         return Response({"error": "SecondarySchool not found."}, status=status.HTTP_404_NOT_FOUND)
-    
-    if request.method=="PUT":
-        school=SecondarySchool.objects.get(pk=pk)
-        serializer=SecondarySchoolSerializer(school,data=request.data) 
+
+    if request.method == "PUT":
+        serializer = SecondarySchoolSerializer(school, data=request.data)
         if serializer.is_valid():
             serializer.save()
-            return Response( serializer.data,status=status.HTTP_204_NO_CONTENT)
+            return Response(serializer.data, status=status.HTTP_204_NO_CONTENT)
         else:
-            return Response(status = status.HTTP_400_BAD_REQUEST)
-        
+            return Response(status=status.HTTP_400_BAD_REQUEST)
+
     if request.method == "DELETE":
-        school.delete()  
-        return Response(status=status.HTTP_204_NO_CONTENT) 
+        school.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
     serializer = SecondarySchoolSerializer(school)
-    return Response(serializer.data, status=status.HTTP_200_OK)
+    response_data = serializer.data
+    response_data['student_count'] = school.student_count
+    return Response(response_data, status=status.HTTP_200_OK)
 
 
 # For Secondary Student
@@ -265,6 +285,16 @@ def update_delete_secondary_student(request, school_id, student_id):
         student.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
+# Category
+@csrf_exempt
+@api_view(['GET',])
+def get_category(request):
+   if request.method == "GET":
+        category = Categories.objects.all()
+        serializer = CategoriesSerializer(category,many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+# Menu
 @api_view(['POST'])
 def add_menu(request):
     if request.method == 'POST':
@@ -500,14 +530,13 @@ def edit_menu(request, id):
 @csrf_exempt
 @api_view(['POST'])
 def add_menu_item(request):
-    if request.method=='POST':
-        serializer=MenuItemsSerializer(data=request.data)
+    if request.method == 'POST':
+        serializer = MenuItemsSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save()
-            return Response(serializer.data,status=status.HTTP_201_CREATED, )
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
         else:
-            return Response({ "error" : serializer.errors},status = status.HTTP_400_BAD_REQUEST)
-
+            return Response({"error": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
 # View Registered Students
 @csrf_exempt
@@ -574,3 +603,98 @@ def edit_student(request, student_id):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@csrf_exempt
+@api_view(['POST'])
+def create_order(request):
+    if request.method == 'POST':
+        student_id = request.data.get('student_id')  
+        selected_days = request.data.get('selected_days') 
+
+
+        if not student_id or not selected_days:
+            return Response({'error': 'Student ID and selected days are required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        student = Student.objects.filter(id=student_id).first()
+        if not student:
+            return Response({'error': 'Student not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        created_orders = []
+
+       
+        for day in selected_days:
+          
+            menus_for_day = Menu.objects.filter(menu_day=day)
+
+            if not menus_for_day:
+                return Response({'error': f'No menus available for {day}.'}, status=status.HTTP_404_NOT_FOUND)
+
+            order_total_price = 0
+            order_items = []
+
+       
+            order_data = {
+                'user_id': student.id,
+                'user_type': 'student',
+                'student': student.id,  
+                'total_price': order_total_price,
+                'week_number': datetime.now().isocalendar()[1],
+                'year': datetime.now().year,
+                'order_date': datetime.now(),
+                'selected_day': day,
+                'is_delivered': False,
+            }
+
+            order_serializer = OrderSerializer(data=order_data)
+            if not order_serializer.is_valid():
+                return Response(order_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        
+            order_instance = order_serializer.save()
+
+            for menu_item in menus_for_day:
+             
+                order_item = OrderItem.objects.create(
+                    fk_menu_item_id=menu_item,
+                    quantity=1,  
+                    order=order_instance  
+                )
+
+                order_items.append(order_item)
+                order_total_price += menu_item.price
+
+           
+            order_instance.total_price = order_total_price
+            order_instance.save() 
+
+            created_orders.append({
+                'order_id': order_instance.id,
+                'selected_day': day,
+                'total_price': order_instance.total_price,
+                'order_date': str(order_instance.order_date),
+                'items': [{'item_name': item.fk_menu_item_id.name, 'price': item.fk_menu_item_id.price} for item in order_items],
+            })
+
+        return Response({
+            'message': 'Orders created successfully!',
+            'orders': created_orders
+        }, status=status.HTTP_201_CREATED)
+
+
+
+
+
+
+    
+
+@csrf_exempt
+@api_view(['POST'])
+def add_order_item(request):
+    if request.method=='POST':
+        serializer=OrderItemSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data,status=status.HTTP_201_CREATED, )
+        else:
+            return Response({ "error" : serializer.errors},status = status.HTTP_400_BAD_REQUEST)
