@@ -22,9 +22,10 @@ class StudentSerializer(serializers.ModelSerializer):
 
 
 class SecondarySchoolSerializer(serializers.ModelSerializer):
+    student_count = serializers.IntegerField(read_only=True)
     class Meta:
         model = SecondarySchool
-        fields = '__all__'
+        fields =  ['id', 'secondary_school_name', 'secondary_school_email', 'secondary_school_eircode', 'student_count']
 
 
 class SecondaryStudentSerializer(serializers.ModelSerializer):
