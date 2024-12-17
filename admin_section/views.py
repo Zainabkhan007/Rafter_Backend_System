@@ -198,36 +198,45 @@ def add_secondary_school(request):
 @csrf_exempt
 @api_view(['GET',])
 def secondary_school(request):
-    if request.method=="GET":
-     try:
-      detail=SecondarySchool.objects.all()
-     except:
-        return Response(status=status.HTTP_404_NOT_FOUND)
-     serializer=SecondarySchoolSerializer(detail, many=True)
-     return Response(serializer.data)
+   if request.method == "GET":
+        try:
+           
+            details = SecondarySchool.objects.annotate(student_count=Count('student'))
+        except:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+    
+        serializer = SecondarySchoolSerializer(details, many=True)
+    
+        for school_data in serializer.data:
+    
+            school_data['student_count'] = school_data.get('student_count', 0)
+        
+        return Response(serializer.data)
+
 
 @api_view(['GET','DELETE','PUT'])
 def delete_secondary_school(request,pk):
-    try:
-        school = SecondarySchool.objects.get(pk=pk)  
+     try:
+        school = SecondarySchool.objects.annotate(student_count=Count('student')).get(pk=pk)
     except SecondarySchool.DoesNotExist:
         return Response({"error": "SecondarySchool not found."}, status=status.HTTP_404_NOT_FOUND)
-    
-    if request.method=="PUT":
-        school=SecondarySchool.objects.get(pk=pk)
-        serializer=SecondarySchoolSerializer(school,data=request.data) 
+
+    if request.method == "PUT":
+        serializer = SecondarySchoolSerializer(school, data=request.data)
         if serializer.is_valid():
             serializer.save()
-            return Response( serializer.data,status=status.HTTP_204_NO_CONTENT)
+            return Response(serializer.data, status=status.HTTP_204_NO_CONTENT)
         else:
-            return Response(status = status.HTTP_400_BAD_REQUEST)
-        
-    if request.method == "DELETE":
-        school.delete()  
-        return Response(status=status.HTTP_204_NO_CONTENT) 
-    serializer = SecondarySchoolSerializer(school)
-    return Response(serializer.data, status=status.HTTP_200_OK)
+            return Response(status=status.HTTP_400_BAD_REQUEST)
 
+    if request.method == "DELETE":
+        school.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    serializer = SecondarySchoolSerializer(school)
+    response_data = serializer.data
+    response_data['student_count'] = school.student_count
+    return Response(response_data, status=status.HTTP_200_OK)
 
 # For Secondary Student
 
@@ -274,7 +283,7 @@ def update_delete_secondary_student(request, school_id, student_id):
     elif request.method == 'DELETE':
         student.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
-
+# MENU
 @api_view(['POST'])
 def add_menu(request):
     if request.method == 'POST':
