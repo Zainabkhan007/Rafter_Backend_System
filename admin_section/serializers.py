@@ -33,6 +33,10 @@ class SecondaryStudentSerializer(serializers.ModelSerializer):
         model = SecondaryStudent
         fields = ['secondary_student_name', 'secondary_class_year','secondary_school','seconadry_student_email', ]
 
+class CategoriesSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Categories
+        fields = '__all__'
 
 class MenuSerializer(serializers.ModelSerializer):
     # Ensure that we display the is_active field
