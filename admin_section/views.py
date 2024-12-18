@@ -546,15 +546,21 @@ def get_menu_items(request):
         menu_items = MenuItems.objects.all()
         serializer = MenuItemsSerializer(menu_items,many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
-@api_view([ 'PATCH'])
+@api_view(['GET', 'PATCH'])
 def update_menu_items(request, pk):
     menu_item = get_object_or_404(MenuItems, pk=pk)
-    serializer = MenuItemsSerializer(menu_item, data=request.data, partial=(request.method == 'PATCH'))
-
-    if serializer.is_valid():
-        serializer.save()
+    
+    if request.method == 'GET':
+        serializer = MenuItemsSerializer(menu_item)
         return Response(serializer.data, status=status.HTTP_200_OK)
-    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    elif request.method == 'PATCH':
+        serializer = MenuItemsSerializer(menu_item, data=request.data, partial=True)
+        
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 # View Registered Students
