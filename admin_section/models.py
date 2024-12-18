@@ -77,7 +77,6 @@ class Menu(models.Model):
         return False
 
 
-    
 class MenuItems(models.Model):
     category=models.ForeignKey('Categories',null=True, blank=True,on_delete=models.CASCADE, related_name='orders')
     item_name= models.CharField(max_length=255,null=False)
