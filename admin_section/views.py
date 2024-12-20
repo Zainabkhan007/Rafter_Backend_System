@@ -5,12 +5,113 @@ from rest_framework.generics import ListAPIView
 from .serializers import *
 from django.views.decorators.csrf import csrf_exempt
 from django.shortcuts import get_object_or_404
-from rest_framework.views import APIView
 from rest_framework.filters import SearchFilter
 from django.db.models import Count
-
+import calendar
+from django.contrib.auth import authenticate
+from rest_framework_simplejwt.tokens import RefreshToken
+from django.conf import settings
+from django.contrib.auth.hashers import make_password
+from .models import *
 # Create your views here.
-  
+
+@api_view(["POST"])
+def register(request):
+    user_type = request.data.get('user_type')
+    serializer = None
+
+    email = request.data.get('email')
+    if not email:
+        return Response({"error": "Email is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+    if StaffRegisteration.objects.filter(email=email).exists():
+        return Response({"error": "Email already registered as staff."}, status=status.HTTP_400_BAD_REQUEST)
+    if ParentRegisteration.objects.filter(email=email).exists():
+        return Response({"error": "Email already registered as parent."}, status=status.HTTP_400_BAD_REQUEST)
+    if StudentRegisteration.objects.filter(email=email).exists():
+        return Response({"error": "Email already registered as student."}, status=status.HTTP_400_BAD_REQUEST)
+    if CanteenStaff.objects.filter(email=email).exists():
+        return Response({"error": "Email already registered as canteen."}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Choose the correct serializer based on user type
+    if user_type == "parent":
+        serializer = ParentRegisterationSerializer(data=request.data)
+    elif user_type == "student":
+        serializer = StudentRegisterationSerializer(data=request.data)
+    elif user_type == "staff":
+        serializer = StaffRegisterationSerializer(data=request.data)
+    elif user_type == "canteenstaff":
+        
+        serializer = CanteenStaffSerializer(data=request.data, context={'school_id': request.data.get('school_id')})
+    else:
+        return Response({"error": "Invalid user type"}, status=status.HTTP_400_BAD_REQUEST)
+
+    password = request.data.get('password')
+    password_confirmation = request.data.get('password_confirmation')
+
+    if password != password_confirmation:
+        return Response({"error": "Passwords do not match."}, status=status.HTTP_400_BAD_REQUEST)
+
+
+    if serializer.is_valid():
+      
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+    else:
+       
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+    
+@api_view(["POST"])
+def login(request):
+
+    serializer = LoginSerializer(data=request.data)
+    
+    if serializer.is_valid():
+        user = serializer.validated_data['user']
+        user_type = serializer.validated_data['user_type'] 
+       
+        refresh = RefreshToken.for_user(user)
+        access_token = str(refresh.access_token)
+        refresh_token = str(refresh)
+        request.session['user_id'] = user.id
+        request.session['user_email'] = user.email
+        request.session['user_type'] = user_type
+ 
+        return Response({
+            'access': access_token,
+            'refresh': refresh_token,
+            'user_type': user_type,
+            'user_id': user.id,
+            'message': 'Login successful'
+        }, status=status.HTTP_200_OK)
+    
+    return Response({
+        'detail': 'Invalid credentials'
+    }, status=status.HTTP_401_UNAUTHORIZED)
+
+
+
+@api_view(['POST',])
+
+def admin_login(request):
+     username=request.data.get("username")
+     password=request.data.get("password")
+     if not username or not password:
+        return Response({'detail': 'Both username and password are required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+     user = authenticate(username=username, password=password)
+
+     if user is None:
+        return Response({'detail': 'Invalid username or password.'}, status=status.HTTP_401_UNAUTHORIZED)
+
+     if not user.is_staff:
+        return Response({'detail': 'You do not have permission to access this resource.'}, status=status.HTTP_403_FORBIDDEN)
+
+     return Response({'detail': 'Login successful!'}, status=status.HTTP_200_OK)
+
+
 # Primary School Sction
 @csrf_exempt
 @api_view(['POST'])
@@ -301,20 +402,15 @@ def add_menu(request):
        
         school_id = request.data.get('school_id')
         school_type = request.data.get('school_type')
-        cycle_name = request.data.get('cycle_name')
-        start_date = request.data.get('start_date')
-        end_date = request.data.get('end_date')  
+        cycle_name = request.data.get('cycle_name') 
         menu_date = datetime.now().date()  
 
         # Validate cycle_name
         if not cycle_name.isalnum() and " " not in cycle_name:
             return Response({'error': 'Cycle Name cannot contain special characters!'}, status=status.HTTP_400_BAD_REQUEST)
+        if Menu.objects.filter(cycle_name=cycle_name).exists():
+            return Response({'error': f'Menu with cycle name "{cycle_name}" already exists.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        try:
-            start_date = datetime.strptime(start_date, '%Y-%m-%d').date() if start_date else None
-            end_date = datetime.strptime(end_date, '%Y-%m-%d').date() if end_date else None
-        except ValueError:
-            return Response({'error': 'Invalid date format. Use YYYY-MM-DD.'}, status=status.HTTP_400_BAD_REQUEST)
 
         school_model = PrimarySchool if school_type == 'primary' else SecondarySchool
         school = school_model.objects.filter(id=school_id).first()
@@ -356,8 +452,7 @@ def add_menu(request):
                     'secondary_school': school.id if school_type == 'secondary' else None,
                     'category': category.id,  
                     'is_active_time': is_active_time,  
-                    'start_date': start_date,  
-                    'end_date': end_date, 
+                   
                 }
                 if school_type == 'primary':
                     menu_data['secondary_school'] = None
@@ -385,19 +480,76 @@ def add_menu(request):
             'menus': created_menus
         }, status=status.HTTP_201_CREATED)
 
-      
+@api_view(['POST'])
+def activate_cycle(request):
+    if request.method == 'POST':
+        # Get data from request
+        school_id = request.data.get('school_id')
+        school_type = request.data.get('school_type')
+        cycle_name = request.data.get('cycle_name')
+        start_date = request.data.get('start_date')
+        end_date = request.data.get('end_date')
+        
+       
+        if not cycle_name.isalnum() and " " not in cycle_name:
+            return Response({'error': 'Cycle Name cannot contain special characters!'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            start_date = datetime.strptime(start_date, '%Y-%m-%d').date() if start_date else None
+            end_date = datetime.strptime(end_date, '%Y-%m-%d').date() if end_date else None
+        except ValueError:
+            return Response({'error': 'Invalid date format. Use YYYY-MM-DD.'}, status=status.HTTP_400_BAD_REQUEST)
+
+
+        school_model = PrimarySchool if school_type == 'primary' else SecondarySchool
+        school = school_model.objects.filter(id=school_id).first()
+
+        if not school:
+            return Response({'error': f'{school_type.capitalize()} School not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+        menus = Menu.objects.filter(
+            cycle_name=cycle_name,
+            primary_school=school if school_type == 'primary' else None,
+            secondary_school=school if school_type == 'secondary' else None
+        )
+
+        if not menus:
+            return Response({'error': f'No menus found for cycle "{cycle_name}" in the specified school.'}, status=status.HTTP_404_NOT_FOUND)
+
+        updated_menus = []
+        for menu in menus:
+            menu.start_date = start_date
+            menu.end_date = end_date
+            menu.save()
+            updated_menus.append({
+                'id': menu.id,
+                'name': menu.name,
+                'price': str(menu.price),
+                'menu_day': menu.menu_day,
+                'cycle_name': menu.cycle_name,
+                'start_date': str(menu.start_date),
+                'end_date': str(menu.end_date),
+                'is_active': menu.is_active 
+            })
+        
+        return Response({
+            'message': f'Cycle "{cycle_name}" activated successfully!',
+            'menus': updated_menus
+        }, status=status.HTTP_200_OK)
+
+#
 @api_view(['POST', 'GET', 'DELETE'])
 def get_complete_menu(request):
     if request.method == 'POST':
-
+        school_id = request.data.get('school_id')  
         school_type = request.data.get('school_type')  
         cycle_name = request.data.get('cycle_name')
         start_date = request.data.get('start_date')  
         end_date = request.data.get('end_date')  
 
-       
-        if not school_type or not cycle_name:
-            return Response({'error': 'Both school_type and cycle_name are required.'}, status=status.HTTP_400_BAD_REQUEST)
+        # Validate required fields
+        if not school_id or not school_type or not cycle_name:
+            return Response({'error': 'school_id, school_type, and cycle_name are required.'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
             start_date = datetime.strptime(start_date, '%Y-%m-%d').date() if start_date else None
@@ -406,27 +558,31 @@ def get_complete_menu(request):
             return Response({'error': 'Invalid date format. Use YYYY-MM-DD.'}, status=status.HTTP_400_BAD_REQUEST)
 
         if school_type == 'primary':
-            school = PrimarySchool.objects.first() 
+            school = PrimarySchool.objects.filter(id=school_id).first() 
         elif school_type == 'secondary':
-            school = SecondarySchool.objects.first()  
+            school = SecondarySchool.objects.filter(id=school_id).first()
         else:
             return Response({'error': 'Invalid school_type. Use "primary" or "secondary".'}, status=status.HTTP_400_BAD_REQUEST)
+        
         if not school:
-            return Response({'error': f'{school_type.capitalize()} school not found.'}, status=status.HTTP_404_NOT_FOUND)
+            return Response({'error': f'{school_type.capitalize()} school with ID {school_id} not found.'}, status=status.HTTP_404_NOT_FOUND)
+
         menus = Menu.objects.filter(
             primary_school=school if school_type == 'primary' else None,
             secondary_school=school if school_type == 'secondary' else None,
             cycle_name=cycle_name
         )
+
         if start_date and end_date:
             menus = menus.filter(start_date__lte=start_date, end_date__gte=end_date)
 
         if not menus.exists():
-            return Response({'error': f'No menus found for {cycle_name} within the specified date range in this school.'}, status=status.HTTP_404_NOT_FOUND)
+            return Response({'error': f'No menus found for cycle "{cycle_name}" in the specified school.'}, status=status.HTTP_404_NOT_FOUND)
 
         menu_data = {}
         for menu in menus:
             menu_data.setdefault(menu.menu_day, []).append({
+                'id': menu.id,
                 'name': menu.name,
                 'price': menu.price,
                 'category': menu.category.name_category,
@@ -438,15 +594,15 @@ def get_complete_menu(request):
         return Response({'status': 'Menus retrieved successfully!', 'menus': menu_data}, status=status.HTTP_200_OK)
 
     elif request.method == 'DELETE':
-   
-        school_type = request.data.get('school_type') 
+        school_id = request.data.get('school_id')
+        school_type = request.data.get('school_type')
         cycle_name = request.data.get('cycle_name')
         start_date = request.data.get('start_date')  
         end_date = request.data.get('end_date')  
 
-       
-        if not school_type or not cycle_name:
-            return Response({'error': 'Both school_type and cycle_name are required.'}, status=status.HTTP_400_BAD_REQUEST)
+        # Validate required fields
+        if not school_id or not school_type or not cycle_name:
+            return Response({'error': 'school_id, school_type, and cycle_name are required.'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
             start_date = datetime.strptime(start_date, '%Y-%m-%d').date() if start_date else None
@@ -454,18 +610,18 @@ def get_complete_menu(request):
         except ValueError:
             return Response({'error': 'Invalid date format. Use YYYY-MM-DD.'}, status=status.HTTP_400_BAD_REQUEST)
 
-
+        # Fetch the corresponding school model
         if school_type == 'primary':
-            school = PrimarySchool.objects.first()  
+            school = PrimarySchool.objects.filter(id=school_id).first()  
         elif school_type == 'secondary':
-            school = SecondarySchool.objects.first()
+            school = SecondarySchool.objects.filter(id=school_id).first()
         else:
             return Response({'error': 'Invalid school_type. Use "primary" or "secondary".'}, status=status.HTTP_400_BAD_REQUEST)
 
         if not school:
-            return Response({'error': f'{school_type.capitalize()} school not found.'}, status=status.HTTP_404_NOT_FOUND)
+            return Response({'error': f'{school_type.capitalize()} school with ID {school_id} not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-  
+        # Filter menus based on the provided cycle_name and school
         menus_to_delete = Menu.objects.filter(
             primary_school=school if school_type == 'primary' else None,
             secondary_school=school if school_type == 'secondary' else None,
@@ -476,16 +632,14 @@ def get_complete_menu(request):
             menus_to_delete = menus_to_delete.filter(start_date__lte=start_date, end_date__gte=end_date)
 
         if not menus_to_delete.exists():
-            return Response({'error': f'No menus found for {cycle_name} within the specified date range in this school.'}, status=status.HTTP_404_NOT_FOUND)
+            return Response({'error': f'No menus found for cycle "{cycle_name}" in the specified school.'}, status=status.HTTP_404_NOT_FOUND)
 
+        # Delete the menus
         menus_to_delete.delete()
 
-        return Response({'message': f'All menus for {cycle_name} in the specified school and date range have been deleted.'}, status=status.HTTP_204_NO_CONTENT)
+        return Response({'message': f'All menus for cycle "{cycle_name}" in school {school_id} have been deleted.'}, status=status.HTTP_204_NO_CONTENT)
 
     return Response({'error': 'Invalid request method.'}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
-
-
-#
 @api_view(['GET', 'PATCH'])
 def edit_menu(request, id):
     print(f"Received request to edit menu item with id: {id}")
@@ -537,6 +691,30 @@ def add_menu_item(request):
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         else:
             return Response({"error": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+@csrf_exempt
+@api_view(['GET',])
+def get_menu_items(request):
+   if request.method == "GET":
+        menu_items = MenuItems.objects.all()
+        serializer = MenuItemsSerializer(menu_items,many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+@api_view(['GET', 'PATCH'])
+def update_menu_items(request, pk):
+    menu_item = get_object_or_404(MenuItems, pk=pk)
+    
+    if request.method == 'GET':
+        serializer = MenuItemsSerializer(menu_item)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    
+    elif request.method == 'PATCH':
+        serializer = MenuItemsSerializer(menu_item, data=request.data, partial=True)
+        
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
 
 # View Registered Students
 @csrf_exempt
@@ -604,77 +782,101 @@ def edit_student(request, student_id):
 
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-
+# Orders
 @csrf_exempt
 @api_view(['POST'])
 def create_order(request):
     if request.method == 'POST':
-        student_id = request.data.get('student_id')  
-        selected_days = request.data.get('selected_days') 
+        # Extracting input fields from the request data
+        user_type = request.data.get('user_type')
+        user_id = request.data.get('user_id')
+        selected_days = request.data.get('selected_days')
+        child_id = request.data.get('child_id', None)  # Optional child_id for parents/staff
+        
+        # Validation checks
+        if not user_type or not user_id or not selected_days:
+            return Response({'error': 'User type, user ID, and selected days are required.'}, status=status.HTTP_400_BAD_REQUEST)
 
+        # Handle different user types
+        user = None
+        if user_type == 'student':
+            user = StudentRegisteration.objects.filter(id=user_id).first()
+        elif user_type == 'parent':
+            user = ParentRegisteration.objects.filter(id=user_id).first()
+        elif user_type == 'staff':
+            user = StaffRegisteration.objects.filter(id=user_id).first()
 
-        if not student_id or not selected_days:
-            return Response({'error': 'Student ID and selected days are required.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not user:
+            return Response({'error': f'{user_type.capitalize()} not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-        student = Student.objects.filter(id=student_id).first()
-        if not student:
-            return Response({'error': 'Student not found.'}, status=status.HTTP_404_NOT_FOUND)
-
-        created_orders = []
-
-       
+        created_orders = []  # To store created orders
+        
+        # Iterate over the selected days
         for day in selected_days:
-          
-            menus_for_day = Menu.objects.filter(menu_day=day)
+            menus_for_day = Menu.objects.filter(menu_day__iexact=day)
 
             if not menus_for_day:
                 return Response({'error': f'No menus available for {day}.'}, status=status.HTTP_404_NOT_FOUND)
 
             order_total_price = 0
-            order_items = []
+            order_items = []  
 
-       
+            # Create order data
             order_data = {
-                'user_id': student.id,
-                'user_type': 'student',
-                'student': student.id,  
+                'user_id': user.id,
+                'user_type': user_type,
                 'total_price': order_total_price,
                 'week_number': datetime.now().isocalendar()[1],
                 'year': datetime.now().year,
                 'order_date': datetime.now(),
                 'selected_day': day,
                 'is_delivered': False,
+                'status': 'pending',
             }
 
+            # Add child_id if applicable
+            if user_type == 'parent' and child_id:
+                order_data['child_id'] = child_id
+            elif user_type == 'staff' and child_id:
+                order_data['child_id'] = child_id
+
+            # Serialize and save the order
             order_serializer = OrderSerializer(data=order_data)
             if not order_serializer.is_valid():
                 return Response(order_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        
             order_instance = order_serializer.save()
 
+            # Add menu items to the order
             for menu_item in menus_for_day:
-             
                 order_item = OrderItem.objects.create(
-                    fk_menu_item_id=menu_item,
-                    quantity=1,  
-                    order=order_instance  
+                    menu=menu_item,
+                    quantity=1,
+                    order=order_instance
                 )
-
                 order_items.append(order_item)
-                order_total_price += menu_item.price
+                order_total_price += menu_item.price  
 
            
             order_instance.total_price = order_total_price
-            order_instance.save() 
+            order_instance.save()
 
-            created_orders.append({
+            order_details = {
                 'order_id': order_instance.id,
                 'selected_day': day,
                 'total_price': order_instance.total_price,
                 'order_date': str(order_instance.order_date),
-                'items': [{'item_name': item.fk_menu_item_id.name, 'price': item.fk_menu_item_id.price} for item in order_items],
-            })
+                'status': 'pending',
+                'week_number': order_instance.week_number,
+                'year': order_instance.year,
+                'items': [{'item_name': item.menu.name, 'price': item.menu.price} for item in order_items],
+                'user_name': order_instance.user_name,  # Include user_name in the response
+            }
+
+            if order_instance.user_type in ['parent', 'staff']:
+                order_details['child_id'] = order_instance.child_id  # Include child_id for parents/staff
+
+            created_orders.append(order_details)
 
         return Response({
             'message': 'Orders created successfully!',
@@ -683,10 +885,38 @@ def create_order(request):
 
 
 
-
-
-
     
+
+
+@csrf_exempt
+@api_view(['GET'])
+def get_orders(request):
+    if request.method == 'GET':
+   
+        orders = Order.objects.all()
+
+     
+        if not orders:
+            return Response({'message': 'No orders found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Serialize the order data
+        serializer = OrderSerializer(orders, many=True)
+
+       
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+@csrf_exempt
+@api_view(['GET',])
+def get_order(request,pk):
+    orders = get_object_or_404(Order, pk=pk)
+    
+    if request.method == 'GET':
+        serializer = OrderSerializer(orders)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+        
+
 
 @csrf_exempt
 @api_view(['POST'])

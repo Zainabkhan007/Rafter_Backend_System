@@ -1,7 +1,13 @@
-from django.urls import path
+from django.urls import path,include
 from . import views
 # from .views import StudentSearchView
 urlpatterns = [
+
+
+    path("register/",views.register,name='register'),
+    path('login/', views.login,name='login'),
+    path('password_reset/', include('django_rest_passwordreset.urls', namespace='password_reset')),
+    path('admin_login/', views.admin_login,name='admin_login'),
     # Primary School Urls
     path("add_primary_school/",views.add_primary_school,name='add_primary_school'),
     path("primary_school/",views.primary_school,name='primary_school'),
@@ -28,8 +34,13 @@ urlpatterns = [
 #    Menu
     path("add_menu/",views.add_menu,name='add_menu'),
     path("get_complete_menu/",views.get_complete_menu,name='get_complete_menu'),
+    path("activate_cycle/",views.activate_cycle,name='activate_cycle'),
+
     path("edit_menu/<int:id>/",views.edit_menu,name='edit_menu'),
     path("add_menu_item/",views.add_menu_item,name='add_menu_item'),
+    path("get_menu_items/",views.get_menu_items,name='get_menu_items'),
+    path('update_menu_items/<int:pk>/', views.update_menu_items, name='update_menu_items'),
+
 
     # View Registered Students
     path("view_students/",views.view_students,name='view_students'),
@@ -37,8 +48,10 @@ urlpatterns = [
 
 
 #    Order
-    path("create_order/",views. create_order,name=' create_order'),
-    path("add_order_item/",views. add_order_item,name=' add_order_item'),
+    path("create_order/",views. create_order,name='create_order'),
+    path("add_order_item/",views. add_order_item,name='add_order_item'),
+    path("get_orders/",views. get_orders,name='get_orders'),
+    path("get_order/<int:pk>/",views. get_order,name=' get_order'),
    
 
 
