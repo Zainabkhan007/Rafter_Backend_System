@@ -40,7 +40,10 @@ urlpatterns = [
     path("add_menu_item/",views.add_menu_item,name='add_menu_item'),
     path("get_menu_items/",views.get_menu_items,name='get_menu_items'),
     path('update_menu_items/<int:pk>/', views.update_menu_items, name='update_menu_items'),
+<<<<<<< HEAD
 
+=======
+>>>>>>> 9a33fff8131129011a748fc0066bae776cdf795f
 
     # View Registered Students
     path("view_students/",views.view_students,name='view_students'),

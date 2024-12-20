@@ -174,7 +174,17 @@ class MenuItemsSerializer(serializers.ModelSerializer):
     allergies=serializers.SlugRelatedField(queryset=Allergen.objects.all(), slug_field='allergy')
     class Meta:
         model = MenuItems
+<<<<<<< HEAD
         fields = ['id','category', 'item_name', 'item_description', 'nutrients', 'ingredients','allergies']
+=======
+        fields = ['category', 'item_name', 'item_description', 'nutrients', 'ingredients']
+
+
+class OrderSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Order
+        fields = '__all__'
+>>>>>>> 9a33fff8131129011a748fc0066bae776cdf795f
 
 class OrderItemSerializer(serializers.ModelSerializer):
     menu = MenuSerializer() 
@@ -183,6 +193,7 @@ class OrderItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = OrderItem
         fields = '__all__'
+<<<<<<< HEAD
 
 class OrderSerializer(serializers.ModelSerializer):
     items = OrderItemSerializer(many=True, read_only=True)
@@ -213,3 +224,5 @@ class OrderSerializer(serializers.ModelSerializer):
         
         return representation
 
+=======
+>>>>>>> 9a33fff8131129011a748fc0066bae776cdf795f

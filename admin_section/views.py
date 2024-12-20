@@ -692,6 +692,10 @@ def add_menu_item(request):
         else:
             return Response({"error": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> 9a33fff8131129011a748fc0066bae776cdf795f
 @csrf_exempt
 @api_view(['GET',])
 def get_menu_items(request):
