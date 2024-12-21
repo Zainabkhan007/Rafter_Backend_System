@@ -112,6 +112,142 @@ def admin_login(request):
      return Response({'detail': 'Login successful!'}, status=status.HTTP_200_OK)
 
 
+# Get All user by 1
+# @api_view(['GET'])
+# def get_user_by_id(request, user_id, user_type):
+#     """
+#     Fetch user details by user_id and user_type.
+#     user_type can be 'parent', 'student', 'staff', or 'secondary_student'.
+#     """
+#     if user_type == 'parent':
+#         user = ParentRegisteration.objects.filter(id=user_id).first()
+#         if not user:
+#             return Response({'error': 'Parent not found.'}, status=status.HTTP_404_NOT_FOUND)
+#         serializer = ParentRegisterationSerializer(user)
+    
+#     elif user_type == 'student':
+#         # First, fetch the primary student
+#         user = StudentRegisteration.objects.filter(id=user_id).first()
+#         if not user:
+#             return Response({'error': 'Student not found.'}, status=status.HTTP_404_NOT_FOUND)
+#         serializer = StudentRegisterationSerializer(user)
+    
+#     elif user_type == 'staff':
+#         user = StaffRegisteration.objects.filter(id=user_id).first()
+#         if not user:
+#             return Response({'error': 'Staff not found.'}, status=status.HTTP_404_NOT_FOUND)
+#         serializer = StaffRegisterationSerializer(user)
+    
+#     elif user_type == 'secondary_student':
+#         # Now, for secondary students, we use the SecondaryStudent model
+#         user = SecondaryStudent.objects.filter(id=user_id).first()
+#         if not user:
+#             return Response({'error': 'Secondary student not found.'}, status=status.HTTP_404_NOT_FOUND)
+#         serializer = SecondaryStudentSerializer(user)
+    
+#     else:
+#         return Response({'error': 'Invalid user type. Must be one of: parent, student, staff, or secondary_student.'}, status=status.HTTP_400_BAD_REQUEST)
+
+#     return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+@api_view(['GET'])
+def get_parent_by_id(request, parent_id):
+    # Fetch the parent registration by parent ID
+    parent = get_object_or_404(ParentRegisteration, id=parent_id)
+
+    # Fetch the student info related to the teacher of this parent (assuming ParentRegisteration model has a field linking to Teacher)
+    student_info = Student.objects.filter(teacher__id=parent.id).first()
+
+    # Start preparing the response data
+    response_data = {
+        'parent_first_name': parent.first_name,
+        'parent_last_name': parent.last_name,
+        'parent_email': parent.email,
+    }
+
+    if student_info:
+        # Fetching child details from the Student model
+        response_data['child_class'] = student_info.class_year
+        response_data['child_name'] = student_info.student_name
+        response_data['child_school'] = student_info.school.name  # Assuming 'school' is a ForeignKey to PrimarySchool
+        response_data['child_allergy'] = student_info.allergy
+    else:
+        response_data['child_class'] = None
+        response_data['child_name'] = None
+        response_data['child_school'] = None
+        response_data['child_allergy'] = None
+
+    return Response(response_data)
+
+@api_view(['GET'])
+def get_staff_by_id(request, staff_id):
+    staff = get_object_or_404(StaffRegisteration, id=staff_id)
+
+    # Fetch all students associated with the staff (teacher) through the Class model
+    students_info = Class.objects.filter(teacher=staff)
+
+    # Prepare response data
+    response_data = {
+        'staff_first_name': staff.first_name,
+        'staff_last_name': staff.last_name,
+        'staff_email': staff.email,
+        'staff_phone_no': staff.phone_no,
+        # Remove or change the following line to match the data you have for staff school
+        # 'staff_school': staff.school.name,  
+        'staff_allergy': staff.allergy if hasattr(staff, 'allergy') else None,
+    }
+
+    children_data = []
+    for class_info in students_info:
+        student = class_info.student  # Get the student linked to this class
+        children_data.append({
+            'child_name': student.first_name + ' ' + student.last_name,
+            'child_class': student.class_year,
+            'child_allergy': student.allergy,
+        })
+
+    response_data['children'] = children_data
+    return Response(response_data)
+
+# Student API: Fetch Student Info
+# @api_view(['GET'])
+# def get_student_by_id(request, student_id):
+#     student = get_object_or_404(StudentRegisteration, id=student_id)
+
+#     # Fetch detailed information from the Student model
+#     student_details = Student.objects.filter(id=student.id).first()
+
+#     response_data = {
+#         'student_first_name': student.first_name,
+#         'student_last_name': student.last_name,
+#         'student_email': student.email,
+#     }
+
+#     if student_details:
+#         response_data['student_class'] = student_details.class_year
+#         response_data['student_school'] = student_details.school.name  # Assuming Student model has a school field
+#         response_data['student_allergy'] = student_details.allergy
+
+#     return Response(response_data)
+@api_view(['GET'])
+def get_student_by_id(request, student_id):
+    # Fetch the student details by student_id
+    student = get_object_or_404(Student, id=student_id)
+
+    # Prepare the response data
+    response_data = {
+        'student_name': student.student_name,
+        'class_year': student.class_year,
+        'student_email': student.student_email,
+        'school': student.school.school_name,  # Assuming the 'school' field is a ForeignKey to the PrimarySchool model
+        'teacher': student.teacher.teacher_name,  # Assuming 'teacher' is a ForeignKey to Teacher model
+    }
+
+    return Response(response_data)
+
+  
+    
 # Primary School Sction
 @csrf_exempt
 @api_view(['POST'])
@@ -197,8 +333,6 @@ def add_and_get_teacher(request, school_id):
         teacher_serializer = TeacherSerializer(new_teacher)
         return Response(teacher_serializer.data, status=status.HTTP_201_CREATED)
 
-
-# View for handling GET, PUT, DELETE requests for a specific teacher
 @api_view(['GET', 'PUT', 'DELETE'])
 def update_delete_teacher(request, school_id, teacher_id):
     school = get_object_or_404(PrimarySchool, pk=school_id)
@@ -408,8 +542,12 @@ def add_menu(request):
         # Validate cycle_name
         if not cycle_name.isalnum() and " " not in cycle_name:
             return Response({'error': 'Cycle Name cannot contain special characters!'}, status=status.HTTP_400_BAD_REQUEST)
-        if Menu.objects.filter(cycle_name=cycle_name).exists():
-            return Response({'error': f'Menu with cycle name "{cycle_name}" already exists.'}, status=status.HTTP_400_BAD_REQUEST)
+        if school_type == 'primary':
+            if Menu.objects.filter(cycle_name=cycle_name, primary_school__id=school_id).exists():
+                return Response({'error': f'Menu with cycle name "{cycle_name}" already exists for Primary School.'}, status=status.HTTP_400_BAD_REQUEST)
+        elif school_type == 'secondary':
+            if Menu.objects.filter(cycle_name=cycle_name, secondary_school__id=school_id).exists():
+                return Response({'error': f'Menu with cycle name "{cycle_name}" already exists for Secondary School.'}, status=status.HTTP_400_BAD_REQUEST)
 
 
         school_model = PrimarySchool if school_type == 'primary' else SecondarySchool
@@ -692,10 +830,6 @@ def add_menu_item(request):
         else:
             return Response({"error": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-<<<<<<< HEAD
-=======
-
->>>>>>> 9a33fff8131129011a748fc0066bae776cdf795f
 @csrf_exempt
 @api_view(['GET',])
 def get_menu_items(request):
@@ -747,10 +881,12 @@ def view_students(request):
     primary_students_data = primary_students_serializer.data
     for student in primary_students_data:
         student['school_type'] = 'Primary'
+        
 
     secondary_students_data = secondary_students_serializer.data
     for student in secondary_students_data:
         student['school_type'] = 'Secondary'
+       
 
     return Response({
         'primary_students': primary_students_data,
@@ -796,10 +932,14 @@ def create_order(request):
         user_id = request.data.get('user_id')
         selected_days = request.data.get('selected_days')
         child_id = request.data.get('child_id', None)  # Optional child_id for parents/staff
-        
+        quantities = request.data.get('quantities', [])  
+
         # Validation checks
         if not user_type or not user_id or not selected_days:
             return Response({'error': 'User type, user ID, and selected days are required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if len(quantities) != len(selected_days):
+            return Response({'error': 'The number of quantities should match the number of selected days.'}, status=status.HTTP_400_BAD_REQUEST)
 
         # Handle different user types
         user = None
@@ -816,7 +956,7 @@ def create_order(request):
         created_orders = []  # To store created orders
         
         # Iterate over the selected days
-        for day in selected_days:
+        for day, quantity in zip(selected_days, quantities):
             menus_for_day = Menu.objects.filter(menu_day__iexact=day)
 
             if not menus_for_day:
@@ -851,20 +991,21 @@ def create_order(request):
 
             order_instance = order_serializer.save()
 
-            # Add menu items to the order
+            # Add menu items to the order and handle quantities
             for menu_item in menus_for_day:
                 order_item = OrderItem.objects.create(
                     menu=menu_item,
-                    quantity=1,
+                    quantity=quantity,  # Directly using the passed quantity
                     order=order_instance
                 )
                 order_items.append(order_item)
-                order_total_price += menu_item.price  
+                order_total_price += menu_item.price * quantity  # Adjust total price based on quantity
 
-           
+            # Update total price after adding items
             order_instance.total_price = order_total_price
             order_instance.save()
 
+            # Prepare the order response details
             order_details = {
                 'order_id': order_instance.id,
                 'selected_day': day,
@@ -873,7 +1014,13 @@ def create_order(request):
                 'status': 'pending',
                 'week_number': order_instance.week_number,
                 'year': order_instance.year,
-                'items': [{'item_name': item.menu.name, 'price': item.menu.price} for item in order_items],
+                'items': [
+                    {
+                        'item_name': item.menu.name,  # Name of the item
+                        'price': item.menu.price,     # Price of the item
+                        'quantity': item.quantity     # Quantity of the item (from quantities list)
+                    } for item in order_items
+                ],
                 'user_name': order_instance.user_name,  # Include user_name in the response
             }
 
@@ -887,39 +1034,148 @@ def create_order(request):
             'orders': created_orders
         }, status=status.HTTP_201_CREATED)
 
+@api_view(['POST'])
+def complete_order(request):
+    # Extract the order ID from the request data
+    order_id = request.data.get('order_id')
 
+    if not order_id:
+        return Response({'error': 'Order ID is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
+    try:
+        # Fetch the order by ID
+        order = Order.objects.get(id=order_id)
+
+        # Mark the order as completed
+        order.is_delivered = True
+        order.status = 'done'
+        order.save()
+
+        # Respond with success and order details
+        return Response({
+            'message': 'Order completed successfully!',
+            'order_id': order.id,
+            'status': order.status,
+            'is_delivered': order.is_delivered,
+        }, status=status.HTTP_200_OK)
+
+    except Order.DoesNotExist:
+        return Response({'error': 'Order not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+@api_view(['POST'])
+def cancel_order(request):
+    # Extract the order ID from the request data
+    order_id = request.data.get('order_id')
+
+    if not order_id:
+        return Response({'error': 'Order ID is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        # Fetch the order by ID
+        order = Order.objects.get(id=order_id)
+
+        # Mark the order as cancelled
+        order.status = 'cancelled'
+        order.is_delivered = False
+        order.save()
+
+        # Respond with success and order details
+        return Response({
+            'message': 'Order cancelled successfully!',
+            'order_id': order.id,
+            'status': order.status,
+            'is_delivered': order.is_delivered,
+        }, status=status.HTTP_200_OK)
+
+    except Order.DoesNotExist:
+        return Response({'error': 'Order not found.'}, status=status.HTTP_404_NOT_FOUND)
     
-
-
-@csrf_exempt
 @api_view(['GET'])
-def get_orders(request):
-    if request.method == 'GET':
-   
-        orders = Order.objects.all()
+def get_all_orders(request):
+    # Fetch all orders from the database
+    orders = Order.objects.all()
 
-     
-        if not orders:
-            return Response({'message': 'No orders found.'}, status=status.HTTP_404_NOT_FOUND)
+    if not orders.exists():
+        return Response({'error': 'No orders found.'}, status=status.HTTP_404_NOT_FOUND)
 
-        # Serialize the order data
-        serializer = OrderSerializer(orders, many=True)
+    order_details = []
+
+    # Iterate through each order to fetch the related order items and other details
+    for order in orders:
+        order_items = OrderItem.objects.filter(order=order)
+        order_items_data = [
+            {
+                'item_name': item.menu.name,  # Name of the menu item
+                'price': item.menu.price,     # Price of the menu item
+                'quantity': item.quantity     # Quantity of the item in the order
+            } for item in order_items
+        ]
+
+        order_data = {
+            'order_id': order.id,
+            'selected_day': order.selected_day,
+            'total_price': order.total_price,
+            'order_date': str(order.order_date),
+            'status': order.status,
+            'week_number': order.week_number,
+            'year': order.year,
+            'items': order_items_data,
+            'user_name': order.user_name,  # The name of the user who made the order
+        }
+
+        # If the order belongs to a parent or staff, include child_id
+        if order.user_type in ['parent', 'staff']:
+            order_data['child_id'] = order.child_id  # Include child_id for parents/staff
+
+        order_details.append(order_data)
+
+    return Response({
+        'message': 'Orders retrieved successfully!',
+        'orders': order_details
+    }, status=status.HTTP_200_OK)
+@api_view(['GET'])
+def get_order_by_id(request, order_id):
+    try:
+       
+        order = Order.objects.get(id=order_id)
 
        
-        return Response(serializer.data, status=status.HTTP_200_OK)
-
-
-@csrf_exempt
-@api_view(['GET',])
-def get_order(request,pk):
-    orders = get_object_or_404(Order, pk=pk)
-    
-    if request.method == 'GET':
-        serializer = OrderSerializer(orders)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        order_items = OrderItem.objects.filter(order=order)
+        order_items_data = [
+            {
+                'item_name': item.menu.name,  
+                'price': item.menu.price,    
+                'quantity': item.quantity     
+            } for item in order_items
+        ]
 
         
+        order_data = {
+            'order_id': order.id,
+            'selected_day': order.selected_day,
+            'total_price': order.total_price,
+            'order_date': str(order.order_date),
+            'status': order.status,
+            'week_number': order.week_number,
+            'year': order.year,
+            'items': order_items_data,
+            'user_name': order.user_name, 
+        }
+
+        
+        if order.user_type in ['parent', 'staff']:
+            order_data['child_id'] = order.child_id
+
+        return Response({
+            'message': 'Order retrieved successfully!',
+            'order': order_data
+        }, status=status.HTTP_200_OK)
+    
+    except Order.DoesNotExist:
+        return Response({'error': 'Order not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+
+
 
 
 @csrf_exempt

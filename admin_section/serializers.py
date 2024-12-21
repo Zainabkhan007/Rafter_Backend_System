@@ -115,15 +115,15 @@ class PrimarySchoolSerializer(serializers.ModelSerializer):
 class TeacherSerializer(serializers.ModelSerializer):
     class Meta:
         model = Teacher
-        fields = ['teacher_name', 'class_year']
+        fields = ['id','teacher_name', 'class_year']
 
 class StudentSerializer(serializers.ModelSerializer):
     # Define a custom field to get the teacher's name
-    teacher_name = serializers.CharField(source='teacher.teacher_name')  
+    teacher_name = serializers.CharField(source='teacher.teacher_name',read_only=True)  
     
     class Meta:
         model = Student
-        fields = ['student_name', 'class_year', 'teacher_name', 'student_email']
+        fields = ['id','student_name', 'class_year', 'teacher_name', 'student_email']
 
 
 class SecondarySchoolSerializer(serializers.ModelSerializer):
@@ -136,13 +136,14 @@ class SecondarySchoolSerializer(serializers.ModelSerializer):
 class SecondaryStudentSerializer(serializers.ModelSerializer):
     class Meta:
         model = SecondaryStudent
-        fields = ['secondary_student_name', 'secondary_class_year','secondary_school','seconadry_student_email', ]
+        fields = ['id','secondary_student_name', 'secondary_class_year','secondary_school','seconadry_student_email', ]
 
 
 class CategoriesSerializer(serializers.ModelSerializer):
     class Meta:
         model = Categories
-        fields = '__all__'
+        fields =  fields =  ['id', 'name_category', 'emoji', 'image']
+
 
 
     
@@ -174,17 +175,7 @@ class MenuItemsSerializer(serializers.ModelSerializer):
     allergies=serializers.SlugRelatedField(queryset=Allergen.objects.all(), slug_field='allergy')
     class Meta:
         model = MenuItems
-<<<<<<< HEAD
         fields = ['id','category', 'item_name', 'item_description', 'nutrients', 'ingredients','allergies']
-=======
-        fields = ['category', 'item_name', 'item_description', 'nutrients', 'ingredients']
-
-
-class OrderSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Order
-        fields = '__all__'
->>>>>>> 9a33fff8131129011a748fc0066bae776cdf795f
 
 class OrderItemSerializer(serializers.ModelSerializer):
     menu = MenuSerializer() 
@@ -192,8 +183,7 @@ class OrderItemSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = OrderItem
-        fields = '__all__'
-<<<<<<< HEAD
+        fields = ['id','menu', 'quantity', 'order']
 
 class OrderSerializer(serializers.ModelSerializer):
     items = OrderItemSerializer(many=True, read_only=True)
@@ -224,5 +214,3 @@ class OrderSerializer(serializers.ModelSerializer):
         
         return representation
 
-=======
->>>>>>> 9a33fff8131129011a748fc0066bae776cdf795f

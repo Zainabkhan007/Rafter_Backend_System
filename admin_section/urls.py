@@ -8,6 +8,10 @@ urlpatterns = [
     path('login/', views.login,name='login'),
     path('password_reset/', include('django_rest_passwordreset.urls', namespace='password_reset')),
     path('admin_login/', views.admin_login,name='admin_login'),
+    path('get_parent_by_id/<int:parent_id>/', views.get_parent_by_id, name='get_parent_by_id'),
+    path('get_staff_by_id/<int:staff_id>/', views.get_staff_by_id, name='get_staff_by_id'),
+    path('get_student_by_id/<int:student_id>/', views.get_student_by_id, name='get_student_by_id'),
+
     # Primary School Urls
     path("add_primary_school/",views.add_primary_school,name='add_primary_school'),
     path("primary_school/",views.primary_school,name='primary_school'),
@@ -40,10 +44,7 @@ urlpatterns = [
     path("add_menu_item/",views.add_menu_item,name='add_menu_item'),
     path("get_menu_items/",views.get_menu_items,name='get_menu_items'),
     path('update_menu_items/<int:pk>/', views.update_menu_items, name='update_menu_items'),
-<<<<<<< HEAD
 
-=======
->>>>>>> 9a33fff8131129011a748fc0066bae776cdf795f
 
     # View Registered Students
     path("view_students/",views.view_students,name='view_students'),
@@ -51,12 +52,13 @@ urlpatterns = [
 
 
 #    Order
-    path("create_order/",views. create_order,name='create_order'),
-    path("add_order_item/",views. add_order_item,name='add_order_item'),
-    path("get_orders/",views. get_orders,name='get_orders'),
-    path("get_order/<int:pk>/",views. get_order,name=' get_order'),
-   
-
-
-
+    path("create_order/",views.create_order,name='create_order'),
+    path("add_order_item/",views.add_order_item,name='add_order_item'),
+    path('complete_order/', views.complete_order, name='complete_order'),
+    path('cancel_order/', views.cancel_order, name='cancel_order'),
+    path('get_all_orders/', views.get_all_orders, name='get_all_orders'),
+    path('get_order_by_id/<int:order_id>/', views.get_order_by_id, name='get_order_by_id'),
 ]
+
+
+

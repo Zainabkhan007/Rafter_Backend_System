@@ -125,13 +125,9 @@ class Menu(models.Model):
                 return True
         return False
 
-<<<<<<< HEAD
 class Allergen(models.Model):
       allergy =  JSONField(default=list)
     
-=======
-
->>>>>>> 9a33fff8131129011a748fc0066bae776cdf795f
 class MenuItems(models.Model):
     category=models.ForeignKey('Categories',null=True, blank=True,on_delete=models.CASCADE, related_name='menuitems')
     item_name= models.CharField(max_length=255,null=False)
@@ -188,7 +184,6 @@ class OrderItem(models.Model):
     quantity = models.IntegerField() 
 
     def __str__(self):
-<<<<<<< HEAD
         return f'OrderItem {self.id}: {self.quantity}x {self.menu }'
     
 
@@ -214,6 +209,7 @@ class CanteenStaff(models.Model):
 
     def __str__(self):
         return f'{self.username} - {self.school_type}'
-=======
-        return f'OrderItem {self.id}: {self.quantity}x {self.fk_menu_item_id}'
->>>>>>> 9a33fff8131129011a748fc0066bae776cdf795f
+class Class(models.Model):
+    teacher = models.ForeignKey(StaffRegisteration, on_delete=models.CASCADE)
+    student = models.ForeignKey(StudentRegisteration, on_delete=models.CASCADE)
+    class_name = models.CharField(max_length=30)
