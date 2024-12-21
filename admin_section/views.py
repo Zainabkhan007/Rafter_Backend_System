@@ -33,7 +33,7 @@ def register(request):
     if CanteenStaff.objects.filter(email=email).exists():
         return Response({"error": "Email already registered as canteen."}, status=status.HTTP_400_BAD_REQUEST)
 
-    # Choose the correct serializer based on user type
+
     if user_type == "parent":
         serializer = ParentRegisterationSerializer(data=request.data)
     elif user_type == "student":
@@ -153,13 +153,13 @@ def admin_login(request):
 
 @api_view(['GET'])
 def get_parent_by_id(request, parent_id):
-    # Fetch the parent registration by parent ID
+   
     parent = get_object_or_404(ParentRegisteration, id=parent_id)
 
-    # Fetch the student info related to the teacher of this parent (assuming ParentRegisteration model has a field linking to Teacher)
+   
     student_info = Student.objects.filter(teacher__id=parent.id).first()
 
-    # Start preparing the response data
+
     response_data = {
         'parent_first_name': parent.first_name,
         'parent_last_name': parent.last_name,
@@ -167,10 +167,10 @@ def get_parent_by_id(request, parent_id):
     }
 
     if student_info:
-        # Fetching child details from the Student model
+       
         response_data['child_class'] = student_info.class_year
         response_data['child_name'] = student_info.student_name
-        response_data['child_school'] = student_info.school.name  # Assuming 'school' is a ForeignKey to PrimarySchool
+        response_data['child_school'] = student_info.school.name 
         response_data['child_allergy'] = student_info.allergy
     else:
         response_data['child_class'] = None
@@ -235,13 +235,12 @@ def get_student_by_id(request, student_id):
     # Fetch the student details by student_id
     student = get_object_or_404(Student, id=student_id)
 
-    # Prepare the response data
     response_data = {
         'student_name': student.student_name,
         'class_year': student.class_year,
         'student_email': student.student_email,
-        'school': student.school.school_name,  # Assuming the 'school' field is a ForeignKey to the PrimarySchool model
-        'teacher': student.teacher.teacher_name,  # Assuming 'teacher' is a ForeignKey to Teacher model
+        'school': student.school.school_name, 
+        'teacher': student.teacher.teacher_name, 
     }
 
     return Response(response_data)
@@ -621,7 +620,6 @@ def add_menu(request):
 @api_view(['POST'])
 def activate_cycle(request):
     if request.method == 'POST':
-        # Get data from request
         school_id = request.data.get('school_id')
         school_type = request.data.get('school_type')
         cycle_name = request.data.get('cycle_name')
@@ -685,7 +683,7 @@ def get_complete_menu(request):
         start_date = request.data.get('start_date')  
         end_date = request.data.get('end_date')  
 
-        # Validate required fields
+  
         if not school_id or not school_type or not cycle_name:
             return Response({'error': 'school_id, school_type, and cycle_name are required.'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -738,7 +736,6 @@ def get_complete_menu(request):
         start_date = request.data.get('start_date')  
         end_date = request.data.get('end_date')  
 
-        # Validate required fields
         if not school_id or not school_type or not cycle_name:
             return Response({'error': 'school_id, school_type, and cycle_name are required.'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -748,7 +745,6 @@ def get_complete_menu(request):
         except ValueError:
             return Response({'error': 'Invalid date format. Use YYYY-MM-DD.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Fetch the corresponding school model
         if school_type == 'primary':
             school = PrimarySchool.objects.filter(id=school_id).first()  
         elif school_type == 'secondary':
@@ -759,7 +755,6 @@ def get_complete_menu(request):
         if not school:
             return Response({'error': f'{school_type.capitalize()} school with ID {school_id} not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-        # Filter menus based on the provided cycle_name and school
         menus_to_delete = Menu.objects.filter(
             primary_school=school if school_type == 'primary' else None,
             secondary_school=school if school_type == 'secondary' else None,
@@ -927,21 +922,19 @@ def edit_student(request, student_id):
 @api_view(['POST'])
 def create_order(request):
     if request.method == 'POST':
-        # Extracting input fields from the request data
+        
         user_type = request.data.get('user_type')
         user_id = request.data.get('user_id')
         selected_days = request.data.get('selected_days')
-        child_id = request.data.get('child_id', None)  # Optional child_id for parents/staff
+        child_id = request.data.get('child_id', None) 
         quantities = request.data.get('quantities', [])  
 
-        # Validation checks
+      
         if not user_type or not user_id or not selected_days:
             return Response({'error': 'User type, user ID, and selected days are required.'}, status=status.HTTP_400_BAD_REQUEST)
 
         if len(quantities) != len(selected_days):
             return Response({'error': 'The number of quantities should match the number of selected days.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        # Handle different user types
         user = None
         if user_type == 'student':
             user = StudentRegisteration.objects.filter(id=user_id).first()
@@ -953,9 +946,8 @@ def create_order(request):
         if not user:
             return Response({'error': f'{user_type.capitalize()} not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-        created_orders = []  # To store created orders
+        created_orders = [] 
         
-        # Iterate over the selected days
         for day, quantity in zip(selected_days, quantities):
             menus_for_day = Menu.objects.filter(menu_day__iexact=day)
 
@@ -965,7 +957,7 @@ def create_order(request):
             order_total_price = 0
             order_items = []  
 
-            # Create order data
+          
             order_data = {
                 'user_id': user.id,
                 'user_type': user_type,
@@ -978,34 +970,31 @@ def create_order(request):
                 'status': 'pending',
             }
 
-            # Add child_id if applicable
+            
             if user_type == 'parent' and child_id:
                 order_data['child_id'] = child_id
             elif user_type == 'staff' and child_id:
                 order_data['child_id'] = child_id
 
-            # Serialize and save the order
             order_serializer = OrderSerializer(data=order_data)
             if not order_serializer.is_valid():
                 return Response(order_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
             order_instance = order_serializer.save()
 
-            # Add menu items to the order and handle quantities
             for menu_item in menus_for_day:
                 order_item = OrderItem.objects.create(
                     menu=menu_item,
-                    quantity=quantity,  # Directly using the passed quantity
+                    quantity=quantity, 
                     order=order_instance
                 )
                 order_items.append(order_item)
-                order_total_price += menu_item.price * quantity  # Adjust total price based on quantity
+                order_total_price += menu_item.price * quantity  
 
-            # Update total price after adding items
+           
             order_instance.total_price = order_total_price
             order_instance.save()
 
-            # Prepare the order response details
             order_details = {
                 'order_id': order_instance.id,
                 'selected_day': day,
@@ -1016,16 +1005,16 @@ def create_order(request):
                 'year': order_instance.year,
                 'items': [
                     {
-                        'item_name': item.menu.name,  # Name of the item
-                        'price': item.menu.price,     # Price of the item
-                        'quantity': item.quantity     # Quantity of the item (from quantities list)
+                        'item_name': item.menu.name,  
+                        'price': item.menu.price,     
+                        'quantity': item.quantity     
                     } for item in order_items
                 ],
-                'user_name': order_instance.user_name,  # Include user_name in the response
+                'user_name': order_instance.user_name, 
             }
 
             if order_instance.user_type in ['parent', 'staff']:
-                order_details['child_id'] = order_instance.child_id  # Include child_id for parents/staff
+                order_details['child_id'] = order_instance.child_id  
 
             created_orders.append(order_details)
 
@@ -1036,22 +1025,20 @@ def create_order(request):
 
 @api_view(['POST'])
 def complete_order(request):
-    # Extract the order ID from the request data
+
     order_id = request.data.get('order_id')
 
     if not order_id:
         return Response({'error': 'Order ID is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
     try:
-        # Fetch the order by ID
+        
         order = Order.objects.get(id=order_id)
 
-        # Mark the order as completed
         order.is_delivered = True
         order.status = 'done'
         order.save()
 
-        # Respond with success and order details
         return Response({
             'message': 'Order completed successfully!',
             'order_id': order.id,
@@ -1064,22 +1051,20 @@ def complete_order(request):
 
 @api_view(['POST'])
 def cancel_order(request):
-    # Extract the order ID from the request data
+    
     order_id = request.data.get('order_id')
 
     if not order_id:
         return Response({'error': 'Order ID is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
     try:
-        # Fetch the order by ID
+        
         order = Order.objects.get(id=order_id)
 
-        # Mark the order as cancelled
         order.status = 'cancelled'
         order.is_delivered = False
         order.save()
 
-        # Respond with success and order details
         return Response({
             'message': 'Order cancelled successfully!',
             'order_id': order.id,
@@ -1092,7 +1077,7 @@ def cancel_order(request):
     
 @api_view(['GET'])
 def get_all_orders(request):
-    # Fetch all orders from the database
+    
     orders = Order.objects.all()
 
     if not orders.exists():
@@ -1100,14 +1085,14 @@ def get_all_orders(request):
 
     order_details = []
 
-    # Iterate through each order to fetch the related order items and other details
+   
     for order in orders:
         order_items = OrderItem.objects.filter(order=order)
         order_items_data = [
             {
-                'item_name': item.menu.name,  # Name of the menu item
-                'price': item.menu.price,     # Price of the menu item
-                'quantity': item.quantity     # Quantity of the item in the order
+                'item_name': item.menu.name,  
+                'price': item.menu.price,     
+                'quantity': item.quantity    
             } for item in order_items
         ]
 
@@ -1120,12 +1105,12 @@ def get_all_orders(request):
             'week_number': order.week_number,
             'year': order.year,
             'items': order_items_data,
-            'user_name': order.user_name,  # The name of the user who made the order
+            'user_name': order.user_name,  
         }
 
-        # If the order belongs to a parent or staff, include child_id
+       
         if order.user_type in ['parent', 'staff']:
-            order_data['child_id'] = order.child_id  # Include child_id for parents/staff
+            order_data['child_id'] = order.child_id 
 
         order_details.append(order_data)
 
