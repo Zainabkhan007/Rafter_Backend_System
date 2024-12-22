@@ -7,7 +7,8 @@ from django.db.models import JSONField
 from django.db import models
 from django.contrib.auth.hashers import make_password
 # Create your models here.
-
+class Allergen(models.Model):
+      allergy =  models.CharField(max_length=50)
 class ParentRegisteration(models.Model):
     first_name=models.CharField(max_length=30)
     last_name=models.CharField(max_length=30)
@@ -15,23 +16,13 @@ class ParentRegisteration(models.Model):
     email=models.EmailField(max_length=254,unique=True)
     phone_no = models.IntegerField( blank=True, null=True)
     password=models.CharField(max_length=128)
+    allergies=models.ForeignKey(Allergen,null=True, blank=True,on_delete=models.CASCADE)  
     def save(self, *args, **kwargs):
         # Hash the password before saving it
         if self.password:
             self.password = make_password(self.password)
         super().save(*args, **kwargs)
-class StudentRegisteration(models.Model):
-    first_name=models.CharField(max_length=30 )
-    last_name=models.CharField(max_length=30)
-    username=models.CharField(max_length=30)
-    email=models.EmailField(max_length=254,unique=True)
-    phone_no = models.IntegerField( blank=True, null=True)
-    password=models.CharField(max_length=128)
-    def save(self, *args, **kwargs):
-        # Hash the password before saving it
-        if self.password:
-            self.password = make_password(self.password)
-        super().save(*args, **kwargs)
+
 
 class StaffRegisteration(models.Model):
     first_name=models.CharField(max_length=30)
@@ -39,6 +30,7 @@ class StaffRegisteration(models.Model):
     username=models.CharField(max_length=30)
     email=models.EmailField(max_length=254,unique=True)
     phone_no = models.IntegerField( blank=True, null=True)
+    allergies=models.ForeignKey(Allergen,null=True, blank=True,on_delete=models.CASCADE)  
     password=models.CharField(max_length=128)
     def save(self, *args, **kwargs):
         # Hash the password before saving it
@@ -65,14 +57,26 @@ class Teacher(models.Model):
         return f"{self.teacher_name} - {self.class_year} {self.id}"
 
 
-class Student(models.Model):
-    student_name = models.CharField(max_length=30)
-    class_year = models.CharField(max_length=30)
-    student_email=models.EmailField(max_length=254,null=True, blank=True)   
-    school = models.ForeignKey(PrimarySchool, on_delete=models.CASCADE, related_name='student')
-    teacher=models.ForeignKey(Teacher, on_delete=models.CASCADE, related_name='student_teacher')
+class PrimaryStudent(models.Model):
+    first_name=models.CharField(max_length=30,default="" )
+    last_name=models.CharField(max_length=30,default="")
+    username=models.CharField(max_length=30,default="")
+    student_email=models.EmailField(max_length=254,default="")
+    phone_no = models.IntegerField( blank=True, null=True)
+    password=models.CharField(max_length=128,default="")
+    class_year = models.CharField(max_length=30,default="")
+    allergies=models.ForeignKey(Allergen,null=True, blank=True,on_delete=models.CASCADE)  
+    school = models.ForeignKey(PrimarySchool, on_delete=models.CASCADE, related_name='student',default="")
+    teacher=models.ForeignKey(Teacher, on_delete=models.CASCADE, related_name='student_teacher',default="")
+    parent=models.ForeignKey(ParentRegisteration, on_delete=models.CASCADE, related_name='student_parent',default="")
+    staff=models.ForeignKey(StaffRegisteration, on_delete=models.CASCADE, related_name='student_staff',default="")
     def __str__(self):
-        return f"{self.student_name} - {self.class_year}-{self.id}"
+        return f"{self.username} - {self.class_year}-{self.id}"
+    def save(self, *args, **kwargs):
+        # Hash the password before saving it
+        if self.password:
+            self.password = make_password(self.password)
+        super().save(*args, **kwargs)
 
 
 
@@ -125,8 +129,7 @@ class Menu(models.Model):
                 return True
         return False
 
-class Allergen(models.Model):
-      allergy =  JSONField(default=list)
+
     
 class MenuItems(models.Model):
     category=models.ForeignKey('Categories',null=True, blank=True,on_delete=models.CASCADE, related_name='menuitems')
@@ -135,7 +138,8 @@ class MenuItems(models.Model):
     nutrients = JSONField(default=list)  # To store the list of nutrients as JSON
     ingredients = models.TextField(null=True, blank=True)
     allergies = models.ForeignKey(Allergen,null=True, blank=True,on_delete=models.CASCADE)  
-
+    def __str__(self):
+        return f"{self.id} Items:   {self.item_name}"
 class Order(models.Model):
     user_id = models.IntegerField(null=True, blank=True)  
    
@@ -149,7 +153,7 @@ class Order(models.Model):
     is_delivered = models.BooleanField(default=False)
     status = models.CharField(max_length=20, default='pending')
    
-    student = models.ForeignKey('Student', null=True, blank=True, on_delete=models.SET_NULL, related_name='orders')
+    student = models.ForeignKey('PrimaryStudent', null=True, blank=True, on_delete=models.SET_NULL, related_name='orders')
     user_name = models.CharField(max_length=100, null=True, blank=True)
     
     items = models.ManyToManyField('Menu', through='OrderItem')  
@@ -158,9 +162,8 @@ class Order(models.Model):
         return f'Order {self.id} by User {self.user_id} ({self.user_type})'
 
     def get_user_name(self):
-        """Get the user's name based on the user type."""
         if self.user_type == 'student':
-            student = StudentRegisteration.objects.filter(id=self.user_id).first()
+            student = PrimaryStudent.objects.filter(id=self.user_id).first()
             if student:
                 return student.username
         elif self.user_type == 'parent':
@@ -171,13 +174,13 @@ class Order(models.Model):
             staff = StaffRegisteration.objects.filter(id=self.user_id).first()
             if staff:
                 return staff.username
-        return "Unknown User"  
+        return 
 
     def save(self, *args, **kwargs):
-        """Override save method to ensure user_name is stored in the database."""
+       
         self.user_name = self.get_user_name()  
         super().save(*args, **kwargs)
-
+    
 class OrderItem(models.Model):
     menu  = models.ForeignKey('Menu', on_delete=models.CASCADE,related_name='orderitem')  
     order = models.ForeignKey('Order', on_delete=models.CASCADE,related_name='orderitem')  
@@ -209,7 +212,3 @@ class CanteenStaff(models.Model):
 
     def __str__(self):
         return f'{self.username} - {self.school_type}'
-class Class(models.Model):
-    teacher = models.ForeignKey(StaffRegisteration, on_delete=models.CASCADE)
-    student = models.ForeignKey(StudentRegisteration, on_delete=models.CASCADE)
-    class_name = models.CharField(max_length=30)

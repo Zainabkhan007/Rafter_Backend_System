@@ -8,9 +8,9 @@ urlpatterns = [
     path('login/', views.login,name='login'),
     path('password_reset/', include('django_rest_passwordreset.urls', namespace='password_reset')),
     path('admin_login/', views.admin_login,name='admin_login'),
-    path('get_parent_by_id/<int:parent_id>/', views.get_parent_by_id, name='get_parent_by_id'),
-    path('get_staff_by_id/<int:staff_id>/', views.get_staff_by_id, name='get_staff_by_id'),
-    path('get_student_by_id/<int:student_id>/', views.get_student_by_id, name='get_student_by_id'),
+    # path('get_parent_by_id/<int:parent_id>/', views.get_parent_by_id, name='get_parent_by_id'),
+    # path('get_staff_by_id/<int:staff_id>/', views.get_staff_by_id, name='get_staff_by_id'),
+    # path('get_student_by_id/<int:student_id>/', views.get_student_by_id, name='get_student_by_id'),
 
     # Primary School Urls
     path("add_primary_school/",views.add_primary_school,name='add_primary_school'),

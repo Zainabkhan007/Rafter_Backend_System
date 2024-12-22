@@ -12,12 +12,12 @@ class ParentRegisterationSerializer(serializers.ModelSerializer):
         model = ParentRegisteration
         fields = "__all__"
         
-class StudentRegisterationSerializer(serializers.ModelSerializer):
+# class StudentRegisterationSerializer(serializers.ModelSerializer):
    
    
-    class Meta:
-        model = StudentRegisteration
-        fields = "__all__"
+#     class Meta:
+#         model = StudentRegisteration
+#         fields = "__all__"
 
 class StaffRegisterationSerializer(serializers.ModelSerializer):
    
@@ -86,15 +86,15 @@ class LoginSerializer(serializers.Serializer):
 
         if not user:
             try:
-                user = StudentRegisteration.objects.get(email=email)
+                user = PrimaryStudent.objects.get(email=email)
                 user_type = 'student'
-            except StudentRegisteration.DoesNotExist:
+            except PrimaryStudent.DoesNotExist:
                 pass
         if not user:
             try:
                 user = CanteenStaff.objects.get(email=email)
                 user_type = 'canteenstaff'
-            except StudentRegisteration.DoesNotExist:
+            except CanteenStaff.DoesNotExist:
                 pass
         # Validate password with Django's check_password function
         if user and check_password(password, user.password):  # Use check_password to compare hashed password
@@ -117,13 +117,14 @@ class TeacherSerializer(serializers.ModelSerializer):
         model = Teacher
         fields = ['id','teacher_name', 'class_year']
 
-class StudentSerializer(serializers.ModelSerializer):
+class PrimaryStudentSerializer(serializers.ModelSerializer):
     # Define a custom field to get the teacher's name
     teacher_name = serializers.CharField(source='teacher.teacher_name',read_only=True)  
+    primary_school = serializers.IntegerField(source='school.id', read_only=True)
     
     class Meta:
-        model = Student
-        fields = ['id','student_name', 'class_year', 'teacher_name', 'student_email']
+        model = PrimaryStudent
+        fields = ['id','first_name', 'last_name', 'username', 'email','phone_no','class_year','school','teacher',]
 
 
 class SecondarySchoolSerializer(serializers.ModelSerializer):
