@@ -436,7 +436,7 @@ def get_category(request):
 @api_view(['POST'])
 def add_menu(request):
     if request.method == 'POST':
-       
+        
         school_id = request.data.get('school_id')
         school_type = request.data.get('school_type')
         cycle_name = request.data.get('cycle_name') 
@@ -445,19 +445,24 @@ def add_menu(request):
         # Validate cycle_name
         if not cycle_name.isalnum() and " " not in cycle_name:
             return Response({'error': 'Cycle Name cannot contain special characters!'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Check if the same school ID already has a menu with the same cycle name
         if school_type == 'primary':
+            # For Primary School, check if there's already a menu with this cycle name for the same school
             if Menu.objects.filter(cycle_name=cycle_name, primary_school__id=school_id).exists():
-                return Response({'error': f'Menu with cycle name "{cycle_name}" already exists for Primary School.'}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({'error': f'Menu with cycle name "{cycle_name}" already exists for Primary School with school ID {school_id}.'}, status=status.HTTP_400_BAD_REQUEST)
         elif school_type == 'secondary':
+            # For Secondary School, check if there's already a menu with this cycle name for the same school ID
             if Menu.objects.filter(cycle_name=cycle_name, secondary_school__id=school_id).exists():
-                return Response({'error': f'Menu with cycle name "{cycle_name}" already exists for Secondary School.'}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({'error': f'Menu with cycle name "{cycle_name}" already exists for Secondary School with school ID {school_id}.'}, status=status.HTTP_400_BAD_REQUEST)
 
-
+        # Retrieve the correct school model (Primary or Secondary)
         school_model = PrimarySchool if school_type == 'primary' else SecondarySchool
         school = school_model.objects.filter(id=school_id).first()
 
         if not school:
             return Response({'error': f'{school_type.capitalize()} School not found'}, status=status.HTTP_404_NOT_FOUND)
+        
         created_menus = []
 
         days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
@@ -465,6 +470,8 @@ def add_menu(request):
             categories = request.data.get(f'category_{day}')
             item_names = request.data.get(f'item_names_{day}')
             prices = request.data.get(f'price_{day}')
+            
+            # Ensure that all fields are provided
             if not all([categories, item_names, prices]):
                 return Response({'error': f'Missing data for {day}. Ensure all fields are included.'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -477,12 +484,15 @@ def add_menu(request):
                 except ValueError:
                     return Response({'error': f'Invalid price for {item_name} on {day}.'}, status=status.HTTP_400_BAD_REQUEST)
 
-               
+                # Get the category
                 category = Categories.objects.filter(id=category_id).first()
                 if not category:
                     return Response({'error': f'Category with ID {category_id} does not exist.'}, status=status.HTTP_404_NOT_FOUND)
 
+                # Current time for 'is_active_time'
                 is_active_time = datetime.now()   
+                
+                # Prepare the data for creating the menu
                 menu_data = {
                     'name': item_name,
                     'price': price,
@@ -493,14 +503,15 @@ def add_menu(request):
                     'secondary_school': school.id if school_type == 'secondary' else None,
                     'category': category.id,  
                     'is_active_time': is_active_time,  
-                   
                 }
+                
+                # Ensure the correct school is set to None based on the school type
                 if school_type == 'primary':
                     menu_data['secondary_school'] = None
                 elif school_type == 'secondary':
                     menu_data['primary_school'] = None
 
-              
+                # Serialize and save the menu item
                 menu_serializer = MenuSerializer(data=menu_data)
                 if not menu_serializer.is_valid():
                     return Response(menu_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -516,6 +527,8 @@ def add_menu(request):
                     'cycle_name': menu_instance.cycle_name,
                     'is_active': menu_instance.is_active  
                 })
+        
+        # Return the response with the created menus
         return Response({
             'message': 'Menus created successfully!',
             'menus': created_menus
@@ -716,6 +729,43 @@ def edit_menu(request, id):
 
         serializer = MenuSerializer(menu_item)
         return Response({'message': 'Menu updated successfully!', 'menu': serializer.data}, status=status.HTTP_200_OK)
+@api_view(['POST'])
+def get_cycle_names(request):
+    # Get school_id and school_type from the request body
+    school_id = request.data.get('school_id')
+    school_type = request.data.get('school_type')
+
+    # Validate the parameters
+    if not school_id or not school_type:
+        return Response({'error': 'school_id and school_type are required.'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    if school_type not in ['primary', 'secondary']:
+        return Response({'error': 'Invalid school_type. It should be "primary" or "secondary".'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Check if the school exists
+    school_model = PrimarySchool if school_type == 'primary' else SecondarySchool
+    school = school_model.objects.filter(id=school_id).first()
+
+    if not school:
+        return Response({'error': f'{school_type.capitalize()} School not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    # Filter the menus based on school_id and school_type
+    if school_type == 'primary':
+        menus = Menu.objects.filter(primary_school__id=school_id).values('cycle_name').distinct()
+    elif school_type == 'secondary':
+        menus = Menu.objects.filter(secondary_school__id=school_id).values('cycle_name').distinct()
+
+    # If no menus found, return an empty list
+    if not menus:
+        return Response({'message': 'No cycle names found for this school.'}, status=status.HTTP_200_OK)
+
+    # Extract the cycle names
+    cycle_names = [menu['cycle_name'] for menu in menus]
+
+    # Return the response with the cycle names only
+    return Response({
+        'cycle_names': cycle_names
+    }, status=status.HTTP_200_OK)
 
 
 @csrf_exempt

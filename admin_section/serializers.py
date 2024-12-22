@@ -6,7 +6,7 @@ from django.contrib.auth.tokens import default_token_generator
 
 
 class ParentRegisterationSerializer(serializers.ModelSerializer):
-   
+    allergies=serializers.SlugRelatedField(queryset=Allergen.objects.all(), slug_field='allergy')
    
     class Meta:
         model = ParentRegisteration
@@ -20,7 +20,7 @@ class ParentRegisterationSerializer(serializers.ModelSerializer):
 #         fields = "__all__"
 
 class StaffRegisterationSerializer(serializers.ModelSerializer):
-   
+    allergies=serializers.SlugRelatedField(queryset=Allergen.objects.all(), slug_field='allergy')
    
     class Meta:
         model = StaffRegisteration

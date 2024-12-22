@@ -41,6 +41,7 @@ urlpatterns = [
     path("activate_cycle/",views.activate_cycle,name='activate_cycle'),
 
     path("edit_menu/<int:id>/",views.edit_menu,name='edit_menu'),
+    path("get_cycle_names/",views.get_cycle_names,name='get_cycle_names'),
     path("add_menu_item/",views.add_menu_item,name='add_menu_item'),
     path("get_menu_items/",views.get_menu_items,name='get_menu_items'),
     path('update_menu_items/<int:pk>/', views.update_menu_items, name='update_menu_items'),
