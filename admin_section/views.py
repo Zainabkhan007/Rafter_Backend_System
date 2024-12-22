@@ -684,7 +684,6 @@ def get_complete_menu(request):
         if not menus_to_delete.exists():
             return Response({'error': f'No menus found for cycle "{cycle_name}" in the specified school.'}, status=status.HTTP_404_NOT_FOUND)
 
-        # Delete the menus
         menus_to_delete.delete()
 
         return Response({'message': f'All menus for cycle "{cycle_name}" in school {school_id} have been deleted.'}, status=status.HTTP_204_NO_CONTENT)
@@ -731,38 +730,32 @@ def edit_menu(request, id):
         return Response({'message': 'Menu updated successfully!', 'menu': serializer.data}, status=status.HTTP_200_OK)
 @api_view(['POST'])
 def get_cycle_names(request):
-    # Get school_id and school_type from the request body
+
     school_id = request.data.get('school_id')
     school_type = request.data.get('school_type')
 
-    # Validate the parameters
+
     if not school_id or not school_type:
         return Response({'error': 'school_id and school_type are required.'}, status=status.HTTP_400_BAD_REQUEST)
     
     if school_type not in ['primary', 'secondary']:
         return Response({'error': 'Invalid school_type. It should be "primary" or "secondary".'}, status=status.HTTP_400_BAD_REQUEST)
     
-    # Check if the school exists
     school_model = PrimarySchool if school_type == 'primary' else SecondarySchool
     school = school_model.objects.filter(id=school_id).first()
 
     if not school:
         return Response({'error': f'{school_type.capitalize()} School not found'}, status=status.HTTP_404_NOT_FOUND)
 
-    # Filter the menus based on school_id and school_type
     if school_type == 'primary':
         menus = Menu.objects.filter(primary_school__id=school_id).values('cycle_name').distinct()
     elif school_type == 'secondary':
         menus = Menu.objects.filter(secondary_school__id=school_id).values('cycle_name').distinct()
-
-    # If no menus found, return an empty list
     if not menus:
         return Response({'message': 'No cycle names found for this school.'}, status=status.HTTP_200_OK)
 
-    # Extract the cycle names
     cycle_names = [menu['cycle_name'] for menu in menus]
 
-    # Return the response with the cycle names only
     return Response({
         'cycle_names': cycle_names
     }, status=status.HTTP_200_OK)
@@ -884,23 +877,21 @@ def create_order(request):
         user_type = request.data.get('user_type')
         user_id = request.data.get('user_id')
         selected_days = request.data.get('selected_days')
-        child_id = request.data.get('child_id', None)  # Optional child_id for parent and staff
-        order_items_data = request.data.get('order_items', [])  # Accepting order items in the request
+        child_id = request.data.get('child_id', None) 
+        order_items_data = request.data.get('order_items', [])  
 
-        # Validate required fields
+      
         if not user_type or not user_id or not selected_days:
             return Response({'error': 'User type, user ID, and selected days are required.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Validate order_items data
         if not order_items_data:
             return Response({'error': 'Order items are required.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Check if order_items data is valid
         for item in order_items_data:
             if 'item_name' not in item or 'quantity' not in item:
                 return Response({'error': 'Each order item must have a item_name and quantity.'}, status=status.HTTP_400_BAD_REQUEST)
         
-        # Fetch user based on user_type and user_id
+    
         user = None
         if user_type == 'student':
             user = PrimaryStudent.objects.filter(id=user_id).first()
@@ -923,7 +914,7 @@ def create_order(request):
             order_total_price = 0
             order_items = []  
 
-            # Prepare order data
+           
             order_data = {
                 'user_id': user.id,
                 'user_type': user_type,
@@ -945,7 +936,7 @@ def create_order(request):
 
             order_instance = order_serializer.save()
 
-            # Add order items based on the provided order_items_data (using menu names)
+            
             for item in order_items_data:
                 item_name = Menu.objects.filter(name__iexact=item['item_name']).first()
                 
@@ -960,11 +951,10 @@ def create_order(request):
                 order_items.append(order_item)
                 order_total_price += item_name.price * item['quantity']
 
-            # Update the order with the total price
             order_instance.total_price = order_total_price
             order_instance.save()
 
-            # Prepare the response data
+            
             order_details = {
                 'order_id': order_instance.id,
                 'selected_day': day,
