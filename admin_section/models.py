@@ -3,12 +3,12 @@ from datetime import datetime
 from django.utils import timezone
 from django.contrib.postgres.fields import ArrayField
 from django.db.models import JSONField
-# Create your models here.
+
 from django.db import models
 from django.contrib.auth.hashers import make_password
 # Create your models here.
-class Allergen(models.Model):
-      allergy =  models.CharField(max_length=50)
+class Allergens(models.Model):
+    allergy = models.CharField(max_length=50)
 class ParentRegisteration(models.Model):
     first_name=models.CharField(max_length=30)
     last_name=models.CharField(max_length=30)
@@ -16,7 +16,7 @@ class ParentRegisteration(models.Model):
     email=models.EmailField(max_length=254,unique=True)
     phone_no = models.IntegerField( blank=True, null=True)
     password=models.CharField(max_length=128)
-    allergies=models.ForeignKey(Allergen,null=True, blank=True,on_delete=models.CASCADE)  
+    allergies=models.ManyToManyField(Allergens, blank=True,null=True)  
     def save(self, *args, **kwargs):
         # Hash the password before saving it
         if self.password:
@@ -30,7 +30,7 @@ class StaffRegisteration(models.Model):
     username=models.CharField(max_length=30)
     email=models.EmailField(max_length=254,unique=True)
     phone_no = models.IntegerField( blank=True, null=True)
-    allergies=models.ForeignKey(Allergen,null=True, blank=True,on_delete=models.CASCADE)  
+    allergies=models.ManyToManyField(Allergens,null=True, blank=True)  
     password=models.CharField(max_length=128)
     def save(self, *args, **kwargs):
         # Hash the password before saving it
@@ -61,15 +61,15 @@ class PrimaryStudent(models.Model):
     first_name=models.CharField(max_length=30,default="" )
     last_name=models.CharField(max_length=30,default="")
     username=models.CharField(max_length=30,default="")
-    student_email=models.EmailField(max_length=254,default="")
+    email=models.EmailField(max_length=254,default="")
     phone_no = models.IntegerField( blank=True, null=True)
     password=models.CharField(max_length=128,default="")
     class_year = models.CharField(max_length=30,default="")
-    allergies=models.ForeignKey(Allergen,null=True, blank=True,on_delete=models.CASCADE)  
-    school = models.ForeignKey(PrimarySchool, on_delete=models.CASCADE, related_name='student',default="")
-    teacher=models.ForeignKey(Teacher, on_delete=models.CASCADE, related_name='student_teacher',default="")
-    parent=models.ForeignKey(ParentRegisteration, on_delete=models.CASCADE, related_name='student_parent',default="")
-    staff=models.ForeignKey(StaffRegisteration, on_delete=models.CASCADE, related_name='student_staff',default="")
+    allergies=models.ManyToManyField(Allergens,null=True, blank=True)  
+    school = models.ForeignKey(PrimarySchool, on_delete=models.CASCADE, related_name='student',null=True, blank=True)
+    teacher=models.ForeignKey(Teacher, on_delete=models.CASCADE, related_name='student_teacher',null=True, blank=True)
+    parent=models.ForeignKey(ParentRegisteration, on_delete=models.CASCADE, related_name='student_parent',null=True, blank=True)
+    staff=models.ForeignKey(StaffRegisteration, on_delete=models.CASCADE, related_name='student_staff',null=True, blank=True)
     def __str__(self):
         return f"{self.username} - {self.class_year}-{self.id}"
     def save(self, *args, **kwargs):
@@ -102,7 +102,7 @@ class Categories(models.Model):
     emoji = models.ImageField(upload_to='categories_images/', blank=True, null=True)
     image = models.ImageField(upload_to='categories_images/', blank=True, null=True)
     def __str__(self):
-        return f"{self.id}"
+        return f"{self.id} - {self.name_category}"
 class Menu(models.Model):
  
     price = models.DecimalField(max_digits=5, decimal_places=2)
@@ -137,7 +137,7 @@ class MenuItems(models.Model):
     item_description=models.CharField(max_length=255,null=False)
     nutrients = JSONField(default=list)  # To store the list of nutrients as JSON
     ingredients = models.TextField(null=True, blank=True)
-    allergies = models.ForeignKey(Allergen,null=True, blank=True,on_delete=models.CASCADE)  
+    allergies = models.ManyToManyField(Allergens,null=True, blank=True, related_name='menuitems')  
     def __str__(self):
         return f"{self.id} Items:   {self.item_name}"
 class Order(models.Model):

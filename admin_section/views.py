@@ -37,7 +37,7 @@ def register(request):
     if user_type == "parent":
         serializer = ParentRegisterationSerializer(data=request.data)
     elif user_type == "student":
-        serializer = PrimaryStudent(data=request.data)
+        serializer = PrimaryStudentSerializer(data=request.data)
     elif user_type == "staff":
         serializer = StaffRegisterationSerializer(data=request.data)
     elif user_type == "canteenstaff":
@@ -52,6 +52,10 @@ def register(request):
     if password != password_confirmation:
         return Response({"error": "Passwords do not match."}, status=status.HTTP_400_BAD_REQUEST)
 
+    allergies = request.data.get('allergies', [])
+    for allergy in allergies:
+        if not Allergens.objects.filter(allergy=allergy).exists():
+            return Response({"error": f"Allergen '{allergy}' does not exist in the database."}, status=status.HTTP_400_BAD_REQUEST)
 
     if serializer.is_valid():
       
@@ -111,46 +115,253 @@ def admin_login(request):
 
      return Response({'detail': 'Login successful!'}, status=status.HTTP_200_OK)
 
+@api_view(["GET"])
+def get_user_info(request, user_type, id):
+    
+    if user_type == "parent":
+        try:
+            parent = ParentRegisteration.objects.get(id=id)
+            students = PrimaryStudent.objects.filter(parent=parent)
+            parent_serializer = ParentRegisterationSerializer(parent)
+            student_serializer = PrimaryStudentSerializer(students, many=True)
+            
+            return Response({
+                "user_type": "parent", 
+                "user_id": id,  
+                "parent": parent_serializer.data,
+                "students": student_serializer.data
+            }, status=status.HTTP_200_OK)
+        
+        except ParentRegisteration.DoesNotExist:
+            return Response({"error": "Parent not found."}, status=status.HTTP_404_NOT_FOUND)
+    
+    elif user_type == "staff":
+        try:
+            staff = StaffRegisteration.objects.get(id=id)
+            students = PrimaryStudent.objects.filter(staff=staff)
+            staff_serializer = StaffRegisterationSerializer(staff)
+            student_serializer = PrimaryStudentSerializer(students, many=True)
+            
+            return Response({
+                "user_type": "staff", 
+                "user_id": id,  
+                "staff": staff_serializer.data,
+                "students": student_serializer.data
+            }, status=status.HTTP_200_OK)
+        
+        except StaffRegisteration.DoesNotExist:
+            return Response({"error": "Staff not found."}, status=status.HTTP_404_NOT_FOUND)
+    
+    elif user_type == "student":
+        try:
+            student = PrimaryStudent.objects.get(id=id)
+            student_serializer = PrimaryStudentSerializer(student)
+            
+            return Response({
+                "user_type": "student", 
+                "user_id": id,  
+                "student": student_serializer.data
+            }, status=status.HTTP_200_OK)
+        
+        except PrimaryStudent.DoesNotExist:
+            return Response({"error": "Student not found."}, status=status.HTTP_404_NOT_FOUND)
+    
+    else:
+        return Response({"error": "Invalid user_type."}, status=status.HTTP_400_BAD_REQUEST)
+@api_view(["GET", "PUT"])
+def update_user_info(request, user_type, id):
+    
+    if request.method == "GET":
+       
+        if user_type == "parent":
+            try:
+                parent = ParentRegisteration.objects.get(id=id)
+                students = PrimaryStudent.objects.filter(parent=parent)
+                parent_serializer = ParentRegisterationSerializer(parent)
+                student_serializer = PrimaryStudentSerializer(students, many=True)
 
-# Get All user by 1
-# @api_view(['GET'])
-# def get_user_by_id(request, user_id, user_type):
-#     """
-#     Fetch user details by user_id and user_type.
-#     user_type can be 'parent', 'student', 'staff', or 'secondary_student'.
-#     """
-#     if user_type == 'parent':
-#         user = ParentRegisteration.objects.filter(id=user_id).first()
-#         if not user:
-#             return Response({'error': 'Parent not found.'}, status=status.HTTP_404_NOT_FOUND)
-#         serializer = ParentRegisterationSerializer(user)
-    
-#     elif user_type == 'student':
-#         # First, fetch the primary student
-#         user = StudentRegisteration.objects.filter(id=user_id).first()
-#         if not user:
-#             return Response({'error': 'Student not found.'}, status=status.HTTP_404_NOT_FOUND)
-#         serializer = StudentRegisterationSerializer(user)
-    
-#     elif user_type == 'staff':
-#         user = StaffRegisteration.objects.filter(id=user_id).first()
-#         if not user:
-#             return Response({'error': 'Staff not found.'}, status=status.HTTP_404_NOT_FOUND)
-#         serializer = StaffRegisterationSerializer(user)
-    
-#     elif user_type == 'secondary_student':
-#         # Now, for secondary students, we use the SecondaryStudent model
-#         user = SecondaryStudent.objects.filter(id=user_id).first()
-#         if not user:
-#             return Response({'error': 'Secondary student not found.'}, status=status.HTTP_404_NOT_FOUND)
-#         serializer = SecondaryStudentSerializer(user)
-    
-#     else:
-#         return Response({'error': 'Invalid user type. Must be one of: parent, student, staff, or secondary_student.'}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({
+                    "user_type": "parent",
+                    "user_id": id,
+                    "parent": parent_serializer.data,
+                    "students": student_serializer.data
+                }, status=status.HTTP_200_OK)
 
-#     return Response(serializer.data, status=status.HTTP_200_OK)
+            except ParentRegisteration.DoesNotExist:
+                return Response({"error": "Parent not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        elif user_type == "staff":
+            try:
+                staff = StaffRegisteration.objects.get(id=id)
+                students = PrimaryStudent.objects.filter(staff=staff)
+                staff_serializer = StaffRegisterationSerializer(staff)
+                student_serializer = PrimaryStudentSerializer(students, many=True)
+
+                return Response({
+                    "user_type": "staff",
+                    "user_id": id,
+                    "staff": staff_serializer.data,
+                    "students": student_serializer.data
+                }, status=status.HTTP_200_OK)
+
+            except StaffRegisteration.DoesNotExist:
+                return Response({"error": "Staff not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        elif user_type == "student":
+            try:
+                student = PrimaryStudent.objects.get(id=id)
+                student_serializer = PrimaryStudentSerializer(student)
+
+                return Response({
+                    "user_type": "student",
+                    "user_id": id,
+                    "student": student_serializer.data
+                }, status=status.HTTP_200_OK)
+
+            except PrimaryStudent.DoesNotExist:
+                return Response({"error": "Student not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        else:
+            return Response({"error": "Invalid user_type."}, status=status.HTTP_400_BAD_REQUEST)
+
+    elif request.method == "PUT":
+       
+        if user_type == "parent":
+            try:
+                parent = ParentRegisteration.objects.get(id=id)
+                serializer = ParentRegisterationSerializer(parent, data=request.data)
+
+                if serializer.is_valid():
+                    serializer.save()
+                    return Response({
+                        "user_type": "parent",
+                        "user_id": id,
+                        "parent": serializer.data
+                    }, status=status.HTTP_200_OK)
+                else:
+                    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+            except ParentRegisteration.DoesNotExist:
+                return Response({"error": "Parent not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        elif user_type == "staff":
+            try:
+                staff = StaffRegisteration.objects.get(id=id)
+                serializer = StaffRegisterationSerializer(staff, data=request.data)
+
+                if serializer.is_valid():
+                    serializer.save()
+                    return Response({
+                        "user_type": "staff",
+                        "user_id": id,
+                        "staff": serializer.data
+                    }, status=status.HTTP_200_OK)
+                else:
+                    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+            except StaffRegisteration.DoesNotExist:
+                return Response({"error": "Staff not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        elif user_type == "student":
+            try:
+                student = PrimaryStudent.objects.get(id=id)
+                serializer = PrimaryStudentSerializer(student, data=request.data)
+
+                if serializer.is_valid():
+                    serializer.save()
+                    return Response({
+                        "user_type": "student",
+                        "user_id": id,
+                        "student": serializer.data
+                    }, status=status.HTTP_200_OK)
+                else:
+                    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+            except PrimaryStudent.DoesNotExist:
+                return Response({"error": "Student not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        else:
+            return Response({"error": "Invalid user_type."}, status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(['POST'])
+def add_child(request):
+ 
+    school_name = request.data.get('school')
+    first_name = request.data.get('first_name') 
+    last_name = request.data.get('last_name')   
+    class_year = request.data.get('class_year')
+    allergies_data = request.data.get('allergies', [])
+    user_id = request.data.get('user_id')
+    user_type = request.data.get('user_type')
 
     
+    if not school_name:
+        return Response({"error": "School name is required."}, status=status.HTTP_400_BAD_REQUEST)
+    
+    if not first_name:
+        return Response({"error": "First name is required."}, status=status.HTTP_400_BAD_REQUEST)
+    
+    if not last_name:
+        return Response({"error": "Last name is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+    if not class_year:
+        return Response({"error": "Class year is required."}, status=status.HTTP_400_BAD_REQUEST)
+    
+    if not user_id:
+        return Response({"error": "User ID is required."}, status=status.HTTP_400_BAD_REQUEST)
+    
+    if not user_type:
+        return Response({"error": "User type is required."}, status=status.HTTP_400_BAD_REQUEST)
+    
+    
+    try:
+        school = PrimarySchool.objects.get(school_name=school_name)
+    except PrimarySchool.DoesNotExist:
+        return Response({"error": f"School '{school_name}' does not exist."}, status=status.HTTP_400_BAD_REQUEST)
+
+    user = None
+    if user_type == 'parent':
+        try:
+            user = ParentRegisteration.objects.get(id=user_id)
+        except ParentRegisteration.DoesNotExist:
+            return Response({"error": f"Parent with ID {user_id} does not exist."}, status=status.HTTP_400_BAD_REQUEST)
+    elif user_type == 'staff':
+        try:
+            user = StaffRegisteration.objects.get(id=user_id)
+        except StaffRegisteration.DoesNotExist:
+            return Response({"error": f"Staff with ID {user_id} does not exist."}, status=status.HTTP_400_BAD_REQUEST)
+    else:
+        return Response({"error": "Invalid user type."}, status=status.HTTP_400_BAD_REQUEST)
+    
+   
+    student_data = {
+        'first_name': first_name,
+        'last_name': last_name,
+        'class_year': class_year,
+        'school': school,  
+        'allergies': allergies_data
+    }
+
+
+    if user_type == 'parent':
+        student_data['parent'] = user
+    elif user_type == 'staff':
+        student_data['staff'] = user
+    
+    
+    serializer = PrimaryStudentSerializer(data=student_data)
+
+    if serializer.is_valid():
+      
+        student = serializer.save()
+        return Response({
+            "message": "Child added successfully",
+            "student": serializer.data,
+            "user_type": user_type,
+            "user_id": user_id
+        }, status=status.HTTP_201_CREATED)
+    else:
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 # Primary School Sction
 @csrf_exempt
 @api_view(['POST'])
@@ -880,7 +1091,6 @@ def create_order(request):
         child_id = request.data.get('child_id', None) 
         order_items_data = request.data.get('order_items', [])  
 
-      
         if not user_type or not user_id or not selected_days:
             return Response({'error': 'User type, user ID, and selected days are required.'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -888,10 +1098,9 @@ def create_order(request):
             return Response({'error': 'Order items are required.'}, status=status.HTTP_400_BAD_REQUEST)
 
         for item in order_items_data:
-            if 'item_name' not in item or 'quantity' not in item:
-                return Response({'error': 'Each order item must have a item_name and quantity.'}, status=status.HTTP_400_BAD_REQUEST)
+            if 'item_name' not in item or 'quantity' not in item or 'price' not in item:
+                return Response({'error': 'Each order item must have item_name, quantity, and price.'}, status=status.HTTP_400_BAD_REQUEST)
         
-    
         user = None
         if user_type == 'student':
             user = PrimaryStudent.objects.filter(id=user_id).first()
@@ -905,7 +1114,7 @@ def create_order(request):
 
         created_orders = [] 
         
-        for day in selected_days:
+        for idx, day in enumerate(selected_days):
             menus_for_day = Menu.objects.filter(menu_day__iexact=day)
 
             if not menus_for_day:
@@ -914,74 +1123,79 @@ def create_order(request):
             order_total_price = 0
             order_items = []  
 
-           
-            order_data = {
-                'user_id': user.id,
-                'user_type': user_type,
-                'total_price': order_total_price,
-                'week_number': datetime.now().isocalendar()[1],
-                'year': datetime.now().year,
-                'order_date': datetime.now(),
-                'selected_day': day,
-                'is_delivered': False,
-                'status': 'pending',
-            }
+            # Match order items to the current day
+            if idx < len(order_items_data):
+                item = order_items_data[idx]
+                item_name = Menu.objects.filter(name__iexact=item['item_name'], menu_day__iexact=day).first()
 
-            if user_type in ['parent', 'staff'] and child_id:
-                order_data['child_id'] = child_id
-
-            order_serializer = OrderSerializer(data=order_data)
-            if not order_serializer.is_valid():
-                return Response(order_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-            order_instance = order_serializer.save()
-
-            
-            for item in order_items_data:
-                item_name = Menu.objects.filter(name__iexact=item['item_name']).first()
-                
                 if not item_name:
-                    return Response({'error': f'Menu item with name {item["item_name"]} not found.'}, status=status.HTTP_404_NOT_FOUND)
-                
+                    return Response({'error': f'Menu item with name {item["item_name"]} not found for {day}.'}, status=status.HTTP_404_NOT_FOUND)
+
+                # Use the price from the request instead of the Menu price
+                item_price = item['price']
+
+                order_data = {
+                    'user_id': user.id,
+                    'user_type': user_type,
+                    'total_price': 0,
+                    'week_number': datetime.now().isocalendar()[1],
+                    'year': datetime.now().year,
+                    'order_date': datetime.now(),
+                    'selected_day': day,
+                    'is_delivered': False,
+                    'status': 'pending',
+                }
+
+                if user_type in ['parent', 'staff'] and child_id:
+                    order_data['child_id'] = child_id
+
+                order_serializer = OrderSerializer(data=order_data)
+                if not order_serializer.is_valid():
+                    return Response(order_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+                order_instance = order_serializer.save()
+
+                # Create Order Item with the price from the request
                 order_item = OrderItem.objects.create(
                     menu=item_name,
                     quantity=item['quantity'], 
                     order=order_instance
                 )
                 order_items.append(order_item)
-                order_total_price += item_name.price * item['quantity']
+                order_total_price += item_price * item['quantity']
 
-            order_instance.total_price = order_total_price
-            order_instance.save()
+                # Update the total price for the order
+                order_instance.total_price = order_total_price
+                order_instance.save()
 
-            
-            order_details = {
-                'order_id': order_instance.id,
-                'selected_day': day,
-                'total_price': order_instance.total_price,
-                'order_date': str(order_instance.order_date),
-                'status': 'pending',
-                'week_number': order_instance.week_number,
-                'year': order_instance.year,
-                'items': [
-                    {
-                        'item_name': item.menu.name,  # Returning item name instead of ID
-                        'price': item.menu.price,
-                        'quantity': item.quantity
-                    } for item in order_items
-                ],
-                'user_name': order_instance.user_name, 
-            }
+                order_details = {
+                    'order_id': order_instance.id,
+                    'selected_day': day,
+                    'total_price': order_instance.total_price,
+                    'order_date': str(order_instance.order_date),
+                    'status': 'pending',
+                    'week_number': order_instance.week_number,
+                    'year': order_instance.year,
+                    'items': [
+                        {
+                            'item_name': item.menu.name,
+                            'price': item_price,  # Use the price from the request
+                            'quantity': item.quantity
+                        } for item in order_items
+                    ],
+                    'user_name': order_instance.user_name, 
+                }
 
-            if order_instance.user_type in ['parent', 'staff']:
-                order_details['child_id'] = order_instance.child_id  
+                if order_instance.user_type in ['parent', 'staff']:
+                    order_details['child_id'] = order_instance.child_id
 
-            created_orders.append(order_details)
+                created_orders.append(order_details)
 
         return Response({
             'message': 'Orders created successfully!',
             'orders': created_orders
         }, status=status.HTTP_201_CREATED)
+
 
 
 @api_view(['POST'])
