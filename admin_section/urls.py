@@ -10,7 +10,9 @@ urlpatterns = [
     path('admin_login/', views.admin_login,name='admin_login'),
     path('get_user_info/<int:id>/<str:user_type>/', views.get_user_info, name='get_user_info'),
     path('update_user_info/<int:id>/<str:user_type>/', views.update_user_info, name='update_user_info'),
+     
     path('add_child/', views.add_child, name='add_child'),
+    path('edit_child/<int:child_id>/', views.edit_child, name='edit_child'),
     
 
     # Primary School Urls
@@ -36,6 +38,7 @@ urlpatterns = [
 
 # Category
  path("get_category/",views.get_category,name='get_category'),
+  path("get_allergy/",views.get_allergy,name='get_allergy'),
 #    Menu
     path("add_menu/",views.add_menu,name='add_menu'),
     path("get_complete_menu/",views.get_complete_menu,name='get_complete_menu'),
@@ -46,7 +49,7 @@ urlpatterns = [
     path("add_menu_item/",views.add_menu_item,name='add_menu_item'),
     path("get_menu_items/",views.get_menu_items,name='get_menu_items'),
     path('update_menu_items/<int:pk>/', views.update_menu_items, name='update_menu_items'),
-
+    path("get_active_menu/<str:school_type>/<int:school_id>/",views.get_active_menu,name='get_active_menu'),
 
     # View Registered Students
     path("view_students/",views.view_students,name='view_students'),

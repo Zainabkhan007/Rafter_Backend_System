@@ -13,6 +13,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from django.conf import settings
 from django.contrib.auth.hashers import make_password
 from .models import *
+from django.db.models import Min
 # Create your views here.
 
 @api_view(["POST"])
@@ -114,79 +115,96 @@ def admin_login(request):
         return Response({'detail': 'You do not have permission to access this resource.'}, status=status.HTTP_403_FORBIDDEN)
 
      return Response({'detail': 'Login successful!'}, status=status.HTTP_200_OK)
-
 @api_view(["GET"])
 def get_user_info(request, user_type, id):
-    
     if user_type == "parent":
         try:
             parent = ParentRegisteration.objects.get(id=id)
             students = PrimaryStudent.objects.filter(parent=parent)
             parent_serializer = ParentRegisterationSerializer(parent)
             student_serializer = PrimaryStudentSerializer(students, many=True)
-            
+
+           
+            parent_data = parent_serializer.data
+            parent_data.pop('password', None)
+
+            student_data = student_serializer.data
+            for student in student_data:
+                student.pop('password', None)
+
             return Response({
-                "user_type": "parent", 
-                "user_id": id,  
-                "parent": parent_serializer.data,
-                "students": student_serializer.data
+                "user_type": "parent",
+                "user_id": id,
+                "parent": parent_data,
+                "students": student_data
             }, status=status.HTTP_200_OK)
-        
+
         except ParentRegisteration.DoesNotExist:
             return Response({"error": "Parent not found."}, status=status.HTTP_404_NOT_FOUND)
-    
+
     elif user_type == "staff":
         try:
             staff = StaffRegisteration.objects.get(id=id)
             students = PrimaryStudent.objects.filter(staff=staff)
             staff_serializer = StaffRegisterationSerializer(staff)
             student_serializer = PrimaryStudentSerializer(students, many=True)
-            
+
+          
+            staff_data = staff_serializer.data
+            staff_data.pop('password', None)
+
+            student_data = student_serializer.data
+            for student in student_data:
+                student.pop('password', None)
+
             return Response({
-                "user_type": "staff", 
-                "user_id": id,  
-                "staff": staff_serializer.data,
-                "students": student_serializer.data
+                "user_type": "staff",
+                "user_id": id,
+                "staff": staff_data,
+                "students": student_data
             }, status=status.HTTP_200_OK)
-        
+
         except StaffRegisteration.DoesNotExist:
             return Response({"error": "Staff not found."}, status=status.HTTP_404_NOT_FOUND)
-    
+
     elif user_type == "student":
         try:
             student = PrimaryStudent.objects.get(id=id)
             student_serializer = PrimaryStudentSerializer(student)
-            
+
+            # Remove the password field manually
+            student_data = student_serializer.data
+            student_data.pop('password', None)
+
             return Response({
-                "user_type": "student", 
-                "user_id": id,  
-                "student": student_serializer.data
+                "user_type": "student",
+                "user_id": id,
+                "student": student_data
             }, status=status.HTTP_200_OK)
-        
+
         except PrimaryStudent.DoesNotExist:
             return Response({"error": "Student not found."}, status=status.HTTP_404_NOT_FOUND)
-    
+
     else:
         return Response({"error": "Invalid user_type."}, status=status.HTTP_400_BAD_REQUEST)
+
+
 @api_view(["GET", "PUT"])
 def update_user_info(request, user_type, id):
-    
+    # Handling GET request
     if request.method == "GET":
-       
         if user_type == "parent":
             try:
                 parent = ParentRegisteration.objects.get(id=id)
                 students = PrimaryStudent.objects.filter(parent=parent)
                 parent_serializer = ParentRegisterationSerializer(parent)
                 student_serializer = PrimaryStudentSerializer(students, many=True)
-
                 return Response({
                     "user_type": "parent",
                     "user_id": id,
                     "parent": parent_serializer.data,
                     "students": student_serializer.data
                 }, status=status.HTTP_200_OK)
-
             except ParentRegisteration.DoesNotExist:
                 return Response({"error": "Parent not found."}, status=status.HTTP_404_NOT_FOUND)
 
@@ -196,14 +214,12 @@ def update_user_info(request, user_type, id):
                 students = PrimaryStudent.objects.filter(staff=staff)
                 staff_serializer = StaffRegisterationSerializer(staff)
                 student_serializer = PrimaryStudentSerializer(students, many=True)
-
                 return Response({
                     "user_type": "staff",
                     "user_id": id,
                     "staff": staff_serializer.data,
                     "students": student_serializer.data
                 }, status=status.HTTP_200_OK)
-
             except StaffRegisteration.DoesNotExist:
                 return Response({"error": "Staff not found."}, status=status.HTTP_404_NOT_FOUND)
 
@@ -211,25 +227,23 @@ def update_user_info(request, user_type, id):
             try:
                 student = PrimaryStudent.objects.get(id=id)
                 student_serializer = PrimaryStudentSerializer(student)
-
                 return Response({
                     "user_type": "student",
                     "user_id": id,
                     "student": student_serializer.data
                 }, status=status.HTTP_200_OK)
-
             except PrimaryStudent.DoesNotExist:
                 return Response({"error": "Student not found."}, status=status.HTTP_404_NOT_FOUND)
 
         else:
             return Response({"error": "Invalid user_type."}, status=status.HTTP_400_BAD_REQUEST)
 
+    # Handling PUT request (update)
     elif request.method == "PUT":
-       
         if user_type == "parent":
             try:
                 parent = ParentRegisteration.objects.get(id=id)
-                serializer = ParentRegisterationSerializer(parent, data=request.data)
+                serializer = ParentRegisterationSerializer(parent, data=request.data, partial=True)
 
                 if serializer.is_valid():
                     serializer.save()
@@ -238,16 +252,14 @@ def update_user_info(request, user_type, id):
                         "user_id": id,
                         "parent": serializer.data
                     }, status=status.HTTP_200_OK)
-                else:
-                    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
+                return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
             except ParentRegisteration.DoesNotExist:
                 return Response({"error": "Parent not found."}, status=status.HTTP_404_NOT_FOUND)
 
         elif user_type == "staff":
             try:
                 staff = StaffRegisteration.objects.get(id=id)
-                serializer = StaffRegisterationSerializer(staff, data=request.data)
+                serializer = StaffRegisterationSerializer(staff, data=request.data, partial=True)
 
                 if serializer.is_valid():
                     serializer.save()
@@ -256,16 +268,14 @@ def update_user_info(request, user_type, id):
                         "user_id": id,
                         "staff": serializer.data
                     }, status=status.HTTP_200_OK)
-                else:
-                    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
+                return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
             except StaffRegisteration.DoesNotExist:
                 return Response({"error": "Staff not found."}, status=status.HTTP_404_NOT_FOUND)
 
         elif user_type == "student":
             try:
                 student = PrimaryStudent.objects.get(id=id)
-                serializer = PrimaryStudentSerializer(student, data=request.data)
+                serializer = PrimaryStudentSerializer(student, data=request.data, partial=True)
 
                 if serializer.is_valid():
                     serializer.save()
@@ -274,15 +284,13 @@ def update_user_info(request, user_type, id):
                         "user_id": id,
                         "student": serializer.data
                     }, status=status.HTTP_200_OK)
-                else:
-                    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
+                return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
             except PrimaryStudent.DoesNotExist:
                 return Response({"error": "Student not found."}, status=status.HTTP_404_NOT_FOUND)
 
         else:
             return Response({"error": "Invalid user_type."}, status=status.HTTP_400_BAD_REQUEST)
-
+# Child
 @api_view(['POST'])
 def add_child(request):
  
@@ -362,6 +370,56 @@ def add_child(request):
         }, status=status.HTTP_201_CREATED)
     else:
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+@api_view(['GET', 'PUT'])
+def edit_child(request, child_id):
+    
+    child = get_object_or_404(PrimaryStudent, id=child_id)
+
+   
+    if request.method == 'GET':
+        serializer = PrimaryStudentSerializer(child)
+        return Response({'child': serializer.data}, status=status.HTTP_200_OK)
+
+    elif request.method == 'PUT':
+       
+        first_name = request.data.get('first_name', child.first_name)
+        last_name = request.data.get('last_name', child.last_name)
+        class_year = request.data.get('class_year', child.class_year)
+
+       
+        school_name = request.data.get('school', None)  
+        allergies = request.data.get('allergies', [])
+
+        if school_name:
+            try:
+                school = PrimarySchool.objects.get(name=school_name)  
+                child.school = school
+            except PrimarySchool.DoesNotExist:
+                return Response({'message': 'School not found'}, status=status.HTTP_400_BAD_REQUEST)
+       
+
+       
+        child.first_name = first_name
+        child.last_name = last_name
+        child.class_year = class_year
+
+       
+        if allergies is not None:
+            child.allergies.clear()
+            for allergy in allergies:
+                allergen = Allergens.objects.filter(allergy=allergy).first()
+                if allergen:
+                    child.allergies.add(allergen)
+
+        
+        child.save()
+
+        
+        return Response({
+            'message': 'Child details updated successfully.',
+            'child': PrimaryStudentSerializer(child).data
+        }, status=status.HTTP_200_OK)
 # Primary School Sction
 @csrf_exempt
 @api_view(['POST'])
@@ -500,7 +558,7 @@ def get_student_detail(request, school_id,):
 @api_view(['GET', 'PUT', 'DELETE'])
 def update_delete_student(request, school_id, student_id):
     school = get_object_or_404(PrimarySchool, pk=school_id)
-    # teacher = get_object_or_404(Teacher, pk=teacher_id)
+    # teacher = get_object_or_404(Teacher, pk=teacher_id)                             
     student = get_object_or_404(PrimaryStudent, pk=student_id, school=school)
     # teacher=
     if request.method == 'GET':
@@ -642,7 +700,14 @@ def get_category(request):
         category = Categories.objects.all()
         serializer = CategoriesSerializer(category,many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
-
+#    Allergerns
+@csrf_exempt
+@api_view(['GET',])
+def get_allergy(request):
+   if request.method == "GET":
+        allergy = Allergens.objects.all()
+        serializer = AllergenSerializer(allergy,many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 # Menu
 @api_view(['POST'])
 def add_menu(request):
@@ -653,21 +718,21 @@ def add_menu(request):
         cycle_name = request.data.get('cycle_name') 
         menu_date = datetime.now().date()  
 
-        # Validate cycle_name
+      
         if not cycle_name.isalnum() and " " not in cycle_name:
             return Response({'error': 'Cycle Name cannot contain special characters!'}, status=status.HTTP_400_BAD_REQUEST)
         
-        # Check if the same school ID already has a menu with the same cycle name
+       
         if school_type == 'primary':
-            # For Primary School, check if there's already a menu with this cycle name for the same school
+           
             if Menu.objects.filter(cycle_name=cycle_name, primary_school__id=school_id).exists():
                 return Response({'error': f'Menu with cycle name "{cycle_name}" already exists for Primary School with school ID {school_id}.'}, status=status.HTTP_400_BAD_REQUEST)
         elif school_type == 'secondary':
-            # For Secondary School, check if there's already a menu with this cycle name for the same school ID
+            
             if Menu.objects.filter(cycle_name=cycle_name, secondary_school__id=school_id).exists():
                 return Response({'error': f'Menu with cycle name "{cycle_name}" already exists for Secondary School with school ID {school_id}.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Retrieve the correct school model (Primary or Secondary)
+       
         school_model = PrimarySchool if school_type == 'primary' else SecondarySchool
         school = school_model.objects.filter(id=school_id).first()
 
@@ -682,7 +747,7 @@ def add_menu(request):
             item_names = request.data.get(f'item_names_{day}')
             prices = request.data.get(f'price_{day}')
             
-            # Ensure that all fields are provided
+           
             if not all([categories, item_names, prices]):
                 return Response({'error': f'Missing data for {day}. Ensure all fields are included.'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -695,15 +760,13 @@ def add_menu(request):
                 except ValueError:
                     return Response({'error': f'Invalid price for {item_name} on {day}.'}, status=status.HTTP_400_BAD_REQUEST)
 
-                # Get the category
                 category = Categories.objects.filter(id=category_id).first()
                 if not category:
                     return Response({'error': f'Category with ID {category_id} does not exist.'}, status=status.HTTP_404_NOT_FOUND)
 
-                # Current time for 'is_active_time'
                 is_active_time = datetime.now()   
                 
-                # Prepare the data for creating the menu
+                
                 menu_data = {
                     'name': item_name,
                     'price': price,
@@ -716,18 +779,17 @@ def add_menu(request):
                     'is_active_time': is_active_time,  
                 }
                 
-                # Ensure the correct school is set to None based on the school type
+               
                 if school_type == 'primary':
                     menu_data['secondary_school'] = None
                 elif school_type == 'secondary':
                     menu_data['primary_school'] = None
 
-                # Serialize and save the menu item
                 menu_serializer = MenuSerializer(data=menu_data)
                 if not menu_serializer.is_valid():
                     return Response(menu_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
                 
-                # Save the menu item
+                
                 menu_instance = menu_serializer.save()
                 created_menus.append({
                     'id': menu_instance.id,
@@ -739,7 +801,7 @@ def add_menu(request):
                     'is_active': menu_instance.is_active  
                 })
         
-        # Return the response with the created menus
+        
         return Response({
             'message': 'Menus created successfully!',
             'menus': created_menus
@@ -900,7 +962,122 @@ def get_complete_menu(request):
         return Response({'message': f'All menus for cycle "{cycle_name}" in school {school_id} have been deleted.'}, status=status.HTTP_204_NO_CONTENT)
 
     return Response({'error': 'Invalid request method.'}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
-@api_view(['GET', 'PUT'])
+
+
+@api_view(["GET"])
+def get_active_menu(request, school_type, school_id):
+   
+    if school_type == 'primary':
+        try:
+           
+            today = timezone.now().date()
+
+            
+            menus = Menu.objects.filter(
+                primary_school_id=school_id,
+                start_date__lte=today,
+                end_date__gte=today
+            ).select_related('category').all()
+
+            subquery = Menu.objects.filter(
+                primary_school_id=school_id,
+                start_date__lte=today,
+                end_date__gte=today
+            ).values('cycle_name').annotate(id=Min('id')).distinct()
+            cycles = list(subquery)  
+
+           
+            menus_data = MenuSerializer(menus, many=True).data
+
+            weekly_menu = {
+                "Monday": [],
+                "Tuesday": [],
+                "Wednesday": [],
+                "Thursday": [],
+                "Friday": [],
+                "Saturday": [],
+                "Sunday": []
+            }
+
+            for menu in menus_data:
+                
+                day_of_week = menu.get('menu_day') 
+
+                if day_of_week in weekly_menu:
+                    weekly_menu[day_of_week].append({
+                        "name": menu['name'],
+                        "price": menu['price']
+                    })
+
+            cycles_list = [
+                {"cycle": cycle['cycle_name'], 'id': cycle['id']} for cycle in cycles
+            ]
+
+            return Response({
+                "menus": weekly_menu,
+                "cycles": cycles_list
+            }, status=status.HTTP_200_OK)
+
+        except PrimarySchool.DoesNotExist:
+            return Response({"detail": "Primary school not found."}, status=status.HTTP_404_NOT_FOUND)
+    
+    elif school_type == 'secondary':
+        try:
+           
+            today = timezone.now().date()
+
+            menus = Menu.objects.filter(
+                secondary_school_id=school_id,
+                start_date__lte=today,
+                end_date__gte=today
+            ).select_related('category').all()
+
+            
+            subquery = Menu.objects.filter(
+                secondary_school_id=school_id,
+                start_date__lte=today,
+                end_date__gte=today
+            ).values('cycle_name').annotate(id=Min('id')).distinct()
+            cycles = list(subquery) 
+
+            
+            menus_data = MenuSerializer(menus, many=True).data
+
+            weekly_menu = {
+                "Monday": [],
+                "Tuesday": [],
+                "Wednesday": [],
+                "Thursday": [],
+                "Friday": [],
+                "Saturday": [],
+                "Sunday": []
+            }
+
+            for menu in menus_data:
+               
+                day_of_week = menu.get('menu_day')  
+
+                if day_of_week in weekly_menu:
+                    weekly_menu[day_of_week].append({
+                        "name": menu['name'],
+                        "price": menu['price']
+                    })
+
+            cycles_list = [
+                {"cycle": cycle['cycle_name'], 'id': cycle['id']} for cycle in cycles
+            ]
+
+            return Response({
+                "menus": weekly_menu,
+                "cycles": cycles_list
+            }, status=status.HTTP_200_OK)
+
+        except SecondarySchool.DoesNotExist:
+            return Response({"detail": "Secondary school not found."}, status=status.HTTP_404_NOT_FOUND)
+    
+    else:
+        return Response({"detail": "Invalid school type. Please provide either 'primary' or 'secondary'."},
+                        status=status.HTTP_400_BAD_REQUEST)
 def edit_menu(request, id):
     print(f"Received request to edit menu item with id: {id}")
     if request.method == 'GET':

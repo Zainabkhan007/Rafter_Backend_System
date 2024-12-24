@@ -103,6 +103,7 @@ class Categories(models.Model):
     image = models.ImageField(upload_to='categories_images/', blank=True, null=True)
     def __str__(self):
         return f"{self.id} - {self.name_category}"
+    
 class Menu(models.Model):
  
     price = models.DecimalField(max_digits=5, decimal_places=2)

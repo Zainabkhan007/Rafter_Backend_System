@@ -13,7 +13,7 @@ class ParentRegisterationSerializer(serializers.ModelSerializer):
    
     class Meta:
         model = ParentRegisteration
-        fields = ['id','first_name', 'last_name', 'username', 'email','phone_no','password','allergies']
+        fields = ['id','first_name', 'last_name', 'username', 'email','phone_no','allergies']
         
 
 class StaffRegisterationSerializer(serializers.ModelSerializer):
@@ -21,7 +21,7 @@ class StaffRegisterationSerializer(serializers.ModelSerializer):
     allergies = serializers.SlugRelatedField(queryset=Allergens.objects.all(), slug_field='allergy', many=True, required=False)
     class Meta:
         model = StaffRegisteration
-        fields = ['id','first_name', 'last_name', 'username', 'email','phone_no','password',"allergies"]
+        fields = ['id','first_name', 'last_name', 'username', 'email','phone_no',"allergies"]
 
 
 class CanteenStaffSerializer(serializers.ModelSerializer):
@@ -118,10 +118,10 @@ class TeacherSerializer(serializers.ModelSerializer):
 
 class PrimaryStudentSerializer(serializers.ModelSerializer):
     allergies = serializers.SlugRelatedField(queryset=Allergens.objects.all(), slug_field='allergy', many=True, required=False)
-
+    school_name = serializers.CharField(source='school.name', read_only=True)
     class Meta:
         model = PrimaryStudent
-        fields = ['id', 'first_name', 'last_name', 'username', 'email', 'phone_no', 'class_year', 'password',  'allergies']
+        fields = ['id', 'first_name', 'last_name', 'username', 'email', 'phone_no', 'class_year', 'teacher','school_name','school' , 'allergies']
    
     
 
