@@ -7,6 +7,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.shortcuts import get_object_or_404
 from rest_framework.filters import SearchFilter
 from django.db.models import Count
+from rest_framework.exceptions import NotFound
 import calendar
 from django.contrib.auth import authenticate
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -806,7 +807,6 @@ def add_menu(request):
             'message': 'Menus created successfully!',
             'menus': created_menus
         }, status=status.HTTP_201_CREATED)
-
 @api_view(['POST'])
 def activate_cycle(request):
     if request.method == 'POST':
@@ -815,38 +815,49 @@ def activate_cycle(request):
         cycle_name = request.data.get('cycle_name')
         start_date = request.data.get('start_date')
         end_date = request.data.get('end_date')
-        
+
        
         if not cycle_name.isalnum() and " " not in cycle_name:
             return Response({'error': 'Cycle Name cannot contain special characters!'}, status=status.HTTP_400_BAD_REQUEST)
 
+       
         try:
             start_date = datetime.strptime(start_date, '%Y-%m-%d').date() if start_date else None
             end_date = datetime.strptime(end_date, '%Y-%m-%d').date() if end_date else None
         except ValueError:
             return Response({'error': 'Invalid date format. Use YYYY-MM-DD.'}, status=status.HTTP_400_BAD_REQUEST)
 
-
+       
         school_model = PrimarySchool if school_type == 'primary' else SecondarySchool
         school = school_model.objects.filter(id=school_id).first()
 
+     
         if not school:
             return Response({'error': f'{school_type.capitalize()} School not found'}, status=status.HTTP_404_NOT_FOUND)
-        
+
+      
         menus = Menu.objects.filter(
             cycle_name=cycle_name,
             primary_school=school if school_type == 'primary' else None,
             secondary_school=school if school_type == 'secondary' else None
         )
 
+     
         if not menus:
             return Response({'error': f'No menus found for cycle "{cycle_name}" in the specified school.'}, status=status.HTTP_404_NOT_FOUND)
 
+        
+        Menu.objects.filter(
+            primary_school=school if school_type == 'primary' else None,
+            secondary_school=school if school_type == 'secondary' else None
+        ).update(end_date=datetime.today().date())
+
+      
         updated_menus = []
         for menu in menus:
             menu.start_date = start_date
             menu.end_date = end_date
-            menu.save()
+            menu.save()  # Save the updated menu
             updated_menus.append({
                 'id': menu.id,
                 'name': menu.name,
@@ -857,7 +868,7 @@ def activate_cycle(request):
                 'end_date': str(menu.end_date),
                 'is_active': menu.is_active 
             })
-        
+
         return Response({
             'message': f'Cycle "{cycle_name}" activated successfully!',
             'menus': updated_menus
@@ -963,30 +974,28 @@ def get_complete_menu(request):
 
     return Response({'error': 'Invalid request method.'}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
-
 @api_view(["GET"])
 def get_active_menu(request, school_type, school_id):
-   
+    today = timezone.now().date()  # Get today's date
+
     if school_type == 'primary':
         try:
            
-            today = timezone.now().date()
-
-            
             menus = Menu.objects.filter(
                 primary_school_id=school_id,
                 start_date__lte=today,
                 end_date__gte=today
-            ).select_related('category').all()
+            ).select_related('category', 'primary_school').all()
 
+          
             subquery = Menu.objects.filter(
                 primary_school_id=school_id,
                 start_date__lte=today,
                 end_date__gte=today
             ).values('cycle_name').annotate(id=Min('id')).distinct()
-            cycles = list(subquery)  
+            cycles = list(subquery)
 
-           
+          
             menus_data = MenuSerializer(menus, many=True).data
 
             weekly_menu = {
@@ -999,15 +1008,29 @@ def get_active_menu(request, school_type, school_id):
                 "Sunday": []
             }
 
+            # Organize the menus by day of the week and manually add category_name
             for menu in menus_data:
-                
-                day_of_week = menu.get('menu_day') 
+                if menu['is_active']:  # Only include active menus
+                    day_of_week = menu.get('menu_day')
+                    if day_of_week in weekly_menu:
+                        primary_school_name = menu.get('primary_school_name', None)
+                        category_name = None
+                      
+                        if isinstance(menu['category'], int):  
+                            category_obj = Categories.objects.get(id=menu['category'])
+                            category_name = category_obj.name_category
+                        elif isinstance(menu['category'], dict):  
+                            category_name = menu['category'].get('name_category')
 
-                if day_of_week in weekly_menu:
-                    weekly_menu[day_of_week].append({
-                        "name": menu['name'],
-                        "price": menu['price']
-                    })
+                        weekly_menu[day_of_week].append({
+                            "name": menu['name'],
+                            "price": menu['price'],
+                            "menu_date": menu['menu_date'],
+                            "cycle_name": menu['cycle_name'],
+                            "category": category_name,  
+                            "is_active": menu['is_active'],  
+                            "primary_school": primary_school_name
+                        })
 
             cycles_list = [
                 {"cycle": cycle['cycle_name'], 'id': cycle['id']} for cycle in cycles
@@ -1020,68 +1043,17 @@ def get_active_menu(request, school_type, school_id):
 
         except PrimarySchool.DoesNotExist:
             return Response({"detail": "Primary school not found."}, status=status.HTTP_404_NOT_FOUND)
-    
-    elif school_type == 'secondary':
-        try:
-           
-            today = timezone.now().date()
 
-            menus = Menu.objects.filter(
-                secondary_school_id=school_id,
-                start_date__lte=today,
-                end_date__gte=today
-            ).select_related('category').all()
-
-            
-            subquery = Menu.objects.filter(
-                secondary_school_id=school_id,
-                start_date__lte=today,
-                end_date__gte=today
-            ).values('cycle_name').annotate(id=Min('id')).distinct()
-            cycles = list(subquery) 
-
-            
-            menus_data = MenuSerializer(menus, many=True).data
-
-            weekly_menu = {
-                "Monday": [],
-                "Tuesday": [],
-                "Wednesday": [],
-                "Thursday": [],
-                "Friday": [],
-                "Saturday": [],
-                "Sunday": []
-            }
-
-            for menu in menus_data:
-               
-                day_of_week = menu.get('menu_day')  
-
-                if day_of_week in weekly_menu:
-                    weekly_menu[day_of_week].append({
-                        "name": menu['name'],
-                        "price": menu['price']
-                    })
-
-            cycles_list = [
-                {"cycle": cycle['cycle_name'], 'id': cycle['id']} for cycle in cycles
-            ]
-
-            return Response({
-                "menus": weekly_menu,
-                "cycles": cycles_list
-            }, status=status.HTTP_200_OK)
-
-        except SecondarySchool.DoesNotExist:
-            return Response({"detail": "Secondary school not found."}, status=status.HTTP_404_NOT_FOUND)
-    
     else:
         return Response({"detail": "Invalid school type. Please provide either 'primary' or 'secondary'."},
                         status=status.HTTP_400_BAD_REQUEST)
+
+
+
+@api_view(["GET", "PUT"])
 def edit_menu(request, id):
     print(f"Received request to edit menu item with id: {id}")
     if request.method == 'GET':
-    
         try:
             menu_item = Menu.objects.get(id=id)
         except Menu.DoesNotExist:
@@ -1091,21 +1063,31 @@ def edit_menu(request, id):
         return Response({'menu': serializer.data}, status=status.HTTP_200_OK)
 
     elif request.method == 'PUT':
-      
         try:
             menu_item = Menu.objects.get(id=id)
         except Menu.DoesNotExist:
             return Response({'error': 'Menu item not found'}, status=status.HTTP_404_NOT_FOUND)
 
-        category_id = request.data.get('category')
+        category = request.data.get('category')
         menu_name = request.data.get('name')
         price = request.data.get('price')
-        if category_id:
+        
+       
+        if category:
+      
             try:
-                category = Categories.objects.get(id=category_id)
+                category_id = int(category) 
+                category_instance = Categories.objects.get(id=category_id)  
+            except ValueError:
+                
+                category_instance = Categories.objects.filter(name_category=category).first()
+                if not category_instance:
+                    return Response({'error': f'Category with name "{category}" not found.'}, status=status.HTTP_404_NOT_FOUND)
             except Categories.DoesNotExist:
                 return Response({'error': 'Category not found'}, status=status.HTTP_404_NOT_FOUND)
-            menu_item.category = category
+
+            menu_item.category = category_instance
+
         if menu_name:
             menu_item.name = menu_name
         
@@ -1116,6 +1098,7 @@ def edit_menu(request, id):
 
         serializer = MenuSerializer(menu_item)
         return Response({'message': 'Menu updated successfully!', 'menu': serializer.data}, status=status.HTTP_200_OK)
+
 @api_view(['POST'])
 def get_cycle_names(request):
 
@@ -1167,23 +1150,31 @@ def get_menu_items(request):
         menu_items = MenuItems.objects.all()
         serializer = MenuItemsSerializer(menu_items,many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
-@api_view(['GET', 'PUT','DELETE'])
+   
+@api_view(['GET', 'PUT', 'DELETE'])
 def update_menu_items(request, pk):
-    menu_item = get_object_or_404(MenuItems, pk=pk)
-    
+    try:
+        menu_item = MenuItems.objects.get(pk=pk)  
+    except MenuItems.DoesNotExist:
+        raise NotFound({'error': 'Menu item not found'}) 
+
     if request.method == 'GET':
+    
         serializer = MenuItemsSerializer(menu_item)
         return Response(serializer.data, status=status.HTTP_200_OK)
-    
+
     elif request.method == 'PUT':
+      
         serializer = MenuItemsSerializer(menu_item, data=request.data, partial=True)
-        
+
         if serializer.is_valid():
-            serializer.save()
+            serializer.save()  
             return Response(serializer.data, status=status.HTTP_200_OK)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
     elif request.method == 'DELETE':
-        # Delete the menu item
+       
         menu_item.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -1300,7 +1291,7 @@ def create_order(request):
             order_total_price = 0
             order_items = []  
 
-            # Match order items to the current day
+     
             if idx < len(order_items_data):
                 item = order_items_data[idx]
                 item_name = Menu.objects.filter(name__iexact=item['item_name'], menu_day__iexact=day).first()
@@ -1308,7 +1299,7 @@ def create_order(request):
                 if not item_name:
                     return Response({'error': f'Menu item with name {item["item_name"]} not found for {day}.'}, status=status.HTTP_404_NOT_FOUND)
 
-                # Use the price from the request instead of the Menu price
+              
                 item_price = item['price']
 
                 order_data = {
@@ -1332,7 +1323,7 @@ def create_order(request):
 
                 order_instance = order_serializer.save()
 
-                # Create Order Item with the price from the request
+                
                 order_item = OrderItem.objects.create(
                     menu=item_name,
                     quantity=item['quantity'], 
@@ -1356,7 +1347,7 @@ def create_order(request):
                     'items': [
                         {
                             'item_name': item.menu.name,
-                            'price': item_price,  # Use the price from the request
+                            'price': item_price,  
                             'quantity': item.quantity
                         } for item in order_items
                     ],

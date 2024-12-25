@@ -147,21 +147,21 @@ class CategoriesSerializer(serializers.ModelSerializer):
 
     
 class MenuSerializer(serializers.ModelSerializer):
-  
     is_active = serializers.BooleanField(read_only=True) 
     
-    primary_school = serializers.PrimaryKeyRelatedField(queryset=PrimarySchool.objects.all(), required=False, allow_null=True)
-    secondary_school = serializers.PrimaryKeyRelatedField(queryset=SecondarySchool.objects.all(), required=False, allow_null=True)  
+    primary_school_name = serializers.CharField(source='primary_school.school_name', read_only=True, required=False, allow_null=True)
+    secondary_school_name = serializers.CharField(source='secondary_school.school_name', read_only=True, required=False, allow_null=True)
     category = serializers.PrimaryKeyRelatedField(queryset=Categories.objects.all()) 
 
     class Meta:
         model = Menu
-        fields = ['id', 'name', 'price', 'menu_day', 'cycle_name', 'menu_date', 'primary_school', 'secondary_school', 'category', 'is_active']
+        fields = ['id', 'name', 'price', 'menu_day', 'cycle_name', 'menu_date', 'primary_school_name', 'secondary_school_name', 'category', 'is_active']  # Removed the space here
 
     def to_representation(self, instance):
         """ Customize the representation to include more details """
         representation = super().to_representation(instance)
         
+    
         representation['category'] = instance.category.name_category if instance.category else None
         return representation
 
