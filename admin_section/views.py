@@ -294,35 +294,32 @@ def update_user_info(request, user_type, id):
 # Child
 @api_view(['POST'])
 def add_child(request):
- 
     school_name = request.data.get('school')
-    first_name = request.data.get('first_name') 
-    last_name = request.data.get('last_name')   
+    first_name = request.data.get('first_name')
+    last_name = request.data.get('last_name')
     class_year = request.data.get('class_year')
     allergies_data = request.data.get('allergies', [])
     user_id = request.data.get('user_id')
     user_type = request.data.get('user_type')
 
-    
     if not school_name:
         return Response({"error": "School name is required."}, status=status.HTTP_400_BAD_REQUEST)
-    
+
     if not first_name:
         return Response({"error": "First name is required."}, status=status.HTTP_400_BAD_REQUEST)
-    
+
     if not last_name:
         return Response({"error": "Last name is required."}, status=status.HTTP_400_BAD_REQUEST)
 
     if not class_year:
         return Response({"error": "Class year is required."}, status=status.HTTP_400_BAD_REQUEST)
-    
+
     if not user_id:
         return Response({"error": "User ID is required."}, status=status.HTTP_400_BAD_REQUEST)
-    
+
     if not user_type:
         return Response({"error": "User type is required."}, status=status.HTTP_400_BAD_REQUEST)
-    
-    
+
     try:
         school = PrimarySchool.objects.get(school_name=school_name)
     except PrimarySchool.DoesNotExist:
@@ -341,27 +338,23 @@ def add_child(request):
             return Response({"error": f"Staff with ID {user_id} does not exist."}, status=status.HTTP_400_BAD_REQUEST)
     else:
         return Response({"error": "Invalid user type."}, status=status.HTTP_400_BAD_REQUEST)
-    
-   
+
     student_data = {
         'first_name': first_name,
         'last_name': last_name,
         'class_year': class_year,
-        'school': school,  
+        'school': school.id,  # Pass the ID of the school here
         'allergies': allergies_data
     }
-
 
     if user_type == 'parent':
         student_data['parent'] = user
     elif user_type == 'staff':
         student_data['staff'] = user
-    
-    
+
     serializer = PrimaryStudentSerializer(data=student_data)
 
     if serializer.is_valid():
-      
         student = serializer.save()
         return Response({
             "message": "Child added successfully",

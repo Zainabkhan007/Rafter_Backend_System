@@ -119,6 +119,7 @@ class TeacherSerializer(serializers.ModelSerializer):
 class PrimaryStudentSerializer(serializers.ModelSerializer):
     allergies = serializers.SlugRelatedField(queryset=Allergens.objects.all(), slug_field='allergy', many=True, required=False)
     school_name = serializers.CharField(source='school.name', read_only=True)
+    school = serializers.PrimaryKeyRelatedField(queryset=PrimarySchool.objects.all()) 
     class Meta:
         model = PrimaryStudent
         fields = ['id', 'first_name', 'last_name', 'username', 'email', 'phone_no', 'class_year', 'teacher','school_name','school' , 'allergies','password']
