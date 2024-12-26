@@ -16,7 +16,8 @@ class ParentRegisteration(models.Model):
     email=models.EmailField(max_length=254,unique=True)
     phone_no = models.IntegerField( blank=True, null=True)
     password=models.CharField(max_length=128)
-    allergies=models.ManyToManyField(Allergens, blank=True,null=True)  
+    allergies=models.ManyToManyField(Allergens, blank=True,null=True) 
+     
     def save(self, *args, **kwargs):
         # Hash the password before saving it
         if self.password:
@@ -55,9 +56,16 @@ class Teacher(models.Model):
     school = models.ForeignKey(PrimarySchool, on_delete=models.CASCADE, related_name='teachers')
     def __str__(self):
         return f"{self.teacher_name} - {self.class_year} {self.id}"
+class SecondarySchool(models.Model):
+    secondary_school_name=models.CharField(max_length=30)
+    secondary_school_email=models.EmailField(max_length=254,unique=True)   
+    secondary_school_eircode=models.CharField(max_length=30,unique=True)
+    
 
+    def __str__(self):
+        return f"{self.secondary_school_name}-{self.id}"
 
-class PrimaryStudent(models.Model):
+class SecondaryStudent(models.Model):
     first_name=models.CharField(max_length=30,default="" )
     last_name=models.CharField(max_length=30,default="")
     username=models.CharField(max_length=30,default="")
@@ -66,10 +74,9 @@ class PrimaryStudent(models.Model):
     password=models.CharField(max_length=128,default="")
     class_year = models.CharField(max_length=30,default="")
     allergies=models.ManyToManyField(Allergens,null=True, blank=True)  
-    school = models.ForeignKey(PrimarySchool, on_delete=models.CASCADE, related_name='student',null=True, blank=True)
-    teacher=models.ForeignKey(Teacher, on_delete=models.CASCADE, related_name='student_teacher',null=True, blank=True)
-    parent=models.ForeignKey(ParentRegisteration, on_delete=models.CASCADE, related_name='student_parent',null=True, blank=True)
-    staff=models.ForeignKey(StaffRegisteration, on_delete=models.CASCADE, related_name='student_staff',null=True, blank=True)
+    school = models.ForeignKey(SecondarySchool, on_delete=models.CASCADE, related_name='student',null=True, blank=True)
+    
+   
     def __str__(self):
         return f"{self.username} - {self.class_year}-{self.id}"
     def save(self, *args, **kwargs):
@@ -80,20 +87,20 @@ class PrimaryStudent(models.Model):
 
 
 
-class SecondarySchool(models.Model):
-    secondary_school_name=models.CharField(max_length=30)
-    secondary_school_email=models.EmailField(max_length=254,unique=True)   
-    secondary_school_eircode=models.CharField(max_length=30,unique=True)
-    def __str__(self):
-        return f"{self.secondary_school_name}-{self.id}"
 
-class SecondaryStudent(models.Model):
-    secondary_student_name = models.CharField(max_length=30)
-    seconadry_student_email=models.EmailField(max_length=254,null=True, blank=True) 
-    secondary_class_year = models.CharField(max_length=30)
-    secondary_school = models.ForeignKey(SecondarySchool, on_delete=models.CASCADE, related_name='student')
+
+class PrimaryStudentsRegister(models.Model):
+    first_name = models.CharField(max_length=30)
+    last_name = models.CharField(max_length=30)
+    
+    class_year = models.CharField(max_length=30)
+    school = models.ForeignKey(PrimarySchool, on_delete=models.CASCADE, related_name='student')
+    teacher=models.ForeignKey(Teacher, on_delete=models.CASCADE, related_name='student_teacher',null=True, blank=True)
+    allergies=models.ManyToManyField(Allergens,null=True, blank=True) 
+    parent=models.ForeignKey(ParentRegisteration, on_delete=models.CASCADE, related_name='student_parent',null=True, blank=True)
+    staff=models.ForeignKey(StaffRegisteration, on_delete=models.CASCADE, related_name='student_staff',null=True, blank=True)
     def __str__(self):
-        return f"{self.secondary_student_name} - {self.secondary_class_year} {self.id}"
+        return f"{self.first_name} - {self.id}"
 
 class Categories(models.Model):
     name_category=  models.CharField(max_length=30)
@@ -111,7 +118,7 @@ class Menu(models.Model):
     menu_day = models.CharField(max_length=100, null=True, blank=True) 
     menu_date = models.DateField(default=datetime.today)  
     cycle_name = models.CharField(max_length=100)
-    is_active_time = models.DateTimeField(auto_now_add=True) 
+    is_active_time = models.DateTimeField(null=True, blank=True) 
     start_date = models.DateField(null=True, blank=True)  
     end_date = models.DateField(null=True, blank=True) 
 
@@ -123,12 +130,19 @@ class Menu(models.Model):
         return f"{self.id} Menu:   {self.menu_day} {self.name} - {self.cycle_name}"
     @property
     def is_active(self):
-        """ Returns True if the menu is active based on the start and end dates. """
-        if self.start_date and self.end_date:
-          
-            if self.start_date <= timezone.now().date() <= self.end_date:
+
+    # Check if the cycle is within the valid range of dates
+     if self.start_date and self.end_date:
+        # Ensure the current date falls between the start and end date
+        if self.start_date <= timezone.now().date() <= self.end_date:
+            # Also check if the is_active_time is set and not in the future
+            if self.is_active_time and self.is_active_time <= timezone.now():
                 return True
+    # If the cycle has a future start date or is not yet activated, return False
+     if self.is_active_time and self.is_active_time > timezone.now():
         return False
+    
+     return False
 
 
     
@@ -154,7 +168,7 @@ class Order(models.Model):
     is_delivered = models.BooleanField(default=False)
     status = models.CharField(max_length=20, default='pending')
    
-    student = models.ForeignKey('PrimaryStudent', null=True, blank=True, on_delete=models.SET_NULL, related_name='orders')
+    student = models.ForeignKey('SecondaryStudent', null=True, blank=True, on_delete=models.SET_NULL, related_name='orders')
     user_name = models.CharField(max_length=100, null=True, blank=True)
     
     items = models.ManyToManyField('Menu', through='OrderItem')  
@@ -164,7 +178,7 @@ class Order(models.Model):
 
     def get_user_name(self):
         if self.user_type == 'student':
-            student = PrimaryStudent.objects.filter(id=self.user_id).first()
+            student = SecondaryStudent.objects.filter(id=self.user_id).first()
             if student:
                 return student.username
         elif self.user_type == 'parent':

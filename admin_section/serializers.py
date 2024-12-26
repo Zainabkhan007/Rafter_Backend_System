@@ -83,9 +83,9 @@ class LoginSerializer(serializers.Serializer):
 
         if not user:
             try:
-                user = PrimaryStudent.objects.get(email=email)
+                user = SecondaryStudent.objects.get(email=email)
                 user_type = 'student'
-            except PrimaryStudent.DoesNotExist:
+            except SecondaryStudent.DoesNotExist:
                 pass
         if not user:
             try:
@@ -116,13 +116,13 @@ class TeacherSerializer(serializers.ModelSerializer):
 
 
 
-class PrimaryStudentSerializer(serializers.ModelSerializer):
+class SecondaryStudentSerializer(serializers.ModelSerializer):
     allergies = serializers.SlugRelatedField(queryset=Allergens.objects.all(), slug_field='allergy', many=True, required=False)
     school_name = serializers.CharField(source='school.name', read_only=True)
-    school = serializers.PrimaryKeyRelatedField(queryset=PrimarySchool.objects.all()) 
+    school = serializers.PrimaryKeyRelatedField(queryset=SecondarySchool.objects.all()) 
     class Meta:
-        model = PrimaryStudent
-        fields = ['id', 'first_name', 'last_name', 'username', 'email', 'phone_no', 'class_year', 'teacher','school_name','school' , 'allergies','password']
+        model = SecondaryStudent
+        fields = ['id', 'first_name', 'last_name', 'username', 'email', 'phone_no', 'class_year', 'school_name','school' , 'allergies','password']
    
     
 
@@ -133,10 +133,14 @@ class SecondarySchoolSerializer(serializers.ModelSerializer):
         fields =  ['id', 'secondary_school_name', 'secondary_school_email', 'secondary_school_eircode', 'student_count']
 
 
-class SecondaryStudentSerializer(serializers.ModelSerializer):
+class PrimaryStudentSerializer(serializers.ModelSerializer):
+    allergies = serializers.SlugRelatedField(queryset=Allergens.objects.all(), slug_field='allergy', many=True, required=False)
+    parent = serializers.PrimaryKeyRelatedField(queryset=ParentRegisteration.objects.all(), required=False)
+    staff = serializers.PrimaryKeyRelatedField(queryset=StaffRegisteration.objects.all(), required=False)
+    
     class Meta:
-        model = SecondaryStudent
-        fields = ['id','secondary_student_name', 'secondary_class_year','secondary_school','seconadry_student_email', ]
+        model = PrimaryStudentsRegister
+        fields =['id', 'first_name', 'last_name',  'class_year', 'teacher','school' , 'allergies','parent','staff']
 
 
 class CategoriesSerializer(serializers.ModelSerializer):
@@ -146,25 +150,28 @@ class CategoriesSerializer(serializers.ModelSerializer):
 
 
 
-    
 class MenuSerializer(serializers.ModelSerializer):
-    is_active = serializers.BooleanField(read_only=True) 
+    is_active = serializers.BooleanField(read_only=True)
     
     primary_school_name = serializers.CharField(source='primary_school.school_name', read_only=True, required=False, allow_null=True)
     secondary_school_name = serializers.CharField(source='secondary_school.school_name', read_only=True, required=False, allow_null=True)
-    category = serializers.PrimaryKeyRelatedField(queryset=Categories.objects.all()) 
-
+    category = serializers.PrimaryKeyRelatedField(queryset=Categories.objects.all())
+    primary_school_id = serializers.PrimaryKeyRelatedField(source='primary_school.id', read_only=True)
+    secondary_school_id = serializers.PrimaryKeyRelatedField(source='secondary_school.id', read_only=True)
+    
     class Meta:
         model = Menu
-        fields = ['id', 'name', 'price', 'menu_day', 'cycle_name', 'menu_date', 'primary_school_name', 'secondary_school_name', 'category', 'is_active']  # Removed the space here
+        fields = ['id', 'name', 'price', 'menu_day', 'cycle_name', 'menu_date', 'primary_school_name', 
+                  'secondary_school_name', 'category', 'is_active', 'primary_school_id', 'secondary_school_id']
 
     def to_representation(self, instance):
         """ Customize the representation to include more details """
         representation = super().to_representation(instance)
         
-    
+        # Add category name if it exists
         representation['category'] = instance.category.name_category if instance.category else None
         return representation
+
 
 
 class MenuItemsSerializer(serializers.ModelSerializer):

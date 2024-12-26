@@ -2,7 +2,7 @@ from django.contrib import admin
 from .models import *
 # Register your models here.
 admin.site.register(ParentRegisteration)
-admin.site.register(PrimaryStudent)
+admin.site.register(PrimaryStudentsRegister)
 admin.site.register(StaffRegisteration)
 admin.site.register(CanteenStaff)
 admin.site.register(PrimarySchool)
