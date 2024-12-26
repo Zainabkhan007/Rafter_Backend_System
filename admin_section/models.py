@@ -128,20 +128,22 @@ class Menu(models.Model):
 
     def __str__(self):
         return f"{self.id} Menu:   {self.menu_day} {self.name} - {self.cycle_name}"
-    @property
-    def is_active(self):
-
-    # Check if the cycle is within the valid range of dates
-     if self.start_date and self.end_date:
-        # Ensure the current date falls between the start and end date
-        if self.start_date <= timezone.now().date() <= self.end_date:
-            # Also check if the is_active_time is set and not in the future
-            if self.is_active_time and self.is_active_time <= timezone.now():
-                return True
-    # If the cycle has a future start date or is not yet activated, return False
-     if self.is_active_time and self.is_active_time > timezone.now():
-        return False
     
+    @property
+    def is_active(self): 
+     current_date = timezone.now()    
+   
+     if self.is_active_time and timezone.is_naive(self.is_active_time):
+         self.is_active_time = timezone.make_aware(self.is_active_time)
+   
+     if self.start_date and self.end_date:
+        if self.start_date <= current_date.date() <= self.end_date:
+            if self.is_active_time and self.is_active_time <= current_date:
+                return True
+
+     if self.is_active_time and self.is_active_time > current_date:
+        return False
+
      return False
 
 

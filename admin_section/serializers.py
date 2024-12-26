@@ -167,8 +167,7 @@ class MenuSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         """ Customize the representation to include more details """
         representation = super().to_representation(instance)
-        
-        # Add category name if it exists
+            
         representation['category'] = instance.category.name_category if instance.category else None
         return representation
 

@@ -392,7 +392,7 @@ def add_child(request):
     else:
         return Response({"error": "Invalid user type."}, status=status.HTTP_400_BAD_REQUEST)
 
-    # Prepare the student data
+   
     student_data = {
         'first_name': first_name,
         'last_name': last_name,
@@ -403,11 +403,11 @@ def add_child(request):
     }
 
     if user_type == 'parent':
-        student_data['parent'] = user_id  # Set user_id for parent
+        student_data['parent'] = user_id  
     elif user_type == 'staff':
-        student_data['staff'] = user_id  # Set user_id for staff
+        student_data['staff'] = user_id 
 
-    # Use the serializer
+    
     serializer = PrimaryStudentSerializer(data=student_data)
 
     if serializer.is_valid():
@@ -420,80 +420,7 @@ def add_child(request):
         }, status=status.HTTP_201_CREATED)
     else:
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-# @api_view(['POST'])
-# def add_child(request):
-#     school_name = request.data.get('school')
-#     first_name = request.data.get('first_name')
-#     last_name = request.data.get('last_name')
-#     class_year = request.data.get('class_year')
-#     teacher = request.data.get('teacher')
-#     allergies_data = request.data.get('allergies', [])
-#     user_id = request.data.get('user_id')
-#     user_type = request.data.get('user_type')
 
-#     if not school_name:
-#         return Response({"error": "School name is required."}, status=status.HTTP_400_BAD_REQUEST)
-
-#     if not first_name:
-#         return Response({"error": "First name is required."}, status=status.HTTP_400_BAD_REQUEST)
-
-#     if not last_name:
-#         return Response({"error": "Last name is required."}, status=status.HTTP_400_BAD_REQUEST)
-
-#     if not class_year:
-#         return Response({"error": "Class year is required."}, status=status.HTTP_400_BAD_REQUEST)
-
-#     if not user_id:
-#         return Response({"error": "User ID is required."}, status=status.HTTP_400_BAD_REQUEST)
-
-#     if not user_type:
-#         return Response({"error": "User type is required."}, status=status.HTTP_400_BAD_REQUEST)
-
-#     try:
-#         school = PrimarySchool.objects.get(school_name=school_name)
-#     except PrimarySchool.DoesNotExist:
-#         return Response({"error": f"School '{school_name}' does not exist."}, status=status.HTTP_400_BAD_REQUEST)
-
-#     user = None
-#     if user_type == 'parent':
-#         try:
-#             user = ParentRegisteration.objects.get(id=user_id)
-#         except ParentRegisteration.DoesNotExist:
-#             return Response({"error": f"Parent with ID {user_id} does not exist."}, status=status.HTTP_400_BAD_REQUEST)
-#     elif user_type == 'staff':
-#         try:
-#             user = StaffRegisteration.objects.get(id=user_id)
-#         except StaffRegisteration.DoesNotExist:
-#             return Response({"error": f"Staff with ID {user_id} does not exist."}, status=status.HTTP_400_BAD_REQUEST)
-#     else:
-#         return Response({"error": "Invalid user type."}, status=status.HTTP_400_BAD_REQUEST)
-
-#     student_data = {
-#         'first_name': first_name,
-#         'last_name': last_name,
-#         'class_year': class_year,
-#         'school': school.id,  
-#         'allergies': allergies_data,
-#         'teacher': teacher
-#     }
-
-#     if user_type == 'parent':
-#         student_data['parent'] = user
-#     elif user_type == 'staff':
-#         student_data['staff'] = user
-
-#     serializer = PrimaryStudentSerializer(data=student_data)
-
-#     if serializer.is_valid():
-#         student = serializer.save()
-#         return Response({
-#             "message": "Child added successfully",
-#             "student": serializer.data,
-#             "user_type": user_type,
-#             "user_id": user_id
-#         }, status=status.HTTP_201_CREATED)
-#     else:
-#         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
 @api_view(['GET', 'PUT'])
 def edit_child(request, child_id):
@@ -808,35 +735,33 @@ def add_secondary_student(request, school_id):
 
 @api_view(['GET', 'PUT', 'DELETE'])
 def update_delete_secondary_student(request, school_id, student_id):
-    # Fetch the school and student objects
+ 
     school = get_object_or_404(SecondarySchool, pk=school_id)
     student = get_object_or_404(SecondaryStudent, pk=student_id, school=school)
 
-    # Handling the GET request to fetch student details
+   
     if request.method == 'GET':
         student_serializer = SecondaryStudentSerializer(student)
-        # Remove the password field from the response
+       
         student_data = student_serializer.data
-        student_data.pop('password', None)  # This removes the password field
+        student_data.pop('password', None)  
         return Response(student_data, status=status.HTTP_200_OK)
 
-    # Handling the PUT request to update student details
     elif request.method == 'PUT':
         student_name = request.data.get('secondary_student_name', student.secondary_student_name)
         class_year = request.data.get('secondary_class_year', student.secondary_class_year)
 
-        # Update the student fields
+       
         student.secondary_student_name = student_name
         student.secondary_class_year = class_year
         student.save()
 
-        # Return the updated student data, excluding password
         student_serializer = SecondaryStudentSerializer(student)
         student_data = student_serializer.data
-        student_data.pop('password', None)  # Again, remove the password field
+        student_data.pop('password', None)  
         return Response(student_data, status=status.HTTP_200_OK)
 
-    # Handling DELETE request to delete the student
+    
     elif request.method == 'DELETE':
         student.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
@@ -854,12 +779,12 @@ def update_delete_secondary_student(request, school_id, student_id):
         return Response(student_serializer.data, status=status.HTTP_200_OK)
 
     elif request.method == 'PUT':
-        # Fetch the correct fields for updating based on the actual model
-        first_name = request.data.get('first_name', student.first_name)  # Correct field name
-        last_name = request.data.get('last_name', student.last_name)      # Correct field name
+       
+        first_name = request.data.get('first_name', student.first_name) 
+        last_name = request.data.get('last_name', student.last_name)      
         class_year = request.data.get('secondary_class_year', student.class_year)
 
-        # Update the student fields
+        
         student.first_name = first_name
         student.last_name = last_name
         student.class_year = class_year
@@ -889,107 +814,6 @@ def get_allergy(request):
         return Response(serializer.data, status=status.HTTP_200_OK)
 # Menu
 
-
-
-# @api_view(['POST'])
-# def add_menu(request):
-#     if request.method == 'POST':
-        
-#         school_id = request.data.get('school_id')
-#         school_type = request.data.get('school_type')
-#         cycle_name = request.data.get('cycle_name') 
-#         menu_date = datetime.now().date()  
-
-#         # Validate cycle_name (ensure it doesn't contain special characters)
-#         if not cycle_name.isalnum() and " " not in cycle_name:
-#             return Response({'error': 'Cycle Name cannot contain special characters!'}, status=status.HTTP_400_BAD_REQUEST)
-
-#         # Check if the menu already exists for the given school, cycle name
-#         if school_type == 'primary':
-#             if Menu.objects.filter(cycle_name=cycle_name, primary_school__id=school_id).exists():
-#                 return Response({'error': f'Menu with cycle name "{cycle_name}" already exists for Primary School with school ID {school_id}.'}, status=status.HTTP_400_BAD_REQUEST)
-#         elif school_type == 'secondary':
-#             if Menu.objects.filter(cycle_name=cycle_name, secondary_school__id=school_id).exists():
-#                 return Response({'error': f'Menu with cycle name "{cycle_name}" already exists for Secondary School with school ID {school_id}.'}, status=status.HTTP_400_BAD_REQUEST)
-
-#         # Get the school object based on the school type
-#         school_model = PrimarySchool if school_type == 'primary' else SecondarySchool
-#         school = school_model.objects.filter(id=school_id).first()
-
-#         if not school:
-#             return Response({'error': f'{school_type.capitalize()} School not found'}, status=status.HTTP_404_NOT_FOUND)
-        
-#         created_menus = []
-
-#         # Loop over each day of the week
-#         days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
-#         for day in days:
-#             # Retrieve the category, item names, and prices for each day
-#             categories = request.data.get(f'category_{day}')
-#             item_names = request.data.get(f'item_names_{day}')
-#             prices = request.data.get(f'price_{day}')
-            
-#             # Ensure all fields are included for each day
-#             if not all([categories, item_names, prices]):
-#                 return Response({'error': f'Missing data for {day}. Ensure all fields are included.'}, status=status.HTTP_400_BAD_REQUEST)
-
-#             # Loop through categories, item names, and prices to create the menu items
-#             for category_id, item_name, price in zip(categories, item_names, prices):
-                
-#                 try:
-#                     price = float(price)
-#                     if price < 0:
-#                         raise ValueError
-#                 except ValueError:
-#                     return Response({'error': f'Invalid price for {item_name} on {day}.'}, status=status.HTTP_400_BAD_REQUEST)
-
-#                 # Get the category object
-#                 category = Categories.objects.filter(id=category_id).first()
-#                 if not category:
-#                     return Response({'error': f'Category with ID {category_id} does not exist.'}, status=status.HTTP_404_NOT_FOUND)
-
-#                 is_active_time = datetime.now()  # Track when the menu becomes active
-                
-#                 # Prepare the data for menu creation
-#                 menu_data = {
-#                     'name': item_name,
-#                     'price': price,
-#                     'menu_day': day,
-#                     'cycle_name': cycle_name,
-#                     'menu_date': menu_date,
-#                     'category': category.id,
-#                     'is_active_time': is_active_time,
-#                 }
-
-#                 # Assign the correct school based on the school type
-#                 if school_type == 'primary':
-#                     menu_data['primary_school'] = school  # Pass the PrimarySchool object, not just the ID
-#                     menu_data['secondary_school'] = None  # Set secondary school to None
-#                 elif school_type == 'secondary':
-#                     menu_data['secondary_school'] = school  # Pass the SecondarySchool object, not just the ID
-#                     menu_data['primary_school'] = None  # Set primary school to None
-
-#                 # Serialize the menu data
-#                 menu_serializer = MenuSerializer(data=menu_data)
-#                 if not menu_serializer.is_valid():
-#                     return Response(menu_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-                
-#                 # Save the menu instance and add to created_menus list
-#                 menu_instance = menu_serializer.save()
-#                 created_menus.append({
-#                     'id': menu_instance.id,
-#                     'name': menu_instance.name,
-#                     'price': str(menu_instance.price),
-#                     'menu_day': menu_instance.menu_day,
-#                     'menu_date': str(menu_instance.menu_date),
-#                     'cycle_name': menu_instance.cycle_name,
-#                     'is_active': menu_instance.is_active  
-#                 })
-        
-#         return Response({
-#             'message': 'Menus created successfully!',
-#             'menus': created_menus
-#         }, status=status.HTTP_201_CREATED)
 @api_view(['POST'])
 def add_menu(request):
     school_id = request.data.get('school_id')
@@ -997,11 +821,9 @@ def add_menu(request):
     cycle_name = request.data.get('cycle_name')
     menu_date = datetime.now().date()  
 
-    # Validate cycle_name for special characters
     if not cycle_name.isalnum() and " " not in cycle_name:
         return Response({'error': 'Cycle Name cannot contain special characters!'}, status=status.HTTP_400_BAD_REQUEST)
 
-    # Validate school based on school type
     if school_type == 'primary':
         try:
             school = PrimarySchool.objects.get(id=school_id)
@@ -1015,7 +837,7 @@ def add_menu(request):
     else:
         return Response({'error': 'Invalid school type'}, status=status.HTTP_400_BAD_REQUEST)
 
-    # Check if the cycle name already exists for the same school
+  
     if school_type == 'primary':
         if Menu.objects.filter(primary_school=school, cycle_name=cycle_name).exists():
             return Response({'error': 'A menu with the same cycle name already exists for this school.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -1026,22 +848,19 @@ def add_menu(request):
     days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
     created_menus = []
 
-    # Iterate over each day to save menu items
+   
     for day in days:
-        # Get the categories, item names, and prices for the day
+        
         categories = request.data.get(f'category_{day}')
         item_names = request.data.get(f'item_names_{day}')
         prices = request.data.get(f'price_{day}')
 
-        # Ensure the categories, item names, and prices are lists and not None
         if not isinstance(categories, list) or not isinstance(item_names, list) or not isinstance(prices, list):
             return Response({'error': f'Invalid data format for {day}. Expecting lists of categories, item names, and prices.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Ensure all lists have the same length
         if len(categories) != len(item_names) or len(item_names) != len(prices):
             return Response({'error': f'Inconsistent data length for {day}. Categories, item names, and prices must have the same number of items.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Process each menu item for the day
         for category_id, menu_name, price in zip(categories, item_names, prices):
             if not category_id or not menu_name or not price:
                 return Response({'error': f'Incomplete data for {day}. Ensure all fields are filled.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -1073,101 +892,7 @@ def add_menu(request):
             created_menus.append(MenuSerializer(menu).data)
 
     return Response({'message': 'Menus created successfully!', 'menus': created_menus}, status=status.HTTP_201_CREATED)
-# @api_view(['POST'])
-# def add_menu(request):
-#     if request.method == 'POST':
-        
-#         school_id = request.data.get('school_id')
-#         school_type = request.data.get('school_type')
-#         cycle_name = request.data.get('cycle_name') 
-#         menu_date = datetime.now().date()  
 
-#         # Validate cycle_name (ensure it doesn't contain special characters)
-#         if not cycle_name.isalnum() and " " not in cycle_name:
-#             return Response({'error': 'Cycle Name cannot contain special characters!'}, status=status.HTTP_400_BAD_REQUEST)
-        
-#         # Ensure the same cycle name doesn't already exist for the same school
-#         if school_type == 'primary':
-#             if Menu.objects.filter(cycle_name=cycle_name, primary_school__id=school_id).exists():
-#                 return Response({'error': f'Menu with cycle name "{cycle_name}" already exists for Primary School with school ID {school_id}.'}, status=status.HTTP_400_BAD_REQUEST)
-#         elif school_type == 'secondary':
-#             if Menu.objects.filter(cycle_name=cycle_name, secondary_school__id=school_id).exists():
-#                 return Response({'error': f'Menu with cycle name "{cycle_name}" already exists for Secondary School with school ID {school_id}.'}, status=status.HTTP_400_BAD_REQUEST)
-
-#         # Get the school object based on the school type
-#         school_model = PrimarySchool if school_type == 'primary' else SecondarySchool
-#         school = school_model.objects.filter(id=school_id).first()
-
-#         if not school:
-#             return Response({'error': f'{school_type.capitalize()} School not found'}, status=status.HTTP_404_NOT_FOUND)
-        
-#         created_menus = []
-
-#         # Loop over each day of the week
-#         days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
-#         for day in days:
-#             categories = request.data.get(f'category_{day}')
-#             item_names = request.data.get(f'item_names_{day}')
-#             prices = request.data.get(f'price_{day}')
-            
-#             # Ensure all fields are included for each day
-#             if not all([categories, item_names, prices]):
-#                 return Response({'error': f'Missing data for {day}. Ensure all fields are included.'}, status=status.HTTP_400_BAD_REQUEST)
-
-#             for category_id, item_name, price in zip(categories, item_names, prices):
-                
-#                 try:
-#                     price = float(price)
-#                     if price < 0:
-#                         raise ValueError
-#                 except ValueError:
-#                     return Response({'error': f'Invalid price for {item_name} on {day}.'}, status=status.HTTP_400_BAD_REQUEST)
-
-#                 category = Categories.objects.filter(id=category_id).first()
-#                 if not category:
-#                     return Response({'error': f'Category with ID {category_id} does not exist.'}, status=status.HTTP_404_NOT_FOUND)
-
-#                 is_active_time = datetime.now()  # Track when the menu becomes active
-                
-#                 # Prepare the data for menu creation
-#                 menu_data = {
-#                     'name': item_name,
-#                     'price': price,
-#                     'menu_day': day,
-#                     'cycle_name': cycle_name,
-#                     'menu_date': menu_date,
-#                     'category': category.id,
-#                     'is_active_time': is_active_time,  
-#                 }
-
-#                 # Assign the correct school based on the school type
-#                 if school_type == 'primary':
-#                     menu_data['primary_school'] = school  # Assign the primary school object
-#                     menu_data['secondary_school'] = None  # Set secondary school to None
-#                 elif school_type == 'secondary':
-#                     menu_data['secondary_school'] = school  # Assign the secondary school object
-#                     menu_data['primary_school'] = None  # Set primary school to None
-
-
-#                 menu_serializer = MenuSerializer(data=menu_data)
-#                 if not menu_serializer.is_valid():
-#                     return Response(menu_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-                
-#                 menu_instance = menu_serializer.save()
-#                 created_menus.append({
-#                     'id': menu_instance.id,
-#                     'name': menu_instance.name,
-#                     'price': str(menu_instance.price),
-#                     'menu_day': menu_instance.menu_day,
-#                     'menu_date': str(menu_instance.menu_date),
-#                     'cycle_name': menu_instance.cycle_name,
-#                     'is_active': menu_instance.is_active  
-#                 })
-        
-#         return Response({
-#             'message': 'Menus created successfully!',
-#             'menus': created_menus
-#         }, status=status.HTTP_201_CREATED)
 @api_view(['POST'])
 def activate_cycle(request):
     if request.method == 'POST':
@@ -1177,50 +902,44 @@ def activate_cycle(request):
         start_date = request.data.get('start_date')
         end_date = request.data.get('end_date')
 
-        # Validate cycle_name for special characters
+       
         if not cycle_name.isalnum() and " " not in cycle_name:
             return Response({'error': 'Cycle Name cannot contain special characters!'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Convert start_date and end_date to datetime
         try:
             start_date = datetime.strptime(start_date, '%Y-%m-%d').date() if start_date else None
             end_date = datetime.strptime(end_date, '%Y-%m-%d').date() if end_date else None
         except ValueError:
             return Response({'error': 'Invalid date format. Use YYYY-MM-DD.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Get school based on school_type
+      
         school_model = PrimarySchool if school_type == 'primary' else SecondarySchool
         school = school_model.objects.filter(id=school_id).first()
 
         if not school:
             return Response({'error': f'{school_type.capitalize()} School not found'}, status=status.HTTP_404_NOT_FOUND)
 
-        # Deactivate the currently active cycle for the same school (if any)
         Menu.objects.filter(
             primary_school=school if school_type == 'primary' else None,
-            secondary_school=school if school_type == 'secondary' else None,
-            is_active_time__isnull=False  # This field is being used to track active status
-        ).update(is_active_time=None, end_date=datetime.today().date())  # Mark as inactive by nullifying is_active_time
-
-        # Get menus for the new cycle
+            secondary_school=school if school_type == 'secondary' else None
+        ).update(is_active_time=None, end_date=datetime.today().date()) 
+        
         menus = Menu.objects.filter(
             cycle_name=cycle_name,
             primary_school=school if school_type == 'primary' else None,
             secondary_school=school if school_type == 'secondary' else None
         )
 
-        # If no menus are found for the specified cycle
         if not menus:
             return Response({'error': f'No menus found for cycle "{cycle_name}" in the specified school.'}, status=status.HTTP_404_NOT_FOUND)
 
-        # Activate the new cycle
+       
         updated_menus = []
         for menu in menus:
             menu.start_date = start_date
             menu.end_date = end_date
-            menu.is_active_time = datetime.today()  # Mark as active by setting current time
-            menu.save()  # Save the updated menu
-
+            menu.is_active_time = datetime.now() 
+            menu.save()  
             updated_menus.append({
                 'id': menu.id,
                 'name': menu.name,
@@ -1229,13 +948,15 @@ def activate_cycle(request):
                 'cycle_name': menu.cycle_name,
                 'start_date': str(menu.start_date),
                 'end_date': str(menu.end_date),
-                'is_active': True  # Since the current time is set, it implies the cycle is active
+                'is_active': menu.is_active  
             })
 
         return Response({
             'message': f'Cycle "{cycle_name}" activated successfully!',
             'menus': updated_menus
         }, status=status.HTTP_200_OK)
+
+     
 
 
 #
@@ -1547,40 +1268,57 @@ def update_menu_items(request, pk):
 @csrf_exempt
 @api_view(['GET'])
 def view_students(request):
-    search_query = request.query_params.get('search', None) 
+    search_query = request.query_params.get('search', None)
 
     try:
-    
+        
         primary_students = PrimaryStudentsRegister.objects.all()
         secondary_students = SecondaryStudent.objects.all()
+
         if search_query:
             primary_students = primary_students.filter(
                 student_name__icontains=search_query) | primary_students.filter(
-                class_year__icontains=search_query)  
+                class_year__icontains=search_query)
             secondary_students = secondary_students.filter(
                 secondary_student_name__icontains=search_query) | secondary_students.filter(
-                secondary_class_year__icontains=search_query) 
+                secondary_class_year__icontains=search_query)
 
     except Exception as e:
         return Response({'error': str(e)}, status=status.HTTP_404_NOT_FOUND)
 
-   
+    
     primary_students_serializer = PrimaryStudentSerializer(primary_students, many=True)
-    secondary_students_serializer = SecondaryStudentSerializer(secondary_students, many=True)
     primary_students_data = primary_students_serializer.data
+
     for student in primary_students_data:
         student['school_type'] = 'Primary'
-        
 
+        if student.get('parent'):
+            parent = ParentRegisteration.objects.get(id=student['parent'])
+            student['email'] = parent.email if parent else None
+        else:
+            staff = StaffRegisteration.objects.get(id=student['staff']) if student.get('staff') else None
+            student['email'] = staff.email if staff else None
+
+   
+    secondary_students_serializer = SecondaryStudentSerializer(secondary_students, many=True)
     secondary_students_data = secondary_students_serializer.data
+
     for student in secondary_students_data:
         student['school_type'] = 'Secondary'
-       
+
+        if student.get('parent'):
+            parent = ParentRegisteration.objects.get(id=student['parent'])
+            student['email'] = parent.email if parent else None
+        else:
+            staff = StaffRegisteration.objects.get(id=student['staff']) if student.get('staff') else None
+            student['email'] = staff.email if staff else None
 
     return Response({
         'primary_students': primary_students_data,
         'secondary_students': secondary_students_data
     }, status=status.HTTP_200_OK)
+
 
 
 
