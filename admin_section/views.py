@@ -579,38 +579,48 @@ def update_delete_teacher(request, school_id, teacher_id):
 
 
 # For Primary School Student
-@api_view(['GET','POST'])
-def get_student_detail(request, school_id,):
+@api_view(['GET', 'POST'])
+def get_student_detail(request, school_id):
+  
     school = get_object_or_404(PrimarySchool, pk=school_id)
    
     if request.method == 'GET':
-       student = PrimaryStudentsRegister.objects.filter(school=school)
-       student_serializer = PrimaryStudentSerializer(student, many=True)
-       return Response(student_serializer.data, status=status.HTTP_200_OK)
+      
+        students = PrimaryStudentsRegister.objects.filter(school=school)
+        student_serializer = PrimaryStudentSerializer(students, many=True)
+        return Response(student_serializer.data, status=status.HTTP_200_OK)
 
     elif request.method == 'POST':
-        student_name = request.data.get('student_name')
+     
+        first_name = request.data.get('first_name')
+        last_name = request.data.get('last_name')
         class_year = request.data.get('class_year')
         teacher_id = request.data.get('teacher_id')
 
-        teacher=get_object_or_404(Teacher,pk=teacher_id)
+      
+        teacher = get_object_or_404(Teacher, pk=teacher_id)
+
+     
         new_student = PrimaryStudentsRegister(
-            username=student_name,
+            first_name=first_name,
+            last_name=last_name,
             class_year=class_year,
             school=school,
             teacher=teacher
         )
+        
+      
         new_student.save()
+
+       
         student_serializer = PrimaryStudentSerializer(new_student)
         return Response(student_serializer.data, status=status.HTTP_201_CREATED)
 
 @api_view(['GET', 'PUT', 'DELETE'])
 def update_delete_student(request, school_id, student_id):
-   
     school = get_object_or_404(PrimarySchool, pk=school_id)
     student = get_object_or_404(PrimaryStudentsRegister, pk=student_id, school=school)
 
-    
     def exclude_password(data):
         if 'password' in data:
             data.pop('password')
@@ -619,32 +629,41 @@ def update_delete_student(request, school_id, student_id):
    
     if request.method == 'GET':
         student_serializer = PrimaryStudentSerializer(student)
-        student_data = exclude_password(student_serializer.data)  # Exclude password from response
+        student_data = exclude_password(student_serializer.data)  
         return Response(student_data, status=status.HTTP_200_OK)
 
- 
     elif request.method == 'PUT':
-        student_name = request.data.get('student_name', student.student_name)
+      
+        first_name = request.data.get('first_name', student.first_name)
+        last_name = request.data.get('last_name', student.last_name)
         class_year = request.data.get('class_year', student.class_year)
-        teacher = request.data.get('teacher', student.teacher)
+        teacher_id = request.data.get('teacher', None)
 
-    
-        student.student_name = student_name
+     
+        if teacher_id:
+            teacher = get_object_or_404(Teacher, pk=teacher_id)
+            student.teacher = teacher
+
+        student.first_name = first_name
+        student.last_name = last_name
         student.class_year = class_year
-        student.teacher = teacher
+
         
-    
         password = request.data.get('password', None)
         if password:
-            student.set_password(password) 
+            student.set_password(password)
 
+       
         student.save()
 
         student_serializer = PrimaryStudentSerializer(student)
-        student_data = exclude_password(student_serializer.data)  # Exclude password from response
+        student_data = exclude_password(student_serializer.data)
         return Response(student_data, status=status.HTTP_200_OK)
 
-    # Handling DELETE request
+    elif request.method == 'DELETE':
+        student.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)     
+
     elif request.method == 'DELETE':
         student.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
@@ -1271,7 +1290,6 @@ def view_students(request):
     search_query = request.query_params.get('search', None)
 
     try:
-        
         primary_students = PrimaryStudentsRegister.objects.all()
         secondary_students = SecondaryStudent.objects.all()
 
@@ -1286,7 +1304,6 @@ def view_students(request):
     except Exception as e:
         return Response({'error': str(e)}, status=status.HTTP_404_NOT_FOUND)
 
-    
     primary_students_serializer = PrimaryStudentSerializer(primary_students, many=True)
     primary_students_data = primary_students_serializer.data
 
@@ -1300,19 +1317,25 @@ def view_students(request):
             staff = StaffRegisteration.objects.get(id=student['staff']) if student.get('staff') else None
             student['email'] = staff.email if staff else None
 
-   
     secondary_students_serializer = SecondaryStudentSerializer(secondary_students, many=True)
     secondary_students_data = secondary_students_serializer.data
 
     for student in secondary_students_data:
         student['school_type'] = 'Secondary'
 
+       
         if student.get('parent'):
-            parent = ParentRegisteration.objects.get(id=student['parent'])
-            student['email'] = parent.email if parent else None
-        else:
-            staff = StaffRegisteration.objects.get(id=student['staff']) if student.get('staff') else None
-            student['email'] = staff.email if staff else None
+            try:
+                parent = ParentRegisteration.objects.get(id=student['parent'])
+                student['email'] = parent.email if parent else student.get('email')
+            except ParentRegisteration.DoesNotExist:
+                pass
+        elif student.get('staff'):
+            try:
+                staff = StaffRegisteration.objects.get(id=student['staff'])
+                student['email'] = staff.email if staff else student.get('email')
+            except StaffRegisteration.DoesNotExist:
+                pass
 
     return Response({
         'primary_students': primary_students_data,
