@@ -49,7 +49,7 @@ urlpatterns = [
     path("add_menu_item/",views.add_menu_item,name='add_menu_item'),
     path("get_menu_items/",views.get_menu_items,name='get_menu_items'),
     path('update_menu_items/<int:pk>/', views.update_menu_items, name='update_menu_items'),
-    path("get_active_menu/<str:school_type>/<int:school_id>/",views.get_active_menu,name='get_active_menu'),
+    path("get_active_menu/",views.get_active_menu,name='get_active_menu'),
 
     # View Registered Students
     path("view_students/",views.view_students,name='view_students'),

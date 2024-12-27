@@ -15,6 +15,9 @@ from django.conf import settings
 from django.contrib.auth.hashers import make_password
 from .models import *
 from django.db.models import Min
+from django.db.models import Case, When, Value, BooleanField
+from django.db.models.functions import Now
+
 # Create your views here.
 @api_view(["POST"])
 def register(request):
@@ -1078,79 +1081,114 @@ def get_complete_menu(request):
 
     return Response({'error': 'Invalid request method.'}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
-@api_view(["GET"])
-def get_active_menu(request, school_type, school_id):
-    today = timezone.now().date()  # Get today's date
+@api_view(["POST"])
+def get_active_menu(request):
+    school_type = request.data.get('school_type')
+    school_id = request.data.get('school_id')
 
-    if school_type == 'primary':
-        try:
+    if not school_type or not school_id:
+        return Response({"detail": "Both 'school_type' and 'school_id' must be provided."},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    today = timezone.now().date()  
+
+    try:
+        if school_type == 'primary':
            
             menus = Menu.objects.filter(
                 primary_school_id=school_id,
                 start_date__lte=today,
                 end_date__gte=today
-            ).select_related('category', 'primary_school').all()
-
-          
+            ).select_related('category', 'primary_school')  
+            
+            
             subquery = Menu.objects.filter(
                 primary_school_id=school_id,
                 start_date__lte=today,
                 end_date__gte=today
-            ).values('cycle_name').annotate(id=Min('id')).distinct()
-            cycles = list(subquery)
+            ).values('cycle_name').distinct()
 
-          
-            menus_data = MenuSerializer(menus, many=True).data
+        elif school_type == 'secondary':
+         
+            menus = Menu.objects.filter(
+                secondary_school_id=school_id,
+                start_date__lte=today,
+                end_date__gte=today
+            ).select_related('category', 'secondary_school') 
+            
+           
+            subquery = Menu.objects.filter(
+                secondary_school_id=school_id,
+                start_date__lte=today,
+                end_date__gte=today
+            ).values('cycle_name').distinct()
 
-            weekly_menu = {
-                "Monday": [],
-                "Tuesday": [],
-                "Wednesday": [],
-                "Thursday": [],
-                "Friday": [],
-                "Saturday": [],
-                "Sunday": []
-            }
+        else:
+            return Response({"detail": "Invalid school type. Please provide either 'primary' or 'secondary'."},
+                            status=status.HTTP_400_BAD_REQUEST)
 
-            # Organize the menus by day of the week and manually add category_name
-            for menu in menus_data:
-                if menu['is_active']:  # Only include active menus
-                    day_of_week = menu.get('menu_day')
-                    if day_of_week in weekly_menu:
-                        primary_school_name = menu.get('primary_school_name', None)
-                        category_name = None
-                      
-                        if isinstance(menu['category'], int):  
-                            category_obj = Categories.objects.get(id=menu['category'])
-                            category_name = category_obj.name_category
-                        elif isinstance(menu['category'], dict):  
-                            category_name = menu['category'].get('name_category')
+        
+        active_menus = [menu for menu in menus if menu.is_active]
 
-                        weekly_menu[day_of_week].append({
-                            "name": menu['name'],
-                            "price": menu['price'],
-                            "menu_date": menu['menu_date'],
-                            "cycle_name": menu['cycle_name'],
-                            "category": category_name,  
-                            "is_active": menu['is_active'],  
-                            "primary_school": primary_school_name
-                        })
+        active_cycles = [
+            {"cycle": cycle['cycle_name']} 
+            for cycle in subquery 
+            if any(menu.cycle_name == cycle['cycle_name'] for menu in active_menus)
+        ]
 
-            cycles_list = [
-                {"cycle": cycle['cycle_name'], 'id': cycle['id']} for cycle in cycles
-            ]
+        
+        menus_data = MenuSerializer(active_menus, many=True).data
 
-            return Response({
-                "menus": weekly_menu,
-                "cycles": cycles_list
-            }, status=status.HTTP_200_OK)
+        
+        weekly_menu = {
+            "Monday": [],
+            "Tuesday": [],
+            "Wednesday": [],
+            "Thursday": [],
+            "Friday": [],
+            "Saturday": [],
+            "Sunday": []
+        }
 
-        except PrimarySchool.DoesNotExist:
-            return Response({"detail": "Primary school not found."}, status=status.HTTP_404_NOT_FOUND)
+        
+        for menu in menus_data:
+            day_of_week = menu.get('menu_day')
+            if day_of_week in weekly_menu:
+                if school_type == 'primary':
+                   
+                    primary_school_name = menu.get('primary_school', {}).get('name', None)
+                    category_name = menu.get('category', None)
+                    weekly_menu[day_of_week].append({
+                        "name": menu['name'],
+                        "price": menu['price'],
+                        "menu_date": menu['menu_date'],
+                        "cycle_name": menu['cycle_name'],
+                        "category": category_name,
+                        "is_active": menu['is_active'],
+                        
+                    })
+                elif school_type == 'secondary':
+                   
+                    secondary_school_name = menu.get('secondary_school', {}).get('name', None)
+                    category_name = menu.get('category', None)
+                    weekly_menu[day_of_week].append({
+                        "name": menu['name'],
+                        "price": menu['price'],
+                        "menu_date": menu['menu_date'],
+                        "cycle_name": menu['cycle_name'],
+                        "category": category_name,
+                        "is_active": menu['is_active'],
+                        
+                    })
 
-    else:
-        return Response({"detail": "Invalid school type. Please provide either 'primary' or 'secondary'."},
-                        status=status.HTTP_400_BAD_REQUEST)
+        return Response({
+            "menus": weekly_menu,
+            "cycles": active_cycles
+        }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
 
 
