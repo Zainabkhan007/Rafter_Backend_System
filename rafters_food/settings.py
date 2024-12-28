@@ -102,7 +102,12 @@ CORS_ALLOW_METHODS = [
 ]
 CORS_ALLOW_CREDENTIALS = True
 ROOT_URLCONF = 'rafters_food.urls'
-
+SECURE_SSL_REDIRECT = True  # Redirect HTTP to HTTPS
+SECURE_HSTS_SECONDS = 3600  # HTTP Strict Transport Security (HSTS)
+SECURE_HSTS_INCLUDE_SUBDOMAINS = True  # Apply HSTS to all subdomains
+SECURE_HSTS_PRELOAD = True  # Preload HSTS in browsers
+SECURE_BROWSER_XSS_FILTER = True
+SECURE_CONTENT_TYPE_NOSNIFF = True
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
