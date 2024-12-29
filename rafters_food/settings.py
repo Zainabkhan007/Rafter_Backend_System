@@ -42,7 +42,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'django_rest_passwordreset',
     'admin_section',
-    'whitenoise',
+    'whitenoise.runserver_nostatic',
     'corsheaders',
 
 ]
