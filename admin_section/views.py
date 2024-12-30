@@ -6,6 +6,10 @@ from .serializers import *
 from django.views.decorators.csrf import csrf_exempt
 from django.shortcuts import get_object_or_404
 from rest_framework.filters import SearchFilter
+from io import BytesIO
+
+from datetime import datetime
+from django.http import HttpResponse
 from django.db.models import Count
 from rest_framework.exceptions import NotFound
 import calendar
@@ -14,11 +18,10 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from django.conf import settings
 from django.contrib.auth.hashers import make_password
 from .models import *
-from django.db.models import Min
-from django.db.models import Case, When, Value, BooleanField
+
 from django.db.models.functions import Now
 
-# Create your views here.
+
 @api_view(["POST"])
 def register(request):
     user_type = request.data.get('user_type')
@@ -28,6 +31,7 @@ def register(request):
     if not email:
         return Response({"error": "Email is required."}, status=status.HTTP_400_BAD_REQUEST)
 
+   
     if StaffRegisteration.objects.filter(email=email).exists():
         return Response({"error": "Email already registered as staff."}, status=status.HTTP_400_BAD_REQUEST)
     if ParentRegisteration.objects.filter(email=email).exists():
@@ -37,39 +41,49 @@ def register(request):
     if CanteenStaff.objects.filter(email=email).exists():
         return Response({"error": "Email already registered as canteen."}, status=status.HTTP_400_BAD_REQUEST)
 
-   
-    school_id = request.data.get('school_id')
-    school_type = request.data.get('school_type') 
-    school = None
-
-    
-    valid_school_types = ['secondary', 'primary']
-
-    if school_id:
-        try:
-            school = SecondarySchool.objects.get(id=school_id)
-        except SecondarySchool.DoesNotExist:
-            return Response({"error": "School with this ID does not exist."}, status=status.HTTP_400_BAD_REQUEST)
-
-     
-        if school_type and school_type not in valid_school_types:
-            return Response({"error": "Invalid school type provided."}, status=status.HTTP_400_BAD_REQUEST)
-    else:
-        return Response({"error": "School ID is required."}, status=status.HTTP_400_BAD_REQUEST)
-
   
+    school_id = None
+    school_type = None
+    if user_type in ['student', 'staff']:
+        school_id = request.data.get('school_id')
+        school_type = request.data.get('school_type')
+    
+   
+    if user_type in ['student', 'staff'] and (not school_id or not school_type):
+        return Response({"error": "School ID and school type are required for staff and student."}, status=status.HTTP_400_BAD_REQUEST)
+
+    valid_school_types = ['primary', 'secondary']
+    if school_type and school_type not in valid_school_types:
+        return Response({"error": "Invalid school type provided."}, status=status.HTTP_400_BAD_REQUEST)
+
+    school = None
+    if school_type and school_id:
+        if school_type == "primary":
+            try:
+                school = PrimarySchool.objects.get(id=school_id)
+            except PrimarySchool.DoesNotExist:
+                return Response({"error": "Primary school with this ID does not exist."}, status=status.HTTP_400_BAD_REQUEST)
+        elif school_type == "secondary":
+            try:
+                school = SecondarySchool.objects.get(id=school_id)
+            except SecondarySchool.DoesNotExist:
+                return Response({"error": "Secondary school with this ID does not exist."}, status=status.HTTP_400_BAD_REQUEST)
+    
+   
     if user_type == "parent":
         serializer = ParentRegisterationSerializer(data=request.data)
     elif user_type == "student":
-      
-        request.data['school'] = school.id
+        if school:
+            request.data['secondary_school'] = school.id  
         serializer = SecondaryStudentSerializer(data=request.data)
     elif user_type == "staff":
-      
-        request.data['school'] = school.id
+        if school:
+            if school_type == "primary":
+                request.data['primary_school'] = school.id  
+            elif school_type == "secondary":
+                request.data['secondary_school'] = school.id  
         serializer = StaffRegisterationSerializer(data=request.data)
     elif user_type == "canteenstaff":
-  
         serializer = CanteenStaffSerializer(data=request.data)
     else:
         return Response({"error": "Invalid user type"}, status=status.HTTP_400_BAD_REQUEST)
@@ -77,21 +91,23 @@ def register(request):
     password = request.data.get('password')
     password_confirmation = request.data.get('password_confirmation')
 
+    
     if password != password_confirmation:
         return Response({"error": "Passwords do not match."}, status=status.HTTP_400_BAD_REQUEST)
 
-  
     allergies = request.data.get('allergies', [])
     for allergy in allergies:
         if not Allergens.objects.filter(allergy=allergy).exists():
             return Response({"error": f"Allergen '{allergy}' does not exist in the database."}, status=status.HTTP_400_BAD_REQUEST)
 
- 
+    
     if serializer.is_valid():
         serializer.save()
         return Response(serializer.data, status=status.HTTP_201_CREATED)
     else:
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
 
 
 
@@ -915,36 +931,47 @@ def add_menu(request):
 
     return Response({'message': 'Menus created successfully!', 'menus': created_menus}, status=status.HTTP_201_CREATED)
 
+
 @api_view(['POST'])
 def activate_cycle(request):
     if request.method == 'POST':
         school_id = request.data.get('school_id')
         school_type = request.data.get('school_type')
         cycle_name = request.data.get('cycle_name')
-        start_date = request.data.get('start_date')
-        end_date = request.data.get('end_date')
+        start_datetime = request.data.get('start_datetime')  
+        end_datetime = request.data.get('end_datetime')
 
-       
+      
         if not cycle_name.isalnum() and " " not in cycle_name:
             return Response({'error': 'Cycle Name cannot contain special characters!'}, status=status.HTTP_400_BAD_REQUEST)
 
-        try:
-            start_date = datetime.strptime(start_date, '%Y-%m-%d').date() if start_date else None
-            end_date = datetime.strptime(end_date, '%Y-%m-%d').date() if end_date else None
-        except ValueError:
-            return Response({'error': 'Invalid date format. Use YYYY-MM-DD.'}, status=status.HTTP_400_BAD_REQUEST)
-
       
+        try:
+            if start_datetime:
+                start_datetime = datetime.strptime(start_datetime, '%Y-%m-%d %I:%M %p')  
+            else:
+                start_datetime = None  
+            
+            if end_datetime:
+                end_datetime = datetime.strptime(end_datetime, '%Y-%m-%d %I:%M %p')  
+            else:
+                end_datetime = None  
+        except ValueError:
+            return Response({'error': 'Invalid datetime format. Use YYYY-MM-DD HH:MM AM/PM.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    
         school_model = PrimarySchool if school_type == 'primary' else SecondarySchool
         school = school_model.objects.filter(id=school_id).first()
 
         if not school:
             return Response({'error': f'{school_type.capitalize()} School not found'}, status=status.HTTP_404_NOT_FOUND)
 
+        # Deactivate previous menus for the school and cycle
         Menu.objects.filter(
             primary_school=school if school_type == 'primary' else None,
             secondary_school=school if school_type == 'secondary' else None
-        ).update(is_active_time=None, end_date=datetime.today().date()) 
+        ).update(is_active_time=None, end_date=datetime.today().date())
+
         
         menus = Menu.objects.filter(
             cycle_name=cycle_name,
@@ -955,30 +982,38 @@ def activate_cycle(request):
         if not menus:
             return Response({'error': f'No menus found for cycle "{cycle_name}" in the specified school.'}, status=status.HTTP_404_NOT_FOUND)
 
-       
         updated_menus = []
         for menu in menus:
-            menu.start_date = start_date
-            menu.end_date = end_date
-            menu.is_active_time = datetime.now() 
-            menu.save()  
+            
+            if start_datetime:
+                menu.start_date = start_datetime.date()  
+            if end_datetime:
+                menu.end_date = end_datetime.date()  
+
+            menu.is_active_time = datetime.now()  
+            menu.save()
+
+        
+            start_time = start_datetime.strftime('%I:%M %p') if start_datetime else None
+            end_time = end_datetime.strftime('%I:%M %p') if end_datetime else None
+
             updated_menus.append({
                 'id': menu.id,
                 'name': menu.name,
                 'price': str(menu.price),
                 'menu_day': menu.menu_day,
                 'cycle_name': menu.cycle_name,
-                'start_date': str(menu.start_date),
-                'end_date': str(menu.end_date),
-                'is_active': menu.is_active  
+                'start_date': str(menu.start_date) if menu.start_date else None,
+                'start_time': start_time,  
+                'end_date': str(menu.end_date) if menu.end_date else None,
+                'end_time': end_time,  
+                'is_active': menu.is_active
             })
 
         return Response({
             'message': f'Cycle "{cycle_name}" activated successfully!',
             'menus': updated_menus
         }, status=status.HTTP_200_OK)
-
-     
 
 
 #
@@ -1273,7 +1308,82 @@ def get_cycle_names(request):
         'cycle_names': cycle_names
     }, status=status.HTTP_200_OK)
 
+@api_view(['GET'])
+def export_orders_to_excel(request):
+    # Fetch all orders or filter based on any conditions
+    orders = Order.objects.all()
 
+    data = []
+
+    for order in orders:
+        # Extract user information based on the user type
+        if order.user_type == "parent" and order.primary_school_student:
+            name = f"{order.primary_school_student.parent.first_name} {order.primary_school_student.parent.last_name}"
+            child_name = f"{order.primary_school_student.first_name} {order.primary_school_student.last_name}"
+            phone = order.primary_school_student.parent.phone
+            email = order.primary_school_student.parent.email
+            class_year = order.primary_school_student.class_year
+            school_name = order.primary_school_student.primary_school.name
+            user_type = "Parent"
+
+        elif order.user_type == "staff" and order.primary_school_student:
+            name = f"{order.primary_school_student.staff.first_name} {order.primary_school_student.staff.last_name}"
+            child_name = f"{order.primary_school_student.first_name} {order.primary_school_student.last_name}"
+            phone = order.primary_school_student.staff.phone
+            email = order.primary_school_student.staff.email
+            class_year = order.primary_school_student.class_year
+            school_name = order.primary_school_student.primary_school.name
+            user_type = "Staff"
+
+        elif order.user_type == "student" and order.student:
+            name = f"{order.student.first_name} {order.student.last_name}"
+            phone = order.student.phone
+            email = order.student.email
+            class_year = order.student.class_year
+            school_name = order.student.school.name
+            child_name = "N/A"  # No child info for students
+            user_type = "Student"
+        else:
+            name = "N/A"
+            child_name = "N/A"
+            phone = "N/A"
+            email = "N/A"
+            class_year = "N/A"
+            school_name = "N/A"
+            user_type = "N/A"
+
+        # Extract item information
+        items_info = [f"{item.menu_item.name} (x{item.quantity})" for item in order.items.all()]
+
+        # Append each order's data
+        data.append({
+            'Order ID': order.id,
+            'Name': name,
+            'User Type': user_type,
+            'Child Name': child_name,
+            'Phone Number': phone,
+            'Email': email,
+            'School Name': school_name,
+            'Class Year': class_year,
+            'Order Date': order.order_date.strftime('%Y-%m-%d'),
+            'Selected Day': order.selected_day,
+            'Items': ', '.join(items_info),
+            'Total Price (€)': order.total_price,
+        })
+
+    # Convert to a pandas DataFrame
+    df = pd.DataFrame(data)
+
+    # Create an Excel file in memory
+    output = BytesIO()
+    df.to_excel(output, index=False, sheet_name='Orders')  # Specify sheet name
+    output.seek(0)
+
+    # Return the file as a downloadable response
+    response = HttpResponse(output, content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    response['Content-Disposition'] = 'attachment; filename=orders.xlsx'
+    
+    return response
 @csrf_exempt
 @api_view(['POST'])
 def add_menu_item(request):
@@ -1495,7 +1605,7 @@ def create_order(request):
                 order_items.append(order_item)
                 order_total_price += item_price * item['quantity']
 
-                # Update the total price for the order
+                
                 order_instance.total_price = order_total_price
                 order_instance.save()
 
@@ -1580,93 +1690,6 @@ def cancel_order(request):
 
     except Order.DoesNotExist:
         return Response({'error': 'Order not found.'}, status=status.HTTP_404_NOT_FOUND)
-    
-@api_view(['GET'])
-def get_all_orders(request):
-    
-    orders = Order.objects.all()
-
-    if not orders.exists():
-        return Response({'error': 'No orders found.'}, status=status.HTTP_404_NOT_FOUND)
-
-    order_details = []
-
-   
-    for order in orders:
-        order_items = OrderItem.objects.filter(order=order)
-        order_items_data = [
-            {
-                'item_name': item.menu.name,  
-                'price': item.menu.price,     
-                'quantity': item.quantity    
-            } for item in order_items
-        ]
-
-        order_data = {
-            'order_id': order.id,
-            'selected_day': order.selected_day,
-            'total_price': order.total_price,
-            'order_date': str(order.order_date),
-            'status': order.status,
-            'week_number': order.week_number,
-            'year': order.year,
-            'items': order_items_data,
-            'user_name': order.user_name,  
-        }
-
-       
-        if order.user_type in ['parent', 'staff']:
-            order_data['child_id'] = order.child_id 
-
-        order_details.append(order_data)
-
-    return Response({
-        'message': 'Orders retrieved successfully!',
-        'orders': order_details
-    }, status=status.HTTP_200_OK)
-@api_view(['GET'])
-def get_order_by_id(request, order_id):
-    try:
-       
-        order = Order.objects.get(id=order_id)
-
-       
-        order_items = OrderItem.objects.filter(order=order)
-        order_items_data = [
-            {
-                'item_name': item.menu.name,  
-                'price': item.menu.price,    
-                'quantity': item.quantity     
-            } for item in order_items
-        ]
-
-        
-        order_data = {
-            'order_id': order.id,
-            'selected_day': order.selected_day,
-            'total_price': order.total_price,
-            'order_date': str(order.order_date),
-            'status': order.status,
-            'week_number': order.week_number,
-            'year': order.year,
-            'items': order_items_data,
-            'user_name': order.user_name, 
-        }
-
-        
-        if order.user_type in ['parent', 'staff']:
-            order_data['child_id'] = order.child_id
-
-        return Response({
-            'message': 'Order retrieved successfully!',
-            'order': order_data
-        }, status=status.HTTP_200_OK)
-    
-    except Order.DoesNotExist:
-        return Response({'error': 'Order not found.'}, status=status.HTTP_404_NOT_FOUND)
-
-
-
 
 
 @csrf_exempt
@@ -1679,3 +1702,92 @@ def add_order_item(request):
             return Response(serializer.data,status=status.HTTP_201_CREATED, )
         else:
             return Response({ "error" : serializer.errors},status = status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['GET'])
+def get_all_orders(request):
+    orders = Order.objects.all()
+
+    if not orders.exists():
+        return Response({'error': 'No orders found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    order_details = []
+
+    for order in orders:
+        order_items = OrderItem.objects.filter(order=order)
+        
+        
+        items_details = [
+            {
+                'item_name': item.menu.name,
+                'item_price': item.menu.price,  
+                'quantity': item.quantity
+            }
+            for item in order_items
+        ]
+
+        order_data = {
+            'order_id': order.id,
+            'selected_day': order.selected_day,
+            'total_price': order.total_price,
+            'order_date': str(order.order_date),
+            'status': order.status,
+            'week_number': order.week_number,
+            'year': order.year,
+            'items': items_details,  
+            'user_name': order.user_name,
+        }
+
+        if order.user_type in ['parent', 'staff']:
+            order_data['child_id'] = order.child_id
+
+        order_details.append(order_data)
+
+    return Response({
+        'message': 'Orders retrieved successfully!',
+        'orders': order_details
+    }, status=status.HTTP_200_OK)
+
+@api_view(['GET'])
+def get_order_by_id(request, order_id):
+    try:
+        
+        order = Order.objects.get(id=order_id)
+
+        
+        order_items = OrderItem.objects.filter(order=order)
+
+        
+        items_details = [
+            {
+                'item_name': item.menu.name,
+                'item_price': item.menu.price, 
+                'quantity': item.quantity
+            }
+            for item in order_items
+        ]
+
+        
+        order_data = {
+            'order_id': order.id,
+            'selected_day': order.selected_day,
+            'total_price': order.total_price,
+            'order_date': str(order.order_date),
+            'status': order.status,
+            'week_number': order.week_number,
+            'year': order.year,
+            'items': items_details,  
+            'user_name': order.user_name,
+        }
+
+        
+        if order.user_type in ['parent', 'staff']:
+            order_data['child_id'] = order.child_id
+
+        return Response({
+            'message': 'Order retrieved successfully!',
+            'order': order_data
+        }, status=status.HTTP_200_OK)
+
+    except Order.DoesNotExist:
+        return Response({'error': 'Order not found.'}, status=status.HTTP_404_NOT_FOUND)

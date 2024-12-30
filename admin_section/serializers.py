@@ -17,12 +17,25 @@ class ParentRegisterationSerializer(serializers.ModelSerializer):
         
 
 class StaffRegisterationSerializer(serializers.ModelSerializer):
-   
+    
     allergies = serializers.SlugRelatedField(queryset=Allergens.objects.all(), slug_field='allergy', many=True, required=False)
     class Meta:
         model = StaffRegisteration
-        fields = ['id','first_name', 'last_name', 'username', 'email','phone_no',"allergies",'password']
+        fields = ['id','first_name', 'last_name', 'username', 'email','phone_no',"allergies",'password','primary_school','secondary_school']
+    def create(self, validated_data):
+       
+        # Handle school assignment based on school_type
+        school_type = validated_data.get('school_type')  # school_type from the validated data
+        school_id = validated_data.get('school_id')  # school_id from the validated data
 
+        if school_type == "primary":
+            validated_data['primary_school'] = PrimarySchool.objects.get(id=school_id)
+        elif school_type == "secondary":
+            validated_data['secondary_school'] = SecondarySchool.objects.get(id=school_id)
+        else:
+            raise serializers.ValidationError({"school_type": "Invalid school type provided. Use 'primary' or 'secondary'."})
+
+        return super().create(validated_data)
 
 class CanteenStaffSerializer(serializers.ModelSerializer):
     school_type = serializers.ChoiceField(choices=[('primary', 'Primary'), ('secondary', 'Secondary')])
@@ -124,7 +137,19 @@ class SecondaryStudentSerializer(serializers.ModelSerializer):
         model = SecondaryStudent
         fields = ['id', 'first_name', 'last_name', 'username', 'email', 'phone_no', 'class_year', 'school_name','school' , 'allergies','password']
    
+class StaffRegisterationSerializer(serializers.ModelSerializer):
+    allergies = serializers.SlugRelatedField(queryset=Allergens.objects.all(), slug_field='allergy', many=True, required=False)
     
+    # School fields: will return the appropriate school based on type (primary or secondary)
+    school_name = serializers.CharField(source='get_school_name', read_only=True)
+    primary_school = serializers.PrimaryKeyRelatedField(queryset=PrimarySchool.objects.all(), required=False)
+    secondary_school = serializers.PrimaryKeyRelatedField(queryset=SecondarySchool.objects.all(), required=False)
+    
+    class Meta:
+        model = StaffRegisteration
+        fields = ['id', 'first_name', 'last_name', 'username', 'email', 'phone_no', 'allergies', 'password', 'primary_school', 'secondary_school', 'school_name']
+
+  
 
 class SecondarySchoolSerializer(serializers.ModelSerializer):
     student_count = serializers.IntegerField(read_only=True)
@@ -182,17 +207,18 @@ class MenuItemsSerializer(serializers.ModelSerializer):
         fields = ['id','category', 'item_name', 'item_description', 'nutrients', 'ingredients','allergies']
 
 class OrderItemSerializer(serializers.ModelSerializer):
+    item_name = serializers.CharField(source='menu.name', read_only=True)
     menu = MenuSerializer() 
     quantity = serializers.IntegerField()  
 
     class Meta:
         model = OrderItem
-        fields = ['id','menu', 'quantity', 'order']
+        fields = ['id','menu','item_name', 'quantity', 'order']
 
 class OrderSerializer(serializers.ModelSerializer):
     items = OrderItemSerializer(many=True, read_only=True)
-    user_name = serializers.SerializerMethodField()  # Add user_name field
-    child_id = serializers.IntegerField(required=False, allow_null=True)  # Add child_id for parents and staff
+    user_name = serializers.SerializerMethodField()  
+    child_id = serializers.IntegerField(required=False, allow_null=True)  
 
     week_number = serializers.IntegerField(default=datetime.now().isocalendar()[1], read_only=False)
     year = serializers.IntegerField(default=datetime.now().year, read_only=False)
@@ -214,6 +240,7 @@ class OrderSerializer(serializers.ModelSerializer):
             representation['child_id'] = instance.child_id
             representation.pop('child_name', None) 
         else:
+
             representation.pop('child_id', None)  
         
         return representation

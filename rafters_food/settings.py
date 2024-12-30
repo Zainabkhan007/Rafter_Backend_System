@@ -11,7 +11,7 @@ https://docs.djangoproject.com/en/5.1/ref/settings/
 """
 
 from pathlib import Path
-CSRF_TRUSTED_ORIGINS= [""]
+# CSRF_TRUSTED_ORIGINS= [""]
 ROOT_URLCONF = 'rafters_food.urls'
 ADMIN_PASSWORD = 'password123'
 # Build paths inside the project like this: BASE_DIR / 'subdir'.

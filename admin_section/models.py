@@ -7,6 +7,20 @@ from django.db.models import JSONField
 from django.db import models
 from django.contrib.auth.hashers import make_password
 # Create your models here.
+class PrimarySchool(models.Model):
+    school_name=models.CharField(max_length=30)
+    school_email=models.EmailField(max_length=254,unique=True)   
+    school_eircode=models.CharField(max_length=30,unique=True)
+    def __str__(self):
+        return f"{self.school_name} {self.id}" 
+class SecondarySchool(models.Model):
+    secondary_school_name=models.CharField(max_length=30)
+    secondary_school_email=models.EmailField(max_length=254,unique=True)   
+    secondary_school_eircode=models.CharField(max_length=30,unique=True)
+    
+
+    def __str__(self):
+        return f"{self.secondary_school_name}-{self.id}"
 class Allergens(models.Model):
     allergy = models.CharField(max_length=50)
 class ParentRegisteration(models.Model):
@@ -33,6 +47,8 @@ class StaffRegisteration(models.Model):
     phone_no = models.IntegerField( blank=True, null=True)
     allergies=models.ManyToManyField(Allergens,null=True, blank=True)  
     password=models.CharField(max_length=128)
+    primary_school=models.ForeignKey(PrimarySchool, on_delete=models.CASCADE, null=True, blank=True)
+    secondary_school=models.ForeignKey(SecondarySchool, on_delete=models.CASCADE, null=True, blank=True)
     def save(self, *args, **kwargs):
         # Hash the password before saving it
         if self.password:
@@ -43,12 +59,7 @@ class StaffRegisteration(models.Model):
 
 
 
-class PrimarySchool(models.Model):
-    school_name=models.CharField(max_length=30)
-    school_email=models.EmailField(max_length=254,unique=True)   
-    school_eircode=models.CharField(max_length=30,unique=True)
-    def __str__(self):
-        return f"{self.school_name} {self.id}" 
+
 
 class Teacher(models.Model):
     teacher_name = models.CharField(max_length=30)
@@ -56,14 +67,7 @@ class Teacher(models.Model):
     school = models.ForeignKey(PrimarySchool, on_delete=models.CASCADE, related_name='teachers')
     def __str__(self):
         return f"{self.teacher_name} - {self.class_year} {self.id}"
-class SecondarySchool(models.Model):
-    secondary_school_name=models.CharField(max_length=30)
-    secondary_school_email=models.EmailField(max_length=254,unique=True)   
-    secondary_school_eircode=models.CharField(max_length=30,unique=True)
-    
 
-    def __str__(self):
-        return f"{self.secondary_school_name}-{self.id}"
 
 class SecondaryStudent(models.Model):
     first_name=models.CharField(max_length=30,default="" )
@@ -157,6 +161,14 @@ class MenuItems(models.Model):
     allergies = models.ManyToManyField(Allergens,null=True, blank=True, related_name='menuitems')  
     def __str__(self):
         return f"{self.id} Items:   {self.item_name}"
+    
+class OrderItem(models.Model):
+    menu  = models.ForeignKey('Menu', on_delete=models.CASCADE,related_name='orderitem')  
+    order = models.ForeignKey('Order', on_delete=models.CASCADE,related_name='orderitem')  
+    quantity = models.IntegerField() 
+
+    def __str__(self):
+        return f'OrderItem {self.id}: {self.quantity}x {self.menu }'
 class Order(models.Model):
     user_id = models.IntegerField(null=True, blank=True)  
    
@@ -169,11 +181,13 @@ class Order(models.Model):
     selected_day = models.CharField(max_length=10) 
     is_delivered = models.BooleanField(default=False)
     status = models.CharField(max_length=20, default='pending')
-   
-    student = models.ForeignKey('SecondaryStudent', null=True, blank=True, on_delete=models.SET_NULL, related_name='orders')
+    primary_student = models.ForeignKey(PrimaryStudentsRegister, null=True, blank=True, on_delete=models.CASCADE, related_name='primary_student')
+    staff = models.ForeignKey(StaffRegisteration, null=True, blank=True, on_delete=models.CASCADE, related_name='staff')
+    student = models.ForeignKey(SecondaryStudent, null=True, blank=True, on_delete=models.CASCADE, related_name='student')
     user_name = models.CharField(max_length=100, null=True, blank=True)
     
-    items = models.ManyToManyField('Menu', through='OrderItem')  
+    
+    items_name=models.ForeignKey(OrderItem, null=True, blank=True, on_delete=models.CASCADE, related_name='orderItem')
     
     def __str__(self):
         return f'Order {self.id} by User {self.user_id} ({self.user_type})'
@@ -198,13 +212,7 @@ class Order(models.Model):
         self.user_name = self.get_user_name()  
         super().save(*args, **kwargs)
     
-class OrderItem(models.Model):
-    menu  = models.ForeignKey('Menu', on_delete=models.CASCADE,related_name='orderitem')  
-    order = models.ForeignKey('Order', on_delete=models.CASCADE,related_name='orderitem')  
-    quantity = models.IntegerField() 
 
-    def __str__(self):
-        return f'OrderItem {self.id}: {self.quantity}x {self.menu }'
     
 
 class CanteenStaff(models.Model):
