@@ -1,0 +1,13 @@
+{
+    "builds": [{
+      "src": "rafters_food/wsgi.py",
+      "use": "@vercel/python",
+      "config": { "maxLambdaSize": "15mb", "runtime": "python3.12.6" }
+    }],
+    "routes": [
+      {
+        "src": "/(.*)",
+        "dest": "test_rafters_foodproject/wsgi.py"
+      }
+    ]
+}
