@@ -7,7 +7,7 @@
     "routes": [
       {
         "src": "/(.*)",
-        "dest": "test_rafters_foodproject/wsgi.py"
+        "dest": "rafters_food/wsgi.py"
       }
     ]
 }
