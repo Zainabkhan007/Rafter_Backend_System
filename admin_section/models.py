@@ -31,13 +31,16 @@ class ParentRegisteration(models.Model):
     phone_no = models.IntegerField( blank=True, null=True)
     password=models.CharField(max_length=128)
     allergies=models.ManyToManyField(Allergens, blank=True,null=True) 
-     
+    credits = models.IntegerField(default=0)
     def save(self, *args, **kwargs):
         # Hash the password before saving it
         if self.password:
             self.password = make_password(self.password)
         super().save(*args, **kwargs)
-
+    def top_up_credits(self, amount):
+        """Add credits to the staff account"""
+        self.credits += amount
+        self.save()
 
 class StaffRegisteration(models.Model):
     first_name=models.CharField(max_length=30)
@@ -49,11 +52,16 @@ class StaffRegisteration(models.Model):
     password=models.CharField(max_length=128)
     primary_school=models.ForeignKey(PrimarySchool, on_delete=models.CASCADE, null=True, blank=True)
     secondary_school=models.ForeignKey(SecondarySchool, on_delete=models.CASCADE, null=True, blank=True)
+    credits = models.IntegerField(default=0) 
     def save(self, *args, **kwargs):
         # Hash the password before saving it
         if self.password:
             self.password = make_password(self.password)
         super().save(*args, **kwargs)
+    def top_up_credits(self, amount):
+        """Add credits to the staff account"""
+        self.credits += amount
+        self.save()
     def __str__(self):
         return f" {self.id}"
 
@@ -79,7 +87,7 @@ class SecondaryStudent(models.Model):
     class_year = models.CharField(max_length=30,default="")
     allergies=models.ManyToManyField(Allergens,null=True, blank=True)  
     school = models.ForeignKey(SecondarySchool, on_delete=models.CASCADE, related_name='student',null=True, blank=True)
-    
+    credits = models.IntegerField(default=0)
    
     def __str__(self):
         return f"{self.username} - {self.class_year}-{self.id}"
@@ -89,7 +97,10 @@ class SecondaryStudent(models.Model):
             self.password = make_password(self.password)
         super().save(*args, **kwargs)
 
-
+    def top_up_credits(self, amount):
+        """Add credits to the staff account"""
+        self.credits += amount
+        self.save()
 
 
 
@@ -188,7 +199,8 @@ class Order(models.Model):
     
     
     items_name=models.ForeignKey(OrderItem, null=True, blank=True, on_delete=models.CASCADE, related_name='orderItem')
-    
+    primary_school = models.ForeignKey(PrimarySchool, on_delete=models.SET_NULL, null=True, blank=True)
+    secondary_school = models.ForeignKey(SecondarySchool, on_delete=models.SET_NULL, null=True, blank=True)
     def __str__(self):
         return f'Order {self.id} by User {self.user_id} ({self.user_type})'
 
@@ -237,3 +249,13 @@ class CanteenStaff(models.Model):
 
     def __str__(self):
         return f'{self.username} - {self.school_type}'
+
+class ContactMessage(models.Model):
+    full_name=models.CharField(max_length=30)
+    email=models.EmailField(max_length=254)
+    phone= models.IntegerField( blank=True, null=True)
+    subject=models.CharField(max_length=30)
+    message=models.CharField(max_length=30)
+    photo_filename=models.CharField(max_length=30)
+    def __str__(self):
+        return f'{self.full_name} - {self.subject}'

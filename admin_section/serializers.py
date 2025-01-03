@@ -39,36 +39,15 @@ class StaffRegisterationSerializer(serializers.ModelSerializer):
 
 class CanteenStaffSerializer(serializers.ModelSerializer):
     school_type = serializers.ChoiceField(choices=[('primary', 'Primary'), ('secondary', 'Secondary')])
-
+   
+    primary_school = serializers.PrimaryKeyRelatedField(queryset=PrimarySchool.objects.all(), required=False)
+    secondary_school = serializers.PrimaryKeyRelatedField(queryset=SecondarySchool.objects.all(), required=False)
+    
     class Meta:
         model = CanteenStaff
-        fields = ['username', 'email', 'password', 'school_type']  # Removed school_id from fields
+        fields = ['id', 'username', 'email', 'password', 'school_type','primary_school', 'secondary_school']
 
-    def validate(self, data):
-        school_type = data.get('school_type')
-
-        
-        school_id = self.context.get('school_id')
-
-        
-        if school_type == 'primary':
-            if not PrimarySchool.objects.filter(id=school_id).exists():
-                raise serializers.ValidationError("Primary school with the provided ID does not exist.")
-            
-            data['primary_school'] = PrimarySchool.objects.get(id=school_id)
-            data['secondary_school'] = None  
-
-        elif school_type == 'secondary':
-            if not SecondarySchool.objects.filter(id=school_id).exists():
-                raise serializers.ValidationError("Secondary school with the provided ID does not exist.")
-          
-            data['secondary_school'] = SecondarySchool.objects.get(id=school_id)
-            data['primary_school'] = None  
-
-        else:
-            raise serializers.ValidationError("Invalid school type.")
-
-        return data
+   
  
 class LoginSerializer(serializers.Serializer):
     email = serializers.EmailField()
@@ -136,7 +115,11 @@ class SecondaryStudentSerializer(serializers.ModelSerializer):
     class Meta:
         model = SecondaryStudent
         fields = ['id', 'first_name', 'last_name', 'username', 'email', 'phone_no', 'class_year', 'school_name','school' , 'allergies','password']
-   
+class TopUpCreditsSerializer(serializers.Serializer):
+    amount = serializers.IntegerField(min_value=1, required=True)
+    user_id = serializers.IntegerField(required=True)  
+    user_type = serializers.ChoiceField(choices=["parent", "staff", "student"], required=True)   
+    
 class StaffRegisterationSerializer(serializers.ModelSerializer):
     allergies = serializers.SlugRelatedField(queryset=Allergens.objects.all(), slug_field='allergy', many=True, required=False)
     
@@ -245,3 +228,37 @@ class OrderSerializer(serializers.ModelSerializer):
         
         return representation
 
+class ContactMessageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ContactMessage
+        fields = ['full_name', 'email', 'phone', 'subject', 'message', 'photo_filename']
+
+    # def validate_full_name(self, value):
+    #     # Ensure full_name contains only alphabets and spaces
+    #     if not re.match(r'^[a-zA-Z\s]+$', value):
+    #         raise serializers.ValidationError("Invalid name. Please use only letters and spaces.")
+    #     return value
+
+    # def validate_email(self, value):
+    #     # Validate email format
+    #     if not re.match(r'^[^@]+@[^@]+\.[^@]+$', value):
+    #         raise serializers.ValidationError("Invalid email address. Please provide a valid email.")
+    #     return value
+
+    # def validate_phone(self, value):
+    #     # Validate phone number format (optional, it could be None)
+    #     if value and not re.match(r'^\+?[0-9\s\-]+$', str(value)):
+    #         raise serializers.ValidationError("Invalid phone number. Use only numbers, spaces, hyphens, or a leading +.")
+    #     return value
+
+    # def validate_subject(self, value):
+    #     # Validate subject length
+    #     if len(value) > 100:
+    #         raise serializers.ValidationError("Subject must not exceed 100 characters.")
+    #     return value
+
+    # def validate_message(self, value):
+    #     # Validate message length
+    #     if len(value) > 1000:
+    #         raise serializers.ValidationError("Message must not exceed 1000 characters.")
+    #     return value

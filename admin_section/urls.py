@@ -11,6 +11,9 @@ urlpatterns = [
     path('get_user_info/<int:id>/<str:user_type>/', views.get_user_info, name='get_user_info'),
     path('update_user_info/<int:id>/<str:user_type>/', views.update_user_info, name='update_user_info'),
      
+    path('get_cateenstaff/', views.get_cateenstaff, name='get_cateenstaff'),
+    path('cateenstaff_by_id/<int:pk>/', views.cateenstaff_by_id, name='cateenstaff_by_id'),
+
     path('add_child/', views.add_child, name='add_child'),
     path('edit_child/<int:child_id>/', views.edit_child, name='edit_child'),
     
@@ -23,7 +26,8 @@ urlpatterns = [
 
     path('primary_school/<int:school_id>/teacher/', views.add_and_get_teacher, name='add_and_get_teacher'), 
     path('primary_school/<int:school_id>/teacher/<int:teacher_id>/', views.update_delete_teacher, name='update_delete_teacher'),
-
+    path('get_teachers/', views.get_teachers, name='get_teachers'), 
+  
     path('primary_school/<int:school_id>/student/', views.get_student_detail, name='get_student_detail'), 
     path('primary_school/<int:school_id>/student/<int:student_id>/', views.update_delete_student, name='update_delete_student'), 
     path('primary_student/search', views.StudentSearch.as_view(), name='StudentSearch'),
@@ -46,7 +50,8 @@ urlpatterns = [
 
     path("edit_menu/<int:id>/",views.edit_menu,name='edit_menu'),
     path("get_cycle_names/",views.get_cycle_names,name='get_cycle_names'),
-    path('export-orders/', views.export_orders_to_excel, name='export_orders'),
+    path('download_menu_primary/', views.download_menu_primary, name='download_menu_primary'),
+     path('download_menu_secondary/', views.download_menu_secondary, name='download_menu_secondary'),
     path("add_menu_item/",views.add_menu_item,name='add_menu_item'),
     path("get_menu_items/",views.get_menu_items,name='get_menu_items'),
     path('update_menu_items/<int:pk>/', views.update_menu_items, name='update_menu_items'),
@@ -64,7 +69,18 @@ urlpatterns = [
     path('cancel_order/', views.cancel_order, name='cancel_order'),
     path('get_all_orders/', views.get_all_orders, name='get_all_orders'),
     path('get_order_by_id/<int:order_id>/', views.get_order_by_id, name='get_order_by_id'),
+    path('get_orders_by_user/', views.get_orders_by_user, name='get_orders_by_user'),
+    path('get_orders_by_school/', views.get_orders_by_school, name='get_orders_by_school'),
+
+    path('contactmessage/', views.contactmessage, name='contactmessage'),
+
+#  Credits
+   path('top_up_credits/', views.top_up_credits, name='top_up_credits'),
+
+   path('payment/', views.CreatePaymentIntentAPIView.as_view(), name='create-payment-intent'),
+    path('top_up_payment/', views.top_up_payment, name='top_up_payment'),
 ]
+
 
 
 

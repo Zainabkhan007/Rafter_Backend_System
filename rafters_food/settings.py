@@ -11,12 +11,18 @@ https://docs.djangoproject.com/en/5.1/ref/settings/
 """
 
 from pathlib import Path
-# CSRF_TRUSTED_ORIGINS= [""]
+import environ
+
+import os
+env = environ.Env(
+    # set casting, default value
+    DEBUG=(bool, False)
+)
 ROOT_URLCONF = 'rafters_food.urls'
 ADMIN_PASSWORD = 'password123'
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
-
+environ.Env.read_env()
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/
@@ -175,8 +181,10 @@ EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_PORT = 587  
 EMAIL_USE_TLS = True 
 EMAIL_HOST = 'smtp.gmail.com' 
-EMAIL_HOST_USER = 'your email'  # Replace with your email username
-EMAIL_HOST_PASSWORD="your email app pasword"
+EMAIL_HOST_USER = 'testingsites247365@gmail.com'  
+EMAIL_HOST_PASSWORD="djbsfnkdbvfvihrt"
 
+MAIL_DEFAULT_SENDER = 'testingsites247365@gmail.com'
 
-
+STRIPE_PUBLIC_KEY=env('STRIPE_PUBLIC_KEY')
+STRIPE_SECRET_KEY=env('STRIPE_SECRET_KEY')
