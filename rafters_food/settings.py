@@ -52,6 +52,8 @@ INSTALLED_APPS = [
     'corsheaders',
 
 ]
+MEDIA_URL = '/menu_files/' 
+MEDIA_ROOT = BASE_DIR / 'menu_files'
 
 MIDDLEWARE = [
     # 'django.middleware.security.SecurityMiddleware',
