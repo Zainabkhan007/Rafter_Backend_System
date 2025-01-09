@@ -10,6 +10,7 @@ urlpatterns = [
     path('admin_login/', views.admin_login,name='admin_login'),
     path('get_user_info/<int:id>/<str:user_type>/', views.get_user_info, name='get_user_info'),
     path('update_user_info/<int:id>/<str:user_type>/', views.update_user_info, name='update_user_info'),
+    # path('update_profile/<str:user_type>/<int:user_id>/', views.update_profile, name='update_profile'),
      
     path('get_cateenstaff/', views.get_cateenstaff, name='get_cateenstaff'),
     path('cateenstaff_by_id/<int:pk>/', views.cateenstaff_by_id, name='cateenstaff_by_id'),
@@ -77,7 +78,7 @@ urlpatterns = [
 #  Credits
    path('top_up_credits/', views.top_up_credits, name='top_up_credits'),
 
-   path('payment/', views.CreatePaymentIntentAPIView.as_view(), name='create-payment-intent'),
+   path('payment/', views.CreateOrderAndPaymentAPIView.as_view(), name='create-payment-intent'),
     path('top_up_payment/', views.top_up_payment, name='top_up_payment'),
 ]
 

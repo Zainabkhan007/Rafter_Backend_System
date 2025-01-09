@@ -5,6 +5,7 @@ import os
 from rest_framework.generics import ListAPIView
 from .serializers import *
 import re
+
 import json
 from django.views.decorators.csrf import csrf_exempt
 from django.shortcuts import get_object_or_404
@@ -25,11 +26,11 @@ from django.conf import settings
 from django.contrib.auth.hashers import make_password
 from .models import *
 from django.core.mail import send_mail
-# from rest_framework.parsers import MultiPartParser, FormParser
-# from django.db.models.functions import Now
+from django.core.files.storage import default_storage
+from django.core.files.base import ContentFile
+
 stripe.api_key = settings.STRIPE_SECRET_KEY
 ALLOWED_FILE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif']
-
 @api_view(["POST"])
 def register(request):
     user_type = request.data.get('user_type')
@@ -39,7 +40,6 @@ def register(request):
     if not email:
         return Response({"error": "Email is required."}, status=status.HTTP_400_BAD_REQUEST)
 
-   
     if StaffRegisteration.objects.filter(email=email).exists():
         return Response({"error": "Email already registered as staff."}, status=status.HTTP_400_BAD_REQUEST)
     if ParentRegisteration.objects.filter(email=email).exists():
@@ -49,14 +49,12 @@ def register(request):
     if CanteenStaff.objects.filter(email=email).exists():
         return Response({"error": "Email already registered as canteen."}, status=status.HTTP_400_BAD_REQUEST)
 
-  
     school_id = None
     school_type = None
     if user_type in ['student', 'staff','canteenstaff']:
         school_id = request.data.get('school_id')
         school_type = request.data.get('school_type')
-    
-   
+
     if user_type in ['student', 'staff','canteenstaff'] and (not school_id or not school_type):
         return Response({"error": "School ID and school type are required for staff and student."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -76,25 +74,24 @@ def register(request):
                 school = SecondarySchool.objects.get(id=school_id)
             except SecondarySchool.DoesNotExist:
                 return Response({"error": "Secondary school with this ID does not exist."}, status=status.HTTP_400_BAD_REQUEST)
-    
-   
+
     if user_type == "parent":
         serializer = ParentRegisterationSerializer(data=request.data)
     elif user_type == "student":
         if school:
-            request.data['secondary_school'] = school.id  
+            request.data['school'] = school.id  
         serializer = SecondaryStudentSerializer(data=request.data)
     elif user_type == "staff":
         if school:
             if school_type == "primary":
-                request.data['primary_school'] = school.id  
+                request.data['primary_school'] = school.id
             elif school_type == "secondary":
-                request.data['secondary_school'] = school.id  
+                request.data['secondary_school'] = school.id
         serializer = StaffRegisterationSerializer(data=request.data)
     elif user_type == "canteenstaff":
         if school:
             if school_type == "primary":
-                request.data['primary_school'] = school.id  
+                request.data['primary_school'] = school.id
             elif school_type == "secondary":
                 request.data['secondary_school'] = school.id
         serializer = CanteenStaffSerializer(data=request.data)
@@ -104,7 +101,6 @@ def register(request):
     password = request.data.get('password')
     password_confirmation = request.data.get('password_confirmation')
 
-    
     if password != password_confirmation:
         return Response({"error": "Passwords do not match."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -113,13 +109,11 @@ def register(request):
         if not Allergens.objects.filter(allergy=allergy).exists():
             return Response({"error": f"Allergen '{allergy}' does not exist in the database."}, status=status.HTTP_400_BAD_REQUEST)
 
-    
     if serializer.is_valid():
         serializer.save()
         return Response(serializer.data, status=status.HTTP_201_CREATED)
     else:
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
 
 
 
@@ -172,6 +166,7 @@ def admin_login(request):
         return Response({'detail': 'You do not have permission to access this resource.'}, status=status.HTTP_403_FORBIDDEN)
 
      return Response({'detail': 'Login successful!'}, status=status.HTTP_200_OK)
+
 @api_view(["GET"])
 def get_user_info(request, user_type, id):
     if user_type == "parent":
@@ -181,13 +176,20 @@ def get_user_info(request, user_type, id):
             parent_serializer = ParentRegisterationSerializer(parent)
             student_serializer = PrimaryStudentSerializer(students, many=True)
 
-           
             parent_data = parent_serializer.data
             parent_data.pop('password', None)
 
             student_data = student_serializer.data
             for student in student_data:
                 student.pop('password', None)
+
+            
+            if student_data:
+           
+                school_type = "primary" if students[0].school else None
+                parent_data['school_type'] = school_type
+            else:
+                parent_data['school_type'] = None
 
             return Response({
                 "user_type": "parent",
@@ -206,13 +208,16 @@ def get_user_info(request, user_type, id):
             staff_serializer = StaffRegisterationSerializer(staff)
             student_serializer = PrimaryStudentSerializer(students, many=True)
 
-          
             staff_data = staff_serializer.data
             staff_data.pop('password', None)
 
             student_data = student_serializer.data
             for student in student_data:
                 student.pop('password', None)
+
+            # Adding school type to the staff response
+            school_type = "primary" if staff.primary_school else "secondary" if staff.secondary_school else None
+            staff_data['school_type'] = school_type
 
             return Response({
                 "user_type": "staff",
@@ -227,11 +232,14 @@ def get_user_info(request, user_type, id):
     elif user_type == "student":
         try:
             student = SecondaryStudent.objects.get(id=id)
-            student_serializer =SecondaryStudentSerializer(student)
+            student_serializer = SecondaryStudentSerializer(student)
 
-       
             student_data = student_serializer.data
             student_data.pop('password', None)
+
+            # Adding school type to the student response
+            school_type = "secondary" if student.school else None
+            student_data['school_type'] = school_type
 
             return Response({
                 "user_type": "student",
@@ -248,27 +256,19 @@ def get_user_info(request, user_type, id):
 
 @api_view(["GET", "PUT"])
 def update_user_info(request, user_type, id):
-   
-    def exclude_password(data):
-        if 'password' in data:
-            data.pop('password')
-        return data
-
-    # Handling GET request
+    # Handling GET request to fetch user data
     if request.method == "GET":
         if user_type == "parent":
             try:
                 parent = ParentRegisteration.objects.get(id=id)
-                students = PrimaryStudentsRegister.objects.filter(parent=parent)
                 parent_serializer = ParentRegisterationSerializer(parent)
-                student_serializer = PrimaryStudentSerializer(students, many=True)
-                parent_data = exclude_password(parent_serializer.data)  
-                students_data = exclude_password(student_serializer.data)  
+                parent_data = parent_serializer.data 
+                if 'password' in parent_data:
+                    parent_data.pop('password') 
                 return Response({
                     "user_type": "parent",
                     "user_id": id,
-                    "parent": parent_data,
-                    "students": students_data
+                    "parent": parent_data
                 }, status=status.HTTP_200_OK)
             except ParentRegisteration.DoesNotExist:
                 return Response({"error": "Parent not found."}, status=status.HTTP_404_NOT_FOUND)
@@ -276,16 +276,14 @@ def update_user_info(request, user_type, id):
         elif user_type == "staff":
             try:
                 staff = StaffRegisteration.objects.get(id=id)
-                students = PrimaryStudentsRegister.objects.filter(staff=staff)
                 staff_serializer = StaffRegisterationSerializer(staff)
-                student_serializer = PrimaryStudentSerializer(students, many=True)
-                staff_data = exclude_password(staff_serializer.data)  
-                students_data = exclude_password(student_serializer.data)  
+                staff_data = staff_serializer.data 
+                if 'password' in staff_data:
+                    staff_data.pop('password')  
                 return Response({
                     "user_type": "staff",
                     "user_id": id,
-                    "staff": staff_data,
-                    "students": students_data
+                    "staff": staff_data
                 }, status=status.HTTP_200_OK)
             except StaffRegisteration.DoesNotExist:
                 return Response({"error": "Staff not found."}, status=status.HTTP_404_NOT_FOUND)
@@ -294,7 +292,9 @@ def update_user_info(request, user_type, id):
             try:
                 student = SecondaryStudent.objects.get(id=id)
                 student_serializer = SecondaryStudentSerializer(student)
-                student_data = exclude_password(student_serializer.data) 
+                student_data = student_serializer.data  
+                if 'password' in student_data:
+                    student_data.pop('password') 
                 return Response({
                     "user_type": "student",
                     "user_id": id,
@@ -306,25 +306,30 @@ def update_user_info(request, user_type, id):
         else:
             return Response({"error": "Invalid user_type."}, status=status.HTTP_400_BAD_REQUEST)
 
-  
     elif request.method == "PUT":
         if user_type == "parent":
             try:
                 parent = ParentRegisteration.objects.get(id=id)
-                
-                password = request.data.get('password', None)
-                if password:
-                    parent.set_password(password)  
 
+             
+                if 'password' not in request.data:
+                    request.data['password'] = parent.password  
+
+               
                 serializer = ParentRegisterationSerializer(parent, data=request.data, partial=True)
-
                 if serializer.is_valid():
-                    serializer.save()
-                    response_data = exclude_password(serializer.data) 
+                    updated_parent = serializer.save()
+
+                
+                    updated_data = serializer.data
+                    if 'password' in updated_data:
+                        updated_data.pop('password')
+
                     return Response({
                         "user_type": "parent",
                         "user_id": id,
-                        "parent": response_data
+                        "parent": updated_data,
+                        "message": "Profile updated successfully."
                     }, status=status.HTTP_200_OK)
                 return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
             except ParentRegisteration.DoesNotExist:
@@ -333,20 +338,26 @@ def update_user_info(request, user_type, id):
         elif user_type == "staff":
             try:
                 staff = StaffRegisteration.objects.get(id=id)
+
+             
+                if 'password' not in request.data:
+                    request.data['password'] = staff.password 
+
                
-                password = request.data.get('password', None)
-                if password:
-                    staff.set_password(password)  
-
                 serializer = StaffRegisterationSerializer(staff, data=request.data, partial=True)
-
                 if serializer.is_valid():
-                    serializer.save()
-                    response_data = exclude_password(serializer.data) 
+                    updated_staff = serializer.save()
+
+                    
+                    updated_data = serializer.data
+                    if 'password' in updated_data:
+                        updated_data.pop('password')
+
                     return Response({
                         "user_type": "staff",
                         "user_id": id,
-                        "staff": response_data
+                        "staff": updated_data,
+                        "message": "Profile updated successfully."
                     }, status=status.HTTP_200_OK)
                 return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
             except StaffRegisteration.DoesNotExist:
@@ -355,20 +366,25 @@ def update_user_info(request, user_type, id):
         elif user_type == "student":
             try:
                 student = SecondaryStudent.objects.get(id=id)
-               
-                password = request.data.get('password', None)
-                if password:
-                    student.set_password(password) 
 
+              
+                if 'password' not in request.data:
+                    request.data['password'] = student.password 
+              
                 serializer = SecondaryStudentSerializer(student, data=request.data, partial=True)
-
                 if serializer.is_valid():
-                    serializer.save()
-                    response_data = exclude_password(serializer.data)
+                    updated_student = serializer.save()
+
+                    
+                    updated_data = serializer.data
+                    if 'password' in updated_data:
+                        updated_data.pop('password')
+
                     return Response({
                         "user_type": "student",
                         "user_id": id,
-                        "student": response_data
+                        "student": updated_data,
+                        "message": "Profile updated successfully."
                     }, status=status.HTTP_200_OK)
                 return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
             except SecondaryStudent.DoesNotExist:
@@ -376,6 +392,10 @@ def update_user_info(request, user_type, id):
 
         else:
             return Response({"error": "Invalid user_type."}, status=status.HTTP_400_BAD_REQUEST)
+
+
+
+
         
 # Canteen Staff
 @csrf_exempt
@@ -413,6 +433,7 @@ def cateenstaff_by_id(request, pk):
         staff.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
     
+
 @api_view(['POST'])
 def add_child(request):
     school_name = request.data.get('school')
@@ -424,6 +445,7 @@ def add_child(request):
     user_id = request.data.get('user_id')
     user_type = request.data.get('user_type')
 
+    # Validation checks
     if not school_name:
         return Response({"error": "School name is required."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -442,6 +464,7 @@ def add_child(request):
     if not user_type:
         return Response({"error": "User type is required."}, status=status.HTTP_400_BAD_REQUEST)
 
+    
     try:
         school = PrimarySchool.objects.get(school_name=school_name)
     except PrimarySchool.DoesNotExist:
@@ -461,34 +484,40 @@ def add_child(request):
     else:
         return Response({"error": "Invalid user type."}, status=status.HTTP_400_BAD_REQUEST)
 
-   
+    username = f"{first_name.lower()}_{last_name.lower()}" 
+
+    # Create student data
     student_data = {
         'first_name': first_name,
         'last_name': last_name,
+        'username': username, 
         'class_year': class_year,
-        'school': school.id,  
+        'school': school.id,
         'allergies': allergies_data,
         'teacher': teacher
     }
 
+  
     if user_type == 'parent':
-        student_data['parent'] = user_id  
+        student_data['parent'] = user_id
     elif user_type == 'staff':
-        student_data['staff'] = user_id 
+        student_data['staff'] = user_id
 
     
     serializer = PrimaryStudentSerializer(data=student_data)
 
     if serializer.is_valid():
-        student = serializer.save()
+        student = serializer.save()  
         return Response({
             "message": "Child added successfully",
             "student": serializer.data,
             "user_type": user_type,
-            "user_id": user_id
+            "user_id": user_id,
+            "school_type": "primary"  
         }, status=status.HTTP_201_CREATED)
     else:
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
 
     
 @api_view(['GET', 'PUT'])
@@ -996,7 +1025,7 @@ def add_menu(request):
             except Categories.DoesNotExist:
                 return Response({'error': f'Category {category_id} not found for {menu_name} on {day}.'}, status=status.HTTP_404_NOT_FOUND)
 
-            # Create the menu item
+       
             menu = Menu(
                 name=menu_name,
                 price=price,
@@ -1047,7 +1076,6 @@ def activate_cycle(request):
         if not school:
             return Response({'error': f'{school_type.capitalize()} School not found'}, status=status.HTTP_404_NOT_FOUND)
 
-        # Deactivate previous menus for the school and cycle
         Menu.objects.filter(
             primary_school=school if school_type == 'primary' else None,
             secondary_school=school if school_type == 'secondary' else None
@@ -1209,14 +1237,13 @@ def get_active_menu(request):
     today = timezone.now().date()  
 
     try:
+        
         if school_type == 'primary':
-           
             menus = Menu.objects.filter(
                 primary_school_id=school_id,
                 start_date__lte=today,
                 end_date__gte=today
-            ).select_related('category', 'primary_school')  
-            
+            ).select_related('category', 'primary_school')
             
             subquery = Menu.objects.filter(
                 primary_school_id=school_id,
@@ -1225,14 +1252,12 @@ def get_active_menu(request):
             ).values('cycle_name').distinct()
 
         elif school_type == 'secondary':
-         
             menus = Menu.objects.filter(
                 secondary_school_id=school_id,
                 start_date__lte=today,
                 end_date__gte=today
-            ).select_related('category', 'secondary_school') 
+            ).select_related('category', 'secondary_school')
             
-           
             subquery = Menu.objects.filter(
                 secondary_school_id=school_id,
                 start_date__lte=today,
@@ -1243,19 +1268,20 @@ def get_active_menu(request):
             return Response({"detail": "Invalid school type. Please provide either 'primary' or 'secondary'."},
                             status=status.HTTP_400_BAD_REQUEST)
 
-        
+  
         active_menus = [menu for menu in menus if menu.is_active]
 
+        # Get active cycles
         active_cycles = [
             {"cycle": cycle['cycle_name']} 
             for cycle in subquery 
             if any(menu.cycle_name == cycle['cycle_name'] for menu in active_menus)
         ]
 
-        
+   
         menus_data = MenuSerializer(active_menus, many=True).data
 
-        
+     
         weekly_menu = {
             "Monday": [],
             "Tuesday": [],
@@ -1268,37 +1294,50 @@ def get_active_menu(request):
 
         
         for menu in menus_data:
-            day_of_week = menu.get('menu_day')
+            day_of_week = menu['menu_day'] 
             if day_of_week in weekly_menu:
+                
+                menu_items = MenuItems.objects.filter(item_name=menu['name'])
+             
+                menu_items_data = []
+                for item in menu_items:
+                    menu_items_data.append({
+                        "item_name": item.item_name,
+                        "item_description": item.item_description,
+                        "ingredients": item.ingredients,
+                        "nutrients": item.nutrients,
+                        "allergies": [allergy.allergy for allergy in item.allergies.all()]  # Correct 
+                    })
+                
+                # Add menu and menu items data to the response structure
                 if school_type == 'primary':
-                   
-                    primary_school_name = menu.get('primary_school', {}).get('name', None)
-                    category_name = menu.get('category', None)
+                    primary_school_name = menu.get('primary_school_name', None)
+                    category_name = menu.get('category', None)  
                     weekly_menu[day_of_week].append({
-                        'id':menu['id'],
+                        'id': menu['id'],
                         "name": menu['name'],
                         "price": menu['price'],
                         "menu_date": menu['menu_date'],
                         "cycle_name": menu['cycle_name'],
-                        "category": category_name,
+                        "category": category_name,  
                         "is_active": menu['is_active'],
-                        
+                        "menu_items": menu_items_data 
                     })
                 elif school_type == 'secondary':
-                   
-                    secondary_school_name = menu.get('secondary_school', {}).get('name', None)
-                    category_name = menu.get('category', None)
+                    secondary_school_name = menu.get('secondary_school_name', None)
+                    category_name = menu.get('category', None)  
                     weekly_menu[day_of_week].append({
-                        'id':menu['id'],
+                        'id': menu['id'],
                         "name": menu['name'],
                         "price": menu['price'],
                         "menu_date": menu['menu_date'],
                         "cycle_name": menu['cycle_name'],
-                        "category": category_name,
+                        "category": category_name, 
                         "is_active": menu['is_active'],
-                        
+                        "menu_items": menu_items_data  
                     })
 
+     
         return Response({
             "menus": weekly_menu,
             "cycles": active_cycles
@@ -1306,6 +1345,7 @@ def get_active_menu(request):
 
     except Exception as e:
         return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
 
 
@@ -1391,8 +1431,6 @@ def get_cycle_names(request):
         'cycle_names': cycle_names
     }, status=status.HTTP_200_OK)
 
-
-
 @api_view(['POST'])
 def download_menu_secondary(request):
     """
@@ -1416,34 +1454,33 @@ def download_menu_secondary(request):
     current_date = datetime.now()
     current_week, current_year = current_date.isocalendar()[1], current_date.year
 
-   
     student_orders = Order.objects.filter(
         secondary_school=school,
         week_number=current_week,
         year=current_year
-    ).select_related('student')  
+    ).select_related('student')
+
     staff_orders = Order.objects.filter(
         secondary_school=school,
         week_number=current_week,
         year=current_year
     ).select_related('staff')
 
-  
+
     workbook = openpyxl.Workbook()
     sheet = workbook.active
     sheet.title = 'Menu'
 
- 
     sheet.append(["Order ID", "User Name", "Total Price", "Selected Day", "Status", "Items"])
 
     def get_order_items(order):
         items = OrderItem.objects.filter(order=order)
         items_data = []
         for item in items:
-            items_data.append(f"{item.menu.name} x {item.quantity}") 
+            items_data.append(f"{item.menu.name} x {item.quantity}")
         return ", ".join(items_data)
 
- 
+
     for order in student_orders:
         order_details = {
             "id": order.id,
@@ -1451,16 +1488,16 @@ def download_menu_secondary(request):
             "total_price": order.total_price,
             "selected_day": order.selected_day,
             "status": order.status,
-            "items": get_order_items(order)  
+            "items": get_order_items(order)
         }
-        sheet.append([order_details['id'], 
-                      order_details['user_name'], 
-                      order_details['total_price'], 
-                      order_details['selected_day'], 
-                      order_details['status'], 
+        sheet.append([order_details['id'],
+                      order_details['user_name'],
+                      order_details['total_price'],
+                      order_details['selected_day'],
+                      order_details['status'],
                       order_details['items']])
 
-   
+  
     for order in staff_orders:
         order_details = {
             "id": order.id,
@@ -1468,26 +1505,227 @@ def download_menu_secondary(request):
             "total_price": order.total_price,
             "selected_day": order.selected_day,
             "status": order.status,
-            "items": get_order_items(order) 
+            "items": get_order_items(order)
         }
-        sheet.append([order_details['id'], 
-                      order_details['user_name'], 
-                      order_details['total_price'], 
-                      order_details['selected_day'], 
-                      order_details['status'], 
+        sheet.append([order_details['id'],
+                      order_details['user_name'],
+                      order_details['total_price'],
+                      order_details['selected_day'],
+                      order_details['status'],
                       order_details['items']])
 
+  
     file_stream = BytesIO()
     workbook.save(file_stream)
     file_stream.seek(0)
 
+
     filename = f"{school.secondary_school_name}_Secondary_Menu_{current_year}_Week{current_week}.xlsx"
+    file_path = f'menu_files/{filename}'
 
-    response = HttpResponse(file_stream.getvalue(), content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-    response['Content-Disposition'] = f'attachment; filename={filename}'
-    response['Content-Length'] = str(len(file_stream.getvalue()))  
-    return response
+  
+    default_storage.save(file_path, ContentFile(file_stream.getvalue()))
 
+
+    file_url = default_storage.url(file_path)
+
+  
+    return JsonResponse({
+        "download_link": file_url
+    })
+
+# @api_view(['POST'])
+# def download_menu_secondary(request):
+#     """
+#     Downloads the menu data for the secondary school, including student and staff orders.
+#     """
+#     school_id = request.data.get('school_id')
+#     school_type = request.data.get('school_type')
+
+#     if not school_id or not school_type:
+#         return Response({"error": "Both school_id and school_type are required."}, status=status.HTTP_400_BAD_REQUEST)
+
+   
+#     if school_type == 'secondary':
+#         try:
+#             school = SecondarySchool.objects.get(id=school_id)
+#         except SecondarySchool.DoesNotExist:
+#             return Response({"error": "Secondary school not found."}, status=status.HTTP_404_NOT_FOUND)
+#     else:
+#         return Response({"error": "Invalid school type for this endpoint."}, status=status.HTTP_400_BAD_REQUEST)
+
+#     current_date = datetime.now()
+#     current_week, current_year = current_date.isocalendar()[1], current_date.year
+
+   
+#     student_orders = Order.objects.filter(
+#         secondary_school=school,
+#         week_number=current_week,
+#         year=current_year
+#     ).select_related('student')  
+#     staff_orders = Order.objects.filter(
+#         secondary_school=school,
+#         week_number=current_week,
+#         year=current_year
+#     ).select_related('staff')
+
+  
+#     workbook = openpyxl.Workbook()
+#     sheet = workbook.active
+#     sheet.title = 'Menu'
+
+ 
+#     sheet.append(["Order ID", "User Name", "Total Price", "Selected Day", "Status", "Items"])
+
+#     def get_order_items(order):
+#         items = OrderItem.objects.filter(order=order)
+#         items_data = []
+#         for item in items:
+#             items_data.append(f"{item.menu.name} x {item.quantity}") 
+#         return ", ".join(items_data)
+
+ 
+#     for order in student_orders:
+#         order_details = {
+#             "id": order.id,
+#             "user_name": order.user_name,
+#             "total_price": order.total_price,
+#             "selected_day": order.selected_day,
+#             "status": order.status,
+#             "items": get_order_items(order)  
+#         }
+#         sheet.append([order_details['id'], 
+#                       order_details['user_name'], 
+#                       order_details['total_price'], 
+#                       order_details['selected_day'], 
+#                       order_details['status'], 
+#                       order_details['items']])
+
+   
+#     for order in staff_orders:
+#         order_details = {
+#             "id": order.id,
+#             "user_name": order.user_name,
+#             "total_price": order.total_price,
+#             "selected_day": order.selected_day,
+#             "status": order.status,
+#             "items": get_order_items(order) 
+#         }
+#         sheet.append([order_details['id'], 
+#                       order_details['user_name'], 
+#                       order_details['total_price'], 
+#                       order_details['selected_day'], 
+#                       order_details['status'], 
+#                       order_details['items']])
+
+#     file_stream = BytesIO()
+#     workbook.save(file_stream)
+#     file_stream.seek(0)
+
+#     filename = f"{school.secondary_school_name}_Secondary_Menu_{current_year}_Week{current_week}.xlsx"
+
+#     response = HttpResponse(file_stream.getvalue(), content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+#     response['Content-Disposition'] = f'attachment; filename={filename}'
+#     response['Content-Length'] = str(len(file_stream.getvalue()))  
+#     return response
+
+# @api_view(['POST'])
+# def download_menu_primary(request):
+#     """
+#     Downloads the menu data for the primary school, including student and staff orders.
+#     """
+#     school_id = request.data.get('school_id')
+#     school_type = request.data.get('school_type')
+
+#     if not school_id or not school_type:
+#         return Response({"error": "Both school_id and school_type are required."}, status=status.HTTP_400_BAD_REQUEST)
+
+#     try:
+#         school = PrimarySchool.objects.get(id=school_id)
+#     except PrimarySchool.DoesNotExist:
+#         return Response({"error": "Primary school not found."}, status=status.HTTP_404_NOT_FOUND)
+
+#     current_date = datetime.now()
+#     current_week, current_year = current_date.isocalendar()[1], current_date.year
+
+   
+#     student_orders = Order.objects.filter(
+#         primary_school=school,
+#         week_number=current_week,
+#         year=current_year
+#     ).select_related('primary_student')
+
+#     staff_orders = Order.objects.filter(
+#         primary_school=school,
+#         week_number=current_week,
+#         year=current_year
+#     ).select_related('staff')
+
+    
+#     workbook = openpyxl.Workbook()
+#     sheet = workbook.active
+#     sheet.title = 'Menu'
+
+   
+#     sheet.append(["Order ID", "User Name", "Total Price", "Selected Day", "Status", "Items"])
+
+   
+#     def get_order_items(order):
+#         items = OrderItem.objects.filter(order=order)
+#         items_data = []
+#         for item in items:
+#             items_data.append(f"{item.menu.name} x {item.quantity}")  
+#         return ", ".join(items_data)
+
+   
+#     for order in student_orders:
+#         order_details = {
+#             "id": order.id,
+#             "user_name": order.user_name,
+#             "total_price": order.total_price,
+#             "selected_day": order.selected_day,
+#             "status": order.status,
+#             "items": get_order_items(order) 
+#         }
+#         sheet.append([order_details['id'], 
+#                       order_details['user_name'], 
+#                       order_details['total_price'], 
+#                       order_details['selected_day'], 
+#                       order_details['status'], 
+#                       order_details['items']])
+
+   
+#     for order in staff_orders:
+#         order_details = {
+#             "id": order.id,
+#             "user_name": order.user_name,
+#             "total_price": order.total_price,
+#             "selected_day": order.selected_day,
+#             "status": order.status,
+#             "items": get_order_items(order)  
+#         }
+#         sheet.append([order_details['id'], 
+#                       order_details['user_name'], 
+#                       order_details['total_price'], 
+#                       order_details['selected_day'], 
+#                       order_details['status'], 
+#                       order_details['items']])
+
+   
+#     file_stream = BytesIO()
+#     workbook.save(file_stream)
+#     file_stream.seek(0)
+
+   
+#     filename = f"{school.school_name}_Primary_Menu_with_Staff_{current_year}_Week{current_week}.xlsx"
+
+  
+#     response = HttpResponse(file_stream.getvalue(), content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+#     response['Content-Disposition'] = f'attachment; filename={filename}'
+#     response['Content-Length'] = str(len(file_stream.getvalue()))  
+   
+
+#     return response
 @api_view(['POST'])
 def download_menu_primary(request):
     """
@@ -1507,7 +1745,6 @@ def download_menu_primary(request):
     current_date = datetime.now()
     current_week, current_year = current_date.isocalendar()[1], current_date.year
 
-   
     student_orders = Order.objects.filter(
         primary_school=school,
         week_number=current_week,
@@ -1520,12 +1757,11 @@ def download_menu_primary(request):
         year=current_year
     ).select_related('staff')
 
-    
+   
     workbook = openpyxl.Workbook()
     sheet = workbook.active
     sheet.title = 'Menu'
 
-   
     sheet.append(["Order ID", "User Name", "Total Price", "Selected Day", "Status", "Items"])
 
    
@@ -1533,10 +1769,10 @@ def download_menu_primary(request):
         items = OrderItem.objects.filter(order=order)
         items_data = []
         for item in items:
-            items_data.append(f"{item.menu.name} x {item.quantity}")  
+            items_data.append(f"{item.menu.name} x {item.quantity}")
         return ", ".join(items_data)
 
-   
+
     for order in student_orders:
         order_details = {
             "id": order.id,
@@ -1544,16 +1780,16 @@ def download_menu_primary(request):
             "total_price": order.total_price,
             "selected_day": order.selected_day,
             "status": order.status,
-            "items": get_order_items(order) 
+            "items": get_order_items(order)
         }
-        sheet.append([order_details['id'], 
-                      order_details['user_name'], 
-                      order_details['total_price'], 
-                      order_details['selected_day'], 
-                      order_details['status'], 
+        sheet.append([order_details['id'],
+                      order_details['user_name'],
+                      order_details['total_price'],
+                      order_details['selected_day'],
+                      order_details['status'],
                       order_details['items']])
 
-   
+  
     for order in staff_orders:
         order_details = {
             "id": order.id,
@@ -1561,30 +1797,34 @@ def download_menu_primary(request):
             "total_price": order.total_price,
             "selected_day": order.selected_day,
             "status": order.status,
-            "items": get_order_items(order)  
+            "items": get_order_items(order)
         }
-        sheet.append([order_details['id'], 
-                      order_details['user_name'], 
-                      order_details['total_price'], 
-                      order_details['selected_day'], 
-                      order_details['status'], 
+        sheet.append([order_details['id'],
+                      order_details['user_name'],
+                      order_details['total_price'],
+                      order_details['selected_day'],
+                      order_details['status'],
                       order_details['items']])
 
-   
+
     file_stream = BytesIO()
     workbook.save(file_stream)
     file_stream.seek(0)
 
    
     filename = f"{school.school_name}_Primary_Menu_with_Staff_{current_year}_Week{current_week}.xlsx"
+    file_path = f'menu_files/{filename}'
 
-  
-    response = HttpResponse(file_stream.getvalue(), content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-    response['Content-Disposition'] = f'attachment; filename={filename}'
-    response['Content-Length'] = str(len(file_stream.getvalue()))  
-   
+    
+    default_storage.save(file_path, ContentFile(file_stream.getvalue()))
 
-    return response
+ 
+    file_url = default_storage.url(file_path)
+
+    
+    return JsonResponse({
+        "download_link": file_url
+    })
 
 # Menu Items
 @csrf_exempt
@@ -1723,8 +1963,6 @@ def edit_student(request, student_id):
 
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-# Orders
-
 @csrf_exempt
 @api_view(['POST'])
 def create_order(request):
@@ -1733,11 +1971,12 @@ def create_order(request):
         user_type = request.data.get('user_type')
         user_id = request.data.get('user_id')
         selected_days = request.data.get('selected_days')
-        child_id = request.data.get('child_id', None) 
-        school_id = request.data.get('school_id', None)  
+        child_id = request.data.get('child_id', None)
+        school_id = request.data.get('school_id', None)
         school_type = request.data.get('school_type', None)
         order_items_data = request.data.get('order_items', [])  
 
+        # Validate the inputs
         if not user_type or not user_id or not selected_days:
             return Response({'error': 'User type, user ID, and selected days are required.'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1748,6 +1987,7 @@ def create_order(request):
             if 'item_name' not in item or 'quantity' not in item or 'price' not in item:
                 return Response({'error': 'Each order item must have item_name, quantity, and price.'}, status=status.HTTP_400_BAD_REQUEST)
         
+    
         user = None
         if user_type == 'student':
             user = SecondaryStudent.objects.filter(id=user_id).first()
@@ -1758,112 +1998,158 @@ def create_order(request):
 
         if not user:
             return Response({'error': f'{user_type.capitalize()} not found.'}, status=status.HTTP_404_NOT_FOUND)
+        
         if user_type == 'student' and not school_id:
             return Response({'error': 'School ID is required for students.'}, status=status.HTTP_400_BAD_REQUEST)
 
         if user_type == 'parent' and not school_id:
             return Response({'error': 'School ID is required for parents.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        created_orders = [] 
-        
+        created_orders = []  
+
+        days_dict = {}
         for idx, day in enumerate(selected_days):
+            if day not in days_dict:
+                days_dict[day] = []
+            if idx < len(order_items_data):
+                days_dict[day].append(order_items_data[idx])
+
+        for day, items_for_day in days_dict.items():
             menus_for_day = Menu.objects.filter(menu_day__iexact=day)
 
             if not menus_for_day:
                 return Response({'error': f'No menus available for {day}.'}, status=status.HTTP_404_NOT_FOUND)
 
             order_total_price = 0
-            order_items = []  
+            order_items = []  # To store order items
 
-            if idx < len(order_items_data):
-                item = order_items_data[idx]
-                item_name = Menu.objects.filter(name__iexact=item['item_name'], menu_day__iexact=day).first()
+            # Prepare the order data structure
+            order_data = {
+                'user_id': user.id,
+                'user_type': user_type,
+                'total_price': 0,
+                'week_number': 0,  # To be calculated based on selected day
+                'year': 0,
+                'order_date': None,  # Set the actual order date
+                'selected_day': day,
+                'is_delivered': False,
+                'status': 'pending',
+            }
 
-                if not item_name:
-                    return Response({'error': f'Menu item with name {item["item_name"]} not found for {day}.'}, status=status.HTTP_404_NOT_FOUND)
+            if user_type in ['parent', 'staff'] and child_id:
+                order_data['child_id'] = child_id
+            if school_type == 'primary':
+                order_data['primary_school'] = school_id
+            elif school_type == 'secondary':
+                order_data['secondary_school'] = school_id
 
-               
-                try:
-                    item_price = float(item['price'])
-                except ValueError:
-                    return Response({'error': f'Invalid price value for item {item["item_name"]}.'}, status=status.HTTP_400_BAD_REQUEST)
+            today = datetime.today()
+            target_day = day.capitalize()  # Capitalizing to match the format in Menu model
+            
+            # Calculate the next occurrence of the target day
+            target_day_num = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].index(target_day)
+            days_ahead = target_day_num - today.weekday()
+            if days_ahead <= 0:  # If the target day is in the next week
+                days_ahead += 7
+            order_date = today + timedelta(days=days_ahead)
 
-                order_data = {
-                    'user_id': user.id,
-                    'user_type': user_type,
-                    'total_price': 0,
-                    'week_number': datetime.now().isocalendar()[1],
-                    'year': datetime.now().year,
-                    'order_date': datetime.now(),
-                    'selected_day': day,
-                    'is_delivered': False,
-                    'status': 'pending',
-                }
+            # Calculate the week number of the target date
+            week_number = order_date.isocalendar()[1]
+            order_date = order_date.replace(hour=0, minute=0, second=0, microsecond=0)
 
-                if user_type in ['parent', 'staff'] and child_id:
-                    order_data['child_id'] = child_id
-                if school_type == 'primary':
-                    order_data['primary_school'] = school_id
-                elif school_type == 'secondary':
-                    order_data['secondary_school'] = school_id
+            order_data['week_number'] = week_number
+            order_data['year'] = order_date.year
+            order_data['order_date'] = order_date
 
-                order_serializer = OrderSerializer(data=order_data)
-                if not order_serializer.is_valid():
-                    return Response(order_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            # Create the order instance
+            order_serializer = OrderSerializer(data=order_data)
+            if not order_serializer.is_valid():
+                return Response(order_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-                order_instance = order_serializer.save()
+            order_instance = order_serializer.save()
+
+            # Assign user_name based on user_type and child_id (for parent/staff)
+            if user_type == 'parent' or user_type == 'staff':
+                if child_id:
+                    # Fetch the child's username if child_id is provided
+                    child = PrimaryStudentsRegister.objects.filter(id=child_id).first()
+                    if child:
+                        order_instance.user_name = child.username  # Set child username
+                else:
+                    
+                    order_instance.user_name = None  
+            else:
+
+                order_instance.user_name = user.username
+
+            order_instance.save()
+
+          
+            for item in items_for_day:
+                item_name = item['item_name']
+                item_quantity = item['quantity']
 
                 
+                menu_item = menus_for_day.filter(name__iexact=item_name).first()
+
+                if not menu_item:
+                    return Response({'error': f'Menu item {item_name} not found for {day}.'}, status=status.HTTP_404_NOT_FOUND)
+
+              
                 order_item = OrderItem.objects.create(
-                    menu=item_name,
-                    quantity=item['quantity'], 
+                    menu=menu_item,  
+                    quantity=item_quantity,  
                     order=order_instance
                 )
-                order_items.append(order_item)
 
-             
-                order_total_price += item_price * item['quantity']
+                order_items.append(order_item) 
+                order_total_price += menu_item.price * item_quantity  
 
-               
-                order_instance.total_price = order_total_price
-                order_instance.save()
+            
+            order_instance.total_price = order_total_price
+            order_instance.save()
 
-               
-                order_details = {
-                    'order_id': order_instance.id,
-                    'selected_day': day,
-                    'total_price': order_instance.total_price,
-                    'order_date': str(order_instance.order_date),
-                    'status': 'pending',
-                    'week_number': order_instance.week_number,
-                    'year': order_instance.year,
-                    'items': [
-                        {
-                            'item_name': item.menu.name,
-                            'price': item_price,  
-                            'quantity': item.quantity
-                        } for item in order_items
-                    ],
-                    'user_name': order_instance.user_name, 
-                }
+            
+            order_details = {
+                'order_id': order_instance.id,
+                'selected_day': day,
+                'total_price': order_instance.total_price,
+                'order_date': order_instance.order_date.strftime('%d %b'), 
+                'status': order_instance.status,
+                'week_number': order_instance.week_number,
+                'year': order_instance.year,
+                'items': [
+                    {
+                        'item_name': order_item.menu.name,
+                        'price': order_item.menu.price,
+                        'quantity': order_item.quantity
+                    } for order_item in order_items  
+                ],
+                'user_name': order_instance.user_name,  
+            }
 
-                
-                if school_type == 'primary':
-                    order_details['school_id'] = school_id
-                    order_details['school_type'] = 'primary'
-                elif school_type == 'secondary':
-                    order_details['school_id'] = school_id
-                    order_details['school_type'] = 'secondary'
+            if school_type == 'primary':
+                order_details['school_id'] = school_id
+                order_details['school_type'] = 'primary'
+            elif school_type == 'secondary':
+                order_details['school_id'] = school_id
+                order_details['school_type'] = 'secondary'
 
-                if order_instance.user_type in ['parent', 'staff']:
-                    order_details['child_id'] = order_instance.child_id
+        
+            if child_id:
+                order_details['child_id'] = child_id
 
-                created_orders.append(order_details)
+            created_orders.append(order_details)  
 
         return Response({
             'message': 'Orders created successfully!',
             'orders': created_orders
         }, status=status.HTTP_201_CREATED)
+
+
+
+
+
 
 @api_view(['POST'])
 def complete_order(request):
@@ -1928,6 +2214,77 @@ def add_order_item(request):
             return Response(serializer.data,status=status.HTTP_201_CREATED, )
         else:
             return Response({ "error" : serializer.errors},status = status.HTTP_400_BAD_REQUEST)
+@api_view(['POST'])
+def get_all_orders(request):
+ 
+    user_type = request.data.get('user_type')
+    user_id = request.data.get('user_id')
+    child_id = request.data.get('child_id')
+
+    
+    if user_type == 'staff' and user_id:
+        try:
+            staff = StaffRegisteration.objects.get(id=user_id)
+            orders = Order.objects.filter(staff=staff).order_by('-order_date')
+        except StaffRegisteration.DoesNotExist:
+            return Response({'error': 'Staff not found.'}, status=status.HTTP_404_NOT_FOUND)
+    
+    elif user_type == 'parent' and child_id:
+        try:
+            child = PrimaryStudentsRegister.objects.get(id=child_id)
+            orders = Order.objects.filter(child_id=child_id).order_by('-order_date')
+        except PrimaryStudentsRegister.DoesNotExist:
+            return Response({'error': 'Child not found.'}, status=status.HTTP_404_NOT_FOUND)
+    
+    else:
+        orders = Order.objects.all().order_by('-order_date')
+
+    if not orders.exists():
+        return Response({'error': 'No orders found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    order_details = []
+
+    for order in orders:
+        order_items = OrderItem.objects.filter(order=order)
+        
+        items_details = [
+            {
+                'item_name': item.menu.name,
+                'item_price': item.menu.price,  
+                'quantity': item.quantity
+            }
+            for item in order_items
+        ]
+
+        formatted_order_date = order.order_date.strftime('%d %b')
+        order_data = {
+            'order_id': order.id,
+            'selected_day': order.selected_day,
+            'total_price': order.total_price,
+            'order_date': formatted_order_date,
+            'status': order.status,
+            'week_number': order.week_number,
+            'year': order.year,
+            'items': items_details,  
+            'user_name': order.user_name,
+        }
+
+        if order.user_type in ['parent', 'staff']:
+            order_data['child_id'] = order.child_id
+
+        if order.primary_school:
+            order_data['school_id'] = order.primary_school.id
+            order_data['school_type'] = 'primary'
+        elif order.secondary_school:
+            order_data['school_id'] = order.secondary_school.id
+            order_data['school_type'] = 'secondary'
+
+        order_details.append(order_data)
+
+    return Response({
+        'message': 'Orders retrieved successfully!',
+        'orders': order_details
+    }, status=status.HTTP_200_OK)
 
 @api_view(['GET'])
 def get_all_orders(request):
@@ -1952,12 +2309,12 @@ def get_all_orders(request):
             for item in order_items
         ]
 
-     
+        formatted_order_date = order.order_date.strftime('%d %b')
         order_data = {
             'order_id': order.id,
             'selected_day': order.selected_day,
             'total_price': order.total_price,
-            'order_date': str(order.order_date),
+            'order_date': formatted_order_date,
             'status': order.status,
             'week_number': order.week_number,
             'year': order.year,
@@ -1987,6 +2344,7 @@ def get_all_orders(request):
     }, status=status.HTTP_200_OK)
 
 
+
 @api_view(['GET'])
 def get_order_by_id(request, order_id):
     try:
@@ -2005,13 +2363,13 @@ def get_order_by_id(request, order_id):
             }
             for item in order_items
         ]
-
-        
+          
+        formatted_order_date = order.order_date.strftime('%d %b')
         order_data = {
             'order_id': order.id,
             'selected_day': order.selected_day,
             'total_price': order.total_price,
-            'order_date': str(order.order_date),
+            'order_date': formatted_order_date,
             'status': order.status,
             'week_number': order.week_number,
             'year': order.year,
@@ -2036,35 +2394,46 @@ def get_order_by_id(request, order_id):
 
     except Order.DoesNotExist:
         return Response({'error': 'Order not found.'}, status=status.HTTP_404_NOT_FOUND)
-
-
 @api_view(['POST'])
 def get_orders_by_user(request):
     
-    user_id = request.data.get('user_id')
+    user_id = request.data.get('user_id')  
     user_type = request.data.get('user_type')
-
+    child_id = request.data.get('child_id')  
    
-    if not user_id or not user_type:
-        return Response({'error': 'Both user_id and user_type are required.'}, status=status.HTTP_400_BAD_REQUEST)
+    if not user_type:
+        return Response({'error': 'user_type is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
 
     if user_type not in ['student', 'parent', 'staff']:
         return Response({'error': 'Invalid user_type. It should be one of ["student", "parent", "staff"].'}, status=status.HTTP_400_BAD_REQUEST)
 
+ 
+    orders = Order.objects.none()
+
+    if user_type == 'staff' and child_id:
+        orders = Order.objects.filter(child_id=child_id).order_by('-order_date')
+
+    elif user_type == 'staff' and user_id:
+        orders = Order.objects.filter(staff__id=user_id).order_by('-order_date')
+
    
-    orders = Order.objects.filter(user_id=user_id, user_type=user_type).order_by('-order_date')
+    elif user_type == 'parent':
+        orders = Order.objects.filter(user_id=user_id, user_type='parent').order_by('-order_date')
+
+    
+    elif user_type == 'student':
+        orders = Order.objects.filter(user_id=user_id, user_type='student').order_by('-order_date')
 
     if not orders.exists():
         return Response({'error': 'No orders found for the given user.'}, status=status.HTTP_404_NOT_FOUND)
 
+ 
     order_details = []
 
     for order in orders:
-       
         order_items = OrderItem.objects.filter(order=order)
-        
-       
+
         items_details = [
             {
                 'item_name': item.menu.name,
@@ -2074,12 +2443,12 @@ def get_orders_by_user(request):
             for item in order_items
         ]
 
-      
+        formatted_order_date = order.order_date.strftime('%d %b')
         order_data = {
             'order_id': order.id,
             'selected_day': order.selected_day,
             'total_price': order.total_price,
-            'order_date': str(order.order_date),
+            'order_date': formatted_order_date,
             'status': order.status,
             'week_number': order.week_number,
             'year': order.year,
@@ -2087,11 +2456,10 @@ def get_orders_by_user(request):
             'user_name': order.user_name,
         }
 
-  
         if order.user_type in ['parent', 'staff']:
             order_data['child_id'] = order.child_id
 
-      
+       
         if order.primary_school:
             order_data['school_id'] = order.primary_school.id
             order_data['school_type'] = 'primary'
@@ -2099,14 +2467,13 @@ def get_orders_by_user(request):
             order_data['school_id'] = order.secondary_school.id
             order_data['school_type'] = 'secondary'
 
-       
         order_details.append(order_data)
 
-    
     return Response({
         'message': 'Orders retrieved successfully!',
         'orders': order_details
     }, status=status.HTTP_200_OK)
+
 
 @api_view(['POST'])
 def get_orders_by_school(request):
@@ -2287,75 +2654,194 @@ def get_current_week_and_year():
     current_year = current_date.year
     return current_week, current_year
 
+ 
 
-class CreatePaymentIntentAPIView(APIView):
+class CreateOrderAndPaymentAPIView(APIView):
     def post(self, request, *args, **kwargs):
         try:
-           
             data = request.data
-            order_items = data.get('order_items', [])  
-            total_price = float(data.get('total_price', 0)) 
+            user_type = data.get('user_type')
+            user_id = data.get('user_id')
+            selected_days = data.get('selected_days')
+            order_items_data = data.get('order_items', [])
+            school_id = data.get('school_id', None)
+            school_type = data.get('school_type', None)
+            child_id = data.get('child_id', None)
+            payment_method_id = data.get("payment_method_id", None) 
+            front_end_total_price = float(data.get("total_price", 0))
+
+        
+            if not user_type or not user_id or not selected_days:
+                return Response({'error': 'User type, user ID, and selected days are required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            if not order_items_data:
+                return Response({'error': 'Order items are required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            for item in order_items_data:
+                if 'item_name' not in item or 'quantity' not in item:
+                    return Response({'error': 'Each order item must have item_name and quantity.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            user = None
+            if user_type == 'student':
+                user = SecondaryStudent.objects.filter(id=user_id).first()
+            elif user_type == 'parent':
+                user = ParentRegisteration.objects.filter(id=user_id).first()
+            elif user_type == 'staff':
+                user = StaffRegisteration.objects.filter(id=user_id).first()
+
+            if not user:
+                return Response({'error': f'{user_type.capitalize()} not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+            if user_type in ['student', 'parent'] and not school_id:
+                return Response({'error': 'School ID is required for students and parents.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            created_orders = []  
+            days_dict = {day: [] for day in selected_days}
 
            
-            user_id = request.session.get('user_id')
-            user_type = request.session.get('user_type')
-
-            selected_days = data.get('selected_day', ['Monday']) 
-
-            
-            if not isinstance(selected_days, list):
-                return Response({"error": "'selected_day' must be a list of days."}, status=status.HTTP_400_BAD_REQUEST)
-
-            current_week, current_year = get_current_week_and_year()
-
-            
-            if total_price < 50:  
-                return Response({"error": "Total amount must be at least ₹50."}, status=status.HTTP_400_BAD_REQUEST)
+            for idx, day in enumerate(selected_days):
+                if idx < len(order_items_data):
+                    days_dict[day].append(order_items_data[idx])
 
            
+            for day, items_for_day in days_dict.items():
+                menus_for_day = Menu.objects.filter(menu_day__iexact=day)
+
+                if not menus_for_day:
+                    return Response({'error': f'No menus available for {day}.'}, status=status.HTTP_404_NOT_FOUND)
+
+                order_total_price = 0 
+                order_items = []  
+
+                today = datetime.today()
+                target_day = day.capitalize()
+
+                target_day_num = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].index(target_day)
+                days_ahead = target_day_num - today.weekday()
+                if days_ahead <= 0: 
+                    days_ahead += 7
+
+                order_date = today + timedelta(days=days_ahead)
+                week_number = order_date.isocalendar()[1]
+                order_date = order_date.replace(hour=0, minute=0, second=0, microsecond=0)
+
+               
+                order_data = {
+                    'user_id': user.id,
+                    'user_type': user_type,
+                    'total_price': front_end_total_price,
+                    'week_number': week_number,
+                    'year': order_date.year,
+                    'order_date': order_date,
+                    'selected_day': day,
+                    'is_delivered': False,
+                    'status': 'pending',
+                }
+
+                if user_type in ['parent', 'staff'] and child_id:
+                    order_data['child_id'] = child_id
+                if school_type == 'primary':
+                    order_data['primary_school'] = school_id
+                elif school_type == 'secondary':
+                    order_data['secondary_school'] = school_id
+
+             
+                order_serializer = OrderSerializer(data=order_data)
+                if not order_serializer.is_valid():
+                    return Response(order_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+                order_instance = order_serializer.save()
+
+             
+                for item in items_for_day:
+                  
+                    menu_item = menus_for_day.filter(name__iexact=item['item_name']).first()
+
+                    if not menu_item:
+                        return Response({'error': f'Menu item with name {item["item_name"]} not found for {day}.'}, status=status.HTTP_404_NOT_FOUND)
+
+                  
+                    item_price = float(item["price"])  
+                    order_item = OrderItem.objects.create(
+                        menu=menu_item,
+                        quantity=item['quantity'],
+                        order=order_instance
+                    )
+                    order_items.append(order_item)
+                    order_total_price += item_price * item['quantity']  
+
+            
+                order_instance.total_price = order_total_price
+                order_instance.save()
+
+               
+                order_details = {
+                    'order_id': order_instance.id,
+                    'selected_day': day,
+                    'total_price': str(order_instance.total_price), 
+                    'order_date': order_instance.order_date,
+                    'status': 'pending',
+                    'week_number': order_instance.week_number,
+                    'year': order_instance.year,
+                    'items': [
+                        {
+                            'item_name': item.menu.name,
+                            'price': item.menu.price, 
+                            'quantity': item.quantity
+                        } for item in order_items
+                    ],
+                    'user_name': order_instance.user_name,
+                }
+
+                if school_type == 'primary':
+                    order_details['school_id'] = school_id
+                    order_details['school_type'] = 'primary'
+                elif school_type == 'secondary':
+                    order_details['school_id'] = school_id
+                    order_details['school_type'] = 'secondary'
+
+                if order_instance.user_type in ['parent', 'staff']:
+                    order_details['child_id'] = order_instance.child_id
+
+                order_details['order_date'] = order_details['order_date'].strftime('%d %b')
+
+                created_orders.append(order_details)
+
+          
+            if not payment_method_id:
+                if hasattr(user, 'credits') and user.credits >= order_total_price:
+                    user.credits -=  front_end_total_price
+                    user.save()
+                    return Response({
+                        'message': 'Orders created successfully! Credits deducted.',
+                        'orders': created_orders,
+                    }, status=status.HTTP_201_CREATED)
+                else:
+                    return Response({'error': 'Insufficient credits.'}, status=status.HTTP_400_BAD_REQUEST)
+
+         
+            total_price_in_cents = int(front_end_total_price * 100) 
             payment_intent = stripe.PaymentIntent.create(
-                amount=int(total_price * 100),  
-                currency="inr",
-                payment_method=data.get("payment_method_id"),  
+                amount=total_price_in_cents,
+                currency="eur",
+                payment_method=payment_method_id,
                 confirmation_method="manual",
                 confirm=True,
-                return_url=f"{request.scheme}://{request.get_host()}/payment-success/",  #
+                return_url=f"{request.scheme}://{request.get_host()}/payment-success/",
             )
 
-           
-            new_order = Order(
-                user_id=user_id,
-                order_date=datetime.now(),
-                selected_day=", ".join(selected_days), 
-                total_price=total_price,
-                user_type=user_type,
-                week_number=current_week,
-                year=current_year,
-            )
-            new_order.save()
-
-            
-            for item in order_items:
-                order_item = OrderItem(
-                    fk_menu_item_id=item['id'],  
-                    order_id=new_order.id,
-                    quantity=item['quantity'],
-                )
-                order_item.save()
-
-           
             return Response({
-                "payment_intent": payment_intent.client_secret,  
-                "order_id": new_order.id
-            })
+                'message': 'Orders and payment intent created successfully!',
+                'orders': created_orders,
+                'payment_intent': payment_intent.client_secret
+            }, status=status.HTTP_201_CREATED)
 
         except stripe.error.CardError as e:
-            
             return Response({"error": f"Card Error: {e.user_message}"}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
-         
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
+
+
 
 @api_view(['POST'])
 def top_up_payment(request):
@@ -2394,16 +2880,17 @@ def top_up_payment(request):
       
         payment_intent = stripe.PaymentIntent.create(
             amount=amount_in_cents, 
-            currency="inr",
+            currency="eur",
             payment_method=payment_method_id,
             confirmation_method="manual",
             confirm=True,
+            return_url=f"{request.scheme}://{request.get_host()}/payment-success/", 
         )
 
        
         if payment_intent.status == 'succeeded':
            
-            user.top_up_credits(amount)  
+            user.top_up_credits(float(amount))  
             return Response({"message": f"{user_type.capitalize()} credits successfully updated."}, status=status.HTTP_200_OK)
         else:
             return Response({"error": "Payment failed."}, status=status.HTTP_400_BAD_REQUEST)

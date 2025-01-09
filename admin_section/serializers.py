@@ -13,7 +13,13 @@ class ParentRegisterationSerializer(serializers.ModelSerializer):
    
     class Meta:
         model = ParentRegisteration
-        fields = ['id','first_name', 'last_name', 'username', 'email','phone_no','allergies','password']
+        fields = ['id','first_name', 'last_name', 'username', 'email','phone_no','allergies','credits','password']
+        def update(self, instance, validated_data):
+       
+         if 'password' not in validated_data:
+            validated_data['password'] = instance.password 
+
+         return super().update(instance, validated_data)
         
 
 class StaffRegisterationSerializer(serializers.ModelSerializer):
@@ -21,12 +27,17 @@ class StaffRegisterationSerializer(serializers.ModelSerializer):
     allergies = serializers.SlugRelatedField(queryset=Allergens.objects.all(), slug_field='allergy', many=True, required=False)
     class Meta:
         model = StaffRegisteration
-        fields = ['id','first_name', 'last_name', 'username', 'email','phone_no',"allergies",'password','primary_school','secondary_school']
-    def create(self, validated_data):
+        fields = ['id','first_name', 'last_name', 'username', 'email','phone_no',"allergies",'credits','password','primary_school','secondary_school']
+    def update(self, instance, validated_data):
        
-        # Handle school assignment based on school_type
-        school_type = validated_data.get('school_type')  # school_type from the validated data
-        school_id = validated_data.get('school_id')  # school_id from the validated data
+        if 'password' not in validated_data:
+            validated_data['password'] = instance.password 
+
+        return super().update(instance, validated_data)
+    def create(self, validated_data):
+
+        school_type = validated_data.get('school_type')  
+        school_id = validated_data.get('school_id')  
 
         if school_type == "primary":
             validated_data['primary_school'] = PrimarySchool.objects.get(id=school_id)
@@ -46,7 +57,12 @@ class CanteenStaffSerializer(serializers.ModelSerializer):
     class Meta:
         model = CanteenStaff
         fields = ['id', 'username', 'email', 'password', 'school_type','primary_school', 'secondary_school']
+    def update(self, instance, validated_data):
+       
+         if 'password' not in validated_data:
+            validated_data['password'] = instance.password 
 
+         return super().update(instance, validated_data)
    
  
 class LoginSerializer(serializers.Serializer):
@@ -114,7 +130,15 @@ class SecondaryStudentSerializer(serializers.ModelSerializer):
     school = serializers.PrimaryKeyRelatedField(queryset=SecondarySchool.objects.all()) 
     class Meta:
         model = SecondaryStudent
-        fields = ['id', 'first_name', 'last_name', 'username', 'email', 'phone_no', 'class_year', 'school_name','school' , 'allergies','password']
+        fields = ['id', 'first_name', 'last_name', 'username', 'email', 'phone_no', 'class_year', 'school_name','school' , 'allergies','credits','password']
+    def update(self, instance, validated_data):
+       
+         if 'password' not in validated_data:
+            validated_data['password'] = instance.password 
+
+        
+         return super().update(instance, validated_data)
+
 class TopUpCreditsSerializer(serializers.Serializer):
     amount = serializers.IntegerField(min_value=1, required=True)
     user_id = serializers.IntegerField(required=True)  
@@ -123,15 +147,20 @@ class TopUpCreditsSerializer(serializers.Serializer):
 class StaffRegisterationSerializer(serializers.ModelSerializer):
     allergies = serializers.SlugRelatedField(queryset=Allergens.objects.all(), slug_field='allergy', many=True, required=False)
     
-    # School fields: will return the appropriate school based on type (primary or secondary)
+   
     school_name = serializers.CharField(source='get_school_name', read_only=True)
     primary_school = serializers.PrimaryKeyRelatedField(queryset=PrimarySchool.objects.all(), required=False)
     secondary_school = serializers.PrimaryKeyRelatedField(queryset=SecondarySchool.objects.all(), required=False)
     
     class Meta:
         model = StaffRegisteration
-        fields = ['id', 'first_name', 'last_name', 'username', 'email', 'phone_no', 'allergies', 'password', 'primary_school', 'secondary_school', 'school_name']
+        fields = ['id', 'first_name', 'last_name', 'username', 'email', 'phone_no', 'allergies','credits', 'password', 'primary_school', 'secondary_school', 'school_name']
+    def update(self, instance, validated_data):
+       
+         if 'password' not in validated_data:
+            validated_data['password'] = instance.password 
 
+         return super().update(instance, validated_data)
   
 
 class SecondarySchoolSerializer(serializers.ModelSerializer):
@@ -148,7 +177,7 @@ class PrimaryStudentSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = PrimaryStudentsRegister
-        fields =['id', 'first_name', 'last_name',  'class_year', 'teacher','school' , 'allergies','parent','staff']
+        fields =['id', 'first_name', 'last_name', "username", 'class_year', 'teacher','school' , 'allergies','parent','staff']
 
 
 class CategoriesSerializer(serializers.ModelSerializer):
@@ -233,32 +262,4 @@ class ContactMessageSerializer(serializers.ModelSerializer):
         model = ContactMessage
         fields = ['full_name', 'email', 'phone', 'subject', 'message', 'photo_filename']
 
-    # def validate_full_name(self, value):
-    #     # Ensure full_name contains only alphabets and spaces
-    #     if not re.match(r'^[a-zA-Z\s]+$', value):
-    #         raise serializers.ValidationError("Invalid name. Please use only letters and spaces.")
-    #     return value
-
-    # def validate_email(self, value):
-    #     # Validate email format
-    #     if not re.match(r'^[^@]+@[^@]+\.[^@]+$', value):
-    #         raise serializers.ValidationError("Invalid email address. Please provide a valid email.")
-    #     return value
-
-    # def validate_phone(self, value):
-    #     # Validate phone number format (optional, it could be None)
-    #     if value and not re.match(r'^\+?[0-9\s\-]+$', str(value)):
-    #         raise serializers.ValidationError("Invalid phone number. Use only numbers, spaces, hyphens, or a leading +.")
-    #     return value
-
-    # def validate_subject(self, value):
-    #     # Validate subject length
-    #     if len(value) > 100:
-    #         raise serializers.ValidationError("Subject must not exceed 100 characters.")
-    #     return value
-
-    # def validate_message(self, value):
-    #     # Validate message length
-    #     if len(value) > 1000:
-    #         raise serializers.ValidationError("Message must not exceed 1000 characters.")
-    #     return value
+    

@@ -31,12 +31,13 @@ class ParentRegisteration(models.Model):
     phone_no = models.IntegerField( blank=True, null=True)
     password=models.CharField(max_length=128)
     allergies=models.ManyToManyField(Allergens, blank=True,null=True) 
-    credits = models.IntegerField(default=0)
+    credits = models.FloatField(default=0.0)
     def save(self, *args, **kwargs):
-        # Hash the password before saving it
-        if self.password:
+      
+        if self.password and (not self.pk or not ParentRegisteration.objects.filter(id=self.pk, password=self.password).exists()):
             self.password = make_password(self.password)
         super().save(*args, **kwargs)
+       
     def top_up_credits(self, amount):
         """Add credits to the staff account"""
         self.credits += amount
@@ -52,12 +53,13 @@ class StaffRegisteration(models.Model):
     password=models.CharField(max_length=128)
     primary_school=models.ForeignKey(PrimarySchool, on_delete=models.CASCADE, null=True, blank=True)
     secondary_school=models.ForeignKey(SecondarySchool, on_delete=models.CASCADE, null=True, blank=True)
-    credits = models.IntegerField(default=0) 
+    credits = models.FloatField(default=0.0)
     def save(self, *args, **kwargs):
-        # Hash the password before saving it
-        if self.password:
+      
+        if self.password and (not self.pk or not StaffRegisteration.objects.filter(id=self.pk, password=self.password).exists()):
             self.password = make_password(self.password)
         super().save(*args, **kwargs)
+       
     def top_up_credits(self, amount):
         """Add credits to the staff account"""
         self.credits += amount
@@ -87,13 +89,13 @@ class SecondaryStudent(models.Model):
     class_year = models.CharField(max_length=30,default="")
     allergies=models.ManyToManyField(Allergens,null=True, blank=True)  
     school = models.ForeignKey(SecondarySchool, on_delete=models.CASCADE, related_name='student',null=True, blank=True)
-    credits = models.IntegerField(default=0)
+    credits = models.FloatField(default=0.0)
    
     def __str__(self):
         return f"{self.username} - {self.class_year}-{self.id}"
     def save(self, *args, **kwargs):
-        # Hash the password before saving it
-        if self.password:
+      
+        if self.password and (not self.pk or not SecondaryStudent.objects.filter(id=self.pk, password=self.password).exists()):
             self.password = make_password(self.password)
         super().save(*args, **kwargs)
 
@@ -107,7 +109,7 @@ class SecondaryStudent(models.Model):
 class PrimaryStudentsRegister(models.Model):
     first_name = models.CharField(max_length=30)
     last_name = models.CharField(max_length=30)
-    
+    username = models.CharField(max_length=60, unique=True, blank=True, null=True)
     class_year = models.CharField(max_length=30)
     school = models.ForeignKey(PrimarySchool, on_delete=models.CASCADE, related_name='student')
     teacher=models.ForeignKey(Teacher, on_delete=models.CASCADE, related_name='student_teacher',null=True, blank=True)
@@ -174,7 +176,7 @@ class MenuItems(models.Model):
         return f"{self.id} Items:   {self.item_name}"
     
 class OrderItem(models.Model):
-    menu  = models.ForeignKey('Menu', on_delete=models.CASCADE,related_name='orderitem')  
+    menu  = models.ForeignKey('Menu', on_delete=models.CASCADE,related_name='menuitem')  
     order = models.ForeignKey('Order', on_delete=models.CASCADE,related_name='orderitem')  
     quantity = models.IntegerField() 
 
@@ -235,9 +237,10 @@ class CanteenStaff(models.Model):
     primary_school = models.ForeignKey(PrimarySchool, on_delete=models.SET_NULL, null=True, blank=True)
     secondary_school = models.ForeignKey(SecondarySchool, on_delete=models.SET_NULL, null=True, blank=True)
     def save(self, *args, **kwargs):
-        # Hash the password before saving it
-        if self.password:
+      
+        if self.password and (not self.pk or not CanteenStaff.objects.filter(id=self.pk, password=self.password).exists()):
             self.password = make_password(self.password)
+        
 
       
         if self.school_type == 'primary':
