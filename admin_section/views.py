@@ -2373,7 +2373,7 @@ class CreateOrderAndPaymentAPIView(APIView):
             school_id = data.get('school_id', None)
             school_type = data.get('school_type', None)
             child_id = data.get('child_id', None)
-            payment_method_id = data.get("payment_method_id", None) 
+            payment_method_id = data.get("payment_method_id", None)
             front_end_total_price = float(data.get("total_price", 0))
 
             
