@@ -199,7 +199,7 @@ class Order(models.Model):
     student = models.ForeignKey(SecondaryStudent, null=True, blank=True, on_delete=models.CASCADE, related_name='student')
     user_name = models.CharField(max_length=100, null=True, blank=True)
     
-    
+    payment_id = models.CharField(max_length=200, null=True, blank=True)
     items_name=models.ForeignKey(OrderItem, null=True, blank=True, on_delete=models.CASCADE, related_name='orderItem')
     primary_school = models.ForeignKey(PrimarySchool, on_delete=models.SET_NULL, null=True, blank=True)
     secondary_school = models.ForeignKey(SecondarySchool, on_delete=models.SET_NULL, null=True, blank=True)

@@ -231,6 +231,8 @@ class OrderSerializer(serializers.ModelSerializer):
     items = OrderItemSerializer(many=True, read_only=True)
     user_name = serializers.SerializerMethodField()  
     child_id = serializers.IntegerField(required=False, allow_null=True)  
+    payment_method_id = serializers.CharField(source='payment_id', required=False)
+
 
     week_number = serializers.IntegerField(default=datetime.now().isocalendar()[1], read_only=False)
     year = serializers.IntegerField(default=datetime.now().year, read_only=False)

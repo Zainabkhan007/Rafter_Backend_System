@@ -5,9 +5,21 @@ import os
 from rest_framework.generics import ListAPIView
 from .serializers import *
 import re
+from django.contrib.auth.models import User
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from django.utils.timezone import now
+import logging
+from collections import defaultdict
+from django.utils.timezone import localtime
 
+from io import BytesIO
+from openpyxl import Workbook
+from datetime import date
+import datetime
 import json
+from django_rest_passwordreset.signals import reset_password_token_created
 from django.views.decorators.csrf import csrf_exempt
+
 from django.shortcuts import get_object_or_404
 from rest_framework.filters import SearchFilter
 from io import BytesIO
@@ -19,7 +31,7 @@ from django.db.models import Count
 from rest_framework.exceptions import NotFound
 import calendar
 import stripe
-
+import datetime
 from django.contrib.auth import authenticate
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.conf import settings
@@ -28,7 +40,7 @@ from .models import *
 from django.core.mail import send_mail
 from django.core.files.storage import default_storage
 from django.core.files.base import ContentFile
-
+logger = logging.getLogger(__name__)
 stripe.api_key = settings.STRIPE_SECRET_KEY
 ALLOWED_FILE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif']
 @api_view(["POST"])
@@ -167,6 +179,9 @@ def admin_login(request):
 
      return Response({'detail': 'Login successful!'}, status=status.HTTP_200_OK)
 
+
+
+
 @api_view(["GET"])
 def get_user_info(request, user_type, id):
     if user_type == "parent":
@@ -254,7 +269,7 @@ def get_user_info(request, user_type, id):
         return Response({"error": "Invalid user_type."}, status=status.HTTP_400_BAD_REQUEST)
 
 
-@api_view(["GET", "PUT"])
+@api_view(["GET", "PUT","DELETE"])
 def update_user_info(request, user_type, id):
     # Handling GET request to fetch user data
     if request.method == "GET":
@@ -393,10 +408,39 @@ def update_user_info(request, user_type, id):
         else:
             return Response({"error": "Invalid user_type."}, status=status.HTTP_400_BAD_REQUEST)
 
+    elif request.method == "DELETE":
+        if user_type == "parent":
+            try:
+                parent = ParentRegisteration.objects.get(id=id)
+                parent.delete()
+                return Response({
+                    "message": "Parent deleted successfully."
+                }, status=status.HTTP_204_NO_CONTENT)
+            except ParentRegisteration.DoesNotExist:
+                return Response({"error": "Parent not found."}, status=status.HTTP_404_NOT_FOUND)
 
+        elif user_type == "staff":
+            try:
+                staff = StaffRegisteration.objects.get(id=id)
+                staff.delete()
+                return Response({
+                    "message": "Staff deleted successfully."
+                }, status=status.HTTP_204_NO_CONTENT)
+            except StaffRegisteration.DoesNotExist:
+                return Response({"error": "Staff not found."}, status=status.HTTP_404_NOT_FOUND)
 
+        elif user_type == "student":
+            try:
+                student = SecondaryStudent.objects.get(id=id)
+                student.delete()
+                return Response({
+                    "message": "Student deleted successfully."
+                }, status=status.HTTP_204_NO_CONTENT)
+            except SecondaryStudent.DoesNotExist:
+                return Response({"error": "Student not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        
+        else:
+            return Response({"error": "Invalid user_type."}, status=status.HTTP_400_BAD_REQUEST)
 # Canteen Staff
 @csrf_exempt
 @api_view(['GET',])
@@ -520,7 +564,7 @@ def add_child(request):
 
 
     
-@api_view(['GET', 'PUT'])
+@api_view(['GET', 'PUT',"DELETE"])
 def edit_child(request, child_id):
     child = get_object_or_404(PrimaryStudentsRegister, id=child_id)
 
@@ -567,6 +611,13 @@ def edit_child(request, child_id):
             'message': 'Child details updated successfully.',
             'child': PrimaryStudentSerializer(child).data
         }, status=status.HTTP_200_OK)
+    
+    elif request.method == 'DELETE':
+        # Deleting the child record
+        child.delete()
+        return Response({
+            'message': 'Child record deleted successfully.'
+        }, status=status.HTTP_204_NO_CONTENT)
 # Primary School Sction
 @csrf_exempt
 @api_view(['POST'])
@@ -1431,402 +1482,19 @@ def get_cycle_names(request):
         'cycle_names': cycle_names
     }, status=status.HTTP_200_OK)
 
-@api_view(['POST'])
-def download_menu_secondary(request):
-    """
-    Downloads the menu data for the secondary school, including student and staff orders.
-    """
-    school_id = request.data.get('school_id')
-    school_type = request.data.get('school_type')
 
-    if not school_id or not school_type:
-        return Response({"error": "Both school_id and school_type are required."}, status=status.HTTP_400_BAD_REQUEST)
 
-   
-    if school_type == 'secondary':
-        try:
-            school = SecondarySchool.objects.get(id=school_id)
-        except SecondarySchool.DoesNotExist:
-            return Response({"error": "Secondary school not found."}, status=status.HTTP_404_NOT_FOUND)
-    else:
-        return Response({"error": "Invalid school type for this endpoint."}, status=status.HTTP_400_BAD_REQUEST)
+        
+def get_custom_week_and_year():
+    import datetime
+    today = datetime.date.today()
+    week_number = today.isocalendar()[1]  # Week number of the current year
+    year = today.year
+    return week_number, year
 
-    current_date = datetime.now()
-    current_week, current_year = current_date.isocalendar()[1], current_date.year
 
-    student_orders = Order.objects.filter(
-        secondary_school=school,
-        week_number=current_week,
-        year=current_year
-    ).select_related('student')
 
-    staff_orders = Order.objects.filter(
-        secondary_school=school,
-        week_number=current_week,
-        year=current_year
-    ).select_related('staff')
-
-
-    workbook = openpyxl.Workbook()
-    sheet = workbook.active
-    sheet.title = 'Menu'
-
-    sheet.append(["Order ID", "User Name", "Total Price", "Selected Day", "Status", "Items"])
-
-    def get_order_items(order):
-        items = OrderItem.objects.filter(order=order)
-        items_data = []
-        for item in items:
-            items_data.append(f"{item.menu.name} x {item.quantity}")
-        return ", ".join(items_data)
-
-
-    for order in student_orders:
-        order_details = {
-            "id": order.id,
-            "user_name": order.user_name,
-            "total_price": order.total_price,
-            "selected_day": order.selected_day,
-            "status": order.status,
-            "items": get_order_items(order)
-        }
-        sheet.append([order_details['id'],
-                      order_details['user_name'],
-                      order_details['total_price'],
-                      order_details['selected_day'],
-                      order_details['status'],
-                      order_details['items']])
-
-  
-    for order in staff_orders:
-        order_details = {
-            "id": order.id,
-            "user_name": order.user_name,
-            "total_price": order.total_price,
-            "selected_day": order.selected_day,
-            "status": order.status,
-            "items": get_order_items(order)
-        }
-        sheet.append([order_details['id'],
-                      order_details['user_name'],
-                      order_details['total_price'],
-                      order_details['selected_day'],
-                      order_details['status'],
-                      order_details['items']])
-
-  
-    file_stream = BytesIO()
-    workbook.save(file_stream)
-    file_stream.seek(0)
-
-
-    filename = f"{school.secondary_school_name}_Secondary_Menu_{current_year}_Week{current_week}.xlsx"
-    file_path = f'menu_files/{filename}'
-
-  
-    default_storage.save(file_path, ContentFile(file_stream.getvalue()))
-
-
-    file_url = default_storage.url(file_path)
-
-  
-    return JsonResponse({
-        "download_link": file_url
-    })
-
-# @api_view(['POST'])
-# def download_menu_secondary(request):
-#     """
-#     Downloads the menu data for the secondary school, including student and staff orders.
-#     """
-#     school_id = request.data.get('school_id')
-#     school_type = request.data.get('school_type')
-
-#     if not school_id or not school_type:
-#         return Response({"error": "Both school_id and school_type are required."}, status=status.HTTP_400_BAD_REQUEST)
-
-   
-#     if school_type == 'secondary':
-#         try:
-#             school = SecondarySchool.objects.get(id=school_id)
-#         except SecondarySchool.DoesNotExist:
-#             return Response({"error": "Secondary school not found."}, status=status.HTTP_404_NOT_FOUND)
-#     else:
-#         return Response({"error": "Invalid school type for this endpoint."}, status=status.HTTP_400_BAD_REQUEST)
-
-#     current_date = datetime.now()
-#     current_week, current_year = current_date.isocalendar()[1], current_date.year
-
-   
-#     student_orders = Order.objects.filter(
-#         secondary_school=school,
-#         week_number=current_week,
-#         year=current_year
-#     ).select_related('student')  
-#     staff_orders = Order.objects.filter(
-#         secondary_school=school,
-#         week_number=current_week,
-#         year=current_year
-#     ).select_related('staff')
-
-  
-#     workbook = openpyxl.Workbook()
-#     sheet = workbook.active
-#     sheet.title = 'Menu'
-
- 
-#     sheet.append(["Order ID", "User Name", "Total Price", "Selected Day", "Status", "Items"])
-
-#     def get_order_items(order):
-#         items = OrderItem.objects.filter(order=order)
-#         items_data = []
-#         for item in items:
-#             items_data.append(f"{item.menu.name} x {item.quantity}") 
-#         return ", ".join(items_data)
-
- 
-#     for order in student_orders:
-#         order_details = {
-#             "id": order.id,
-#             "user_name": order.user_name,
-#             "total_price": order.total_price,
-#             "selected_day": order.selected_day,
-#             "status": order.status,
-#             "items": get_order_items(order)  
-#         }
-#         sheet.append([order_details['id'], 
-#                       order_details['user_name'], 
-#                       order_details['total_price'], 
-#                       order_details['selected_day'], 
-#                       order_details['status'], 
-#                       order_details['items']])
-
-   
-#     for order in staff_orders:
-#         order_details = {
-#             "id": order.id,
-#             "user_name": order.user_name,
-#             "total_price": order.total_price,
-#             "selected_day": order.selected_day,
-#             "status": order.status,
-#             "items": get_order_items(order) 
-#         }
-#         sheet.append([order_details['id'], 
-#                       order_details['user_name'], 
-#                       order_details['total_price'], 
-#                       order_details['selected_day'], 
-#                       order_details['status'], 
-#                       order_details['items']])
-
-#     file_stream = BytesIO()
-#     workbook.save(file_stream)
-#     file_stream.seek(0)
-
-#     filename = f"{school.secondary_school_name}_Secondary_Menu_{current_year}_Week{current_week}.xlsx"
-
-#     response = HttpResponse(file_stream.getvalue(), content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-#     response['Content-Disposition'] = f'attachment; filename={filename}'
-#     response['Content-Length'] = str(len(file_stream.getvalue()))  
-#     return response
-
-# @api_view(['POST'])
-# def download_menu_primary(request):
-#     """
-#     Downloads the menu data for the primary school, including student and staff orders.
-#     """
-#     school_id = request.data.get('school_id')
-#     school_type = request.data.get('school_type')
-
-#     if not school_id or not school_type:
-#         return Response({"error": "Both school_id and school_type are required."}, status=status.HTTP_400_BAD_REQUEST)
-
-#     try:
-#         school = PrimarySchool.objects.get(id=school_id)
-#     except PrimarySchool.DoesNotExist:
-#         return Response({"error": "Primary school not found."}, status=status.HTTP_404_NOT_FOUND)
-
-#     current_date = datetime.now()
-#     current_week, current_year = current_date.isocalendar()[1], current_date.year
-
-   
-#     student_orders = Order.objects.filter(
-#         primary_school=school,
-#         week_number=current_week,
-#         year=current_year
-#     ).select_related('primary_student')
-
-#     staff_orders = Order.objects.filter(
-#         primary_school=school,
-#         week_number=current_week,
-#         year=current_year
-#     ).select_related('staff')
-
-    
-#     workbook = openpyxl.Workbook()
-#     sheet = workbook.active
-#     sheet.title = 'Menu'
-
-   
-#     sheet.append(["Order ID", "User Name", "Total Price", "Selected Day", "Status", "Items"])
-
-   
-#     def get_order_items(order):
-#         items = OrderItem.objects.filter(order=order)
-#         items_data = []
-#         for item in items:
-#             items_data.append(f"{item.menu.name} x {item.quantity}")  
-#         return ", ".join(items_data)
-
-   
-#     for order in student_orders:
-#         order_details = {
-#             "id": order.id,
-#             "user_name": order.user_name,
-#             "total_price": order.total_price,
-#             "selected_day": order.selected_day,
-#             "status": order.status,
-#             "items": get_order_items(order) 
-#         }
-#         sheet.append([order_details['id'], 
-#                       order_details['user_name'], 
-#                       order_details['total_price'], 
-#                       order_details['selected_day'], 
-#                       order_details['status'], 
-#                       order_details['items']])
-
-   
-#     for order in staff_orders:
-#         order_details = {
-#             "id": order.id,
-#             "user_name": order.user_name,
-#             "total_price": order.total_price,
-#             "selected_day": order.selected_day,
-#             "status": order.status,
-#             "items": get_order_items(order)  
-#         }
-#         sheet.append([order_details['id'], 
-#                       order_details['user_name'], 
-#                       order_details['total_price'], 
-#                       order_details['selected_day'], 
-#                       order_details['status'], 
-#                       order_details['items']])
-
-   
-#     file_stream = BytesIO()
-#     workbook.save(file_stream)
-#     file_stream.seek(0)
-
-   
-#     filename = f"{school.school_name}_Primary_Menu_with_Staff_{current_year}_Week{current_week}.xlsx"
-
-  
-#     response = HttpResponse(file_stream.getvalue(), content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-#     response['Content-Disposition'] = f'attachment; filename={filename}'
-#     response['Content-Length'] = str(len(file_stream.getvalue()))  
-   
-
-#     return response
-@api_view(['POST'])
-def download_menu_primary(request):
-    """
-    Downloads the menu data for the primary school, including student and staff orders.
-    """
-    school_id = request.data.get('school_id')
-    school_type = request.data.get('school_type')
-
-    if not school_id or not school_type:
-        return Response({"error": "Both school_id and school_type are required."}, status=status.HTTP_400_BAD_REQUEST)
-
-    try:
-        school = PrimarySchool.objects.get(id=school_id)
-    except PrimarySchool.DoesNotExist:
-        return Response({"error": "Primary school not found."}, status=status.HTTP_404_NOT_FOUND)
-
-    current_date = datetime.now()
-    current_week, current_year = current_date.isocalendar()[1], current_date.year
-
-    student_orders = Order.objects.filter(
-        primary_school=school,
-        week_number=current_week,
-        year=current_year
-    ).select_related('primary_student')
-
-    staff_orders = Order.objects.filter(
-        primary_school=school,
-        week_number=current_week,
-        year=current_year
-    ).select_related('staff')
-
-   
-    workbook = openpyxl.Workbook()
-    sheet = workbook.active
-    sheet.title = 'Menu'
-
-    sheet.append(["Order ID", "User Name", "Total Price", "Selected Day", "Status", "Items"])
-
-   
-    def get_order_items(order):
-        items = OrderItem.objects.filter(order=order)
-        items_data = []
-        for item in items:
-            items_data.append(f"{item.menu.name} x {item.quantity}")
-        return ", ".join(items_data)
-
-
-    for order in student_orders:
-        order_details = {
-            "id": order.id,
-            "user_name": order.user_name,
-            "total_price": order.total_price,
-            "selected_day": order.selected_day,
-            "status": order.status,
-            "items": get_order_items(order)
-        }
-        sheet.append([order_details['id'],
-                      order_details['user_name'],
-                      order_details['total_price'],
-                      order_details['selected_day'],
-                      order_details['status'],
-                      order_details['items']])
-
-  
-    for order in staff_orders:
-        order_details = {
-            "id": order.id,
-            "user_name": order.user_name,
-            "total_price": order.total_price,
-            "selected_day": order.selected_day,
-            "status": order.status,
-            "items": get_order_items(order)
-        }
-        sheet.append([order_details['id'],
-                      order_details['user_name'],
-                      order_details['total_price'],
-                      order_details['selected_day'],
-                      order_details['status'],
-                      order_details['items']])
-
-
-    file_stream = BytesIO()
-    workbook.save(file_stream)
-    file_stream.seek(0)
-
-   
-    filename = f"{school.school_name}_Primary_Menu_with_Staff_{current_year}_Week{current_week}.xlsx"
-    file_path = f'menu_files/{filename}'
-
-    
-    default_storage.save(file_path, ContentFile(file_stream.getvalue()))
-
- 
-    file_url = default_storage.url(file_path)
-
-    
-    return JsonResponse({
-        "download_link": file_url
-    })
-
-# Menu Items
+# MenuItems
 @csrf_exempt
 @api_view(['POST'])
 def add_menu_item(request):
@@ -2177,31 +1845,67 @@ def complete_order(request):
     except Order.DoesNotExist:
         return Response({'error': 'Order not found.'}, status=status.HTTP_404_NOT_FOUND)
 
+
 @api_view(['POST'])
 def cancel_order(request):
-    
     order_id = request.data.get('order_id')
 
     if not order_id:
         return Response({'error': 'Order ID is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
     try:
-        
+       
         order = Order.objects.get(id=order_id)
 
+       
         order.status = 'cancelled'
         order.is_delivered = False
         order.save()
 
-        return Response({
-            'message': 'Order cancelled successfully!',
+      
+        credit_message = None
+        user = None
+
+        if not order.payment_method_id: 
+         
+            if order.user_type == 'student':
+        
+                user = SecondaryStudent.objects.get(id=order.user_id)
+            elif order.user_type == 'parent':
+            
+                user = ParentRegisteration.objects.get(id=order.user_id)
+            elif order.user_type == 'staff':
+            
+                user = StaffRegisteration.objects.get(id=order.user_id)
+
+            user.credits += order.total_price
+            user.save()
+
+            credit_message = f"Credits of {order.total_price} have been added to your account."
+        
+      
+        order_info = {
             'order_id': order.id,
+            'user_name': order.user_name,
+            'total_price': order.total_price,
+            'payment_method_id': order.payment_method_id if hasattr(order, 'payment_method_id') else None,
             'status': order.status,
             'is_delivered': order.is_delivered,
+            'credit_message': credit_message,
+            'user_credits': user.credits if user else None, 
+        }
+
+        return Response({
+            'message': 'Order cancelled successfully!',
+            'order_info': order_info
         }, status=status.HTTP_200_OK)
 
     except Order.DoesNotExist:
         return Response({'error': 'Order not found.'}, status=status.HTTP_404_NOT_FOUND)
+    except (ParentRegisteration.DoesNotExist, StaffRegisteration.DoesNotExist, SecondaryStudent.DoesNotExist):
+        return Response({'error': 'User not found for credits update.'}, status=status.HTTP_404_NOT_FOUND)
+
+
 
 
 @csrf_exempt
@@ -2415,7 +2119,7 @@ def get_orders_by_user(request):
         orders = Order.objects.filter(child_id=child_id).order_by('-order_date')
 
     elif user_type == 'staff' and user_id:
-        orders = Order.objects.filter(staff__id=user_id).order_by('-order_date')
+        orders = Order.objects.filter(user_id=user_id,user_type='staff').order_by('-order_date')
 
    
     elif user_type == 'parent':
@@ -2654,7 +2358,9 @@ def get_current_week_and_year():
     current_year = current_date.year
     return current_week, current_year
 
- 
+
+
+stripe.api_key = "your_stripe_api_key_here"
 
 class CreateOrderAndPaymentAPIView(APIView):
     def post(self, request, *args, **kwargs):
@@ -2670,7 +2376,7 @@ class CreateOrderAndPaymentAPIView(APIView):
             payment_method_id = data.get("payment_method_id", None) 
             front_end_total_price = float(data.get("total_price", 0))
 
-        
+            
             if not user_type or not user_id or not selected_days:
                 return Response({'error': 'User type, user ID, and selected days are required.'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -2698,12 +2404,10 @@ class CreateOrderAndPaymentAPIView(APIView):
             created_orders = []  
             days_dict = {day: [] for day in selected_days}
 
-           
             for idx, day in enumerate(selected_days):
                 if idx < len(order_items_data):
                     days_dict[day].append(order_items_data[idx])
 
-           
             for day, items_for_day in days_dict.items():
                 menus_for_day = Menu.objects.filter(menu_day__iexact=day)
 
@@ -2725,7 +2429,6 @@ class CreateOrderAndPaymentAPIView(APIView):
                 week_number = order_date.isocalendar()[1]
                 order_date = order_date.replace(hour=0, minute=0, second=0, microsecond=0)
 
-               
                 order_data = {
                     'user_id': user.id,
                     'user_type': user_type,
@@ -2745,22 +2448,20 @@ class CreateOrderAndPaymentAPIView(APIView):
                 elif school_type == 'secondary':
                     order_data['secondary_school'] = school_id
 
-             
+                if 'payment_method_id' in data:
+                 order_data['payment_id'] = data['payment_method_id']
                 order_serializer = OrderSerializer(data=order_data)
                 if not order_serializer.is_valid():
                     return Response(order_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
                 order_instance = order_serializer.save()
 
-             
                 for item in items_for_day:
-                  
                     menu_item = menus_for_day.filter(name__iexact=item['item_name']).first()
 
                     if not menu_item:
                         return Response({'error': f'Menu item with name {item["item_name"]} not found for {day}.'}, status=status.HTTP_404_NOT_FOUND)
 
-                  
                     item_price = float(item["price"])  
                     order_item = OrderItem.objects.create(
                         menu=menu_item,
@@ -2770,11 +2471,9 @@ class CreateOrderAndPaymentAPIView(APIView):
                     order_items.append(order_item)
                     order_total_price += item_price * item['quantity']  
 
-            
                 order_instance.total_price = order_total_price
                 order_instance.save()
 
-               
                 order_details = {
                     'order_id': order_instance.id,
                     'selected_day': day,
@@ -2807,10 +2506,9 @@ class CreateOrderAndPaymentAPIView(APIView):
 
                 created_orders.append(order_details)
 
-          
             if not payment_method_id:
                 if hasattr(user, 'credits') and user.credits >= order_total_price:
-                    user.credits -=  front_end_total_price
+                    user.credits -= front_end_total_price
                     user.save()
                     return Response({
                         'message': 'Orders created successfully! Credits deducted.',
@@ -2819,12 +2517,11 @@ class CreateOrderAndPaymentAPIView(APIView):
                 else:
                     return Response({'error': 'Insufficient credits.'}, status=status.HTTP_400_BAD_REQUEST)
 
-         
             total_price_in_cents = int(front_end_total_price * 100) 
             payment_intent = stripe.PaymentIntent.create(
                 amount=total_price_in_cents,
                 currency="eur",
-                payment_method=payment_method_id,
+                payment_method=payment_method_id,  # Correct payment method
                 confirmation_method="manual",
                 confirm=True,
                 return_url=f"{request.scheme}://{request.get_host()}/payment-success/",
@@ -2901,3 +2598,223 @@ def top_up_payment(request):
         return Response({"error": f"Stripe error: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     except Exception as e:
         return Response({"error": f"Error processing payment: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+def get_custom_week_and_year():
+  
+    today = datetime.today()
+    return today.isocalendar()[1], today.year  
+
+
+
+
+
+def get_custom_week_and_year():
+  
+    today = datetime.today()
+    return today.isocalendar()[1], today.year  
+
+
+
+
+
+
+@api_view(['POST'])
+def download_menu(request):
+    school_id = request.data.get('school_id')
+    school_type = request.data.get('school_type')
+
+
+    if not school_id or not school_type:
+        return Response({'error': 'Both school_id and school_type are required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if school_type not in ['primary', 'secondary']:
+        return Response({'error': 'Invalid school_type. It should be either "primary" or "secondary".'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if school_type == 'primary':
+        try:
+            school = PrimarySchool.objects.get(id=school_id)
+            orders = Order.objects.filter(primary_school_id=school_id).order_by('-order_date')
+        except PrimarySchool.DoesNotExist:
+            return Response({'error': 'Primary school not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    elif school_type == 'secondary':
+        try:
+            school = SecondarySchool.objects.get(id=school_id)
+            orders = Order.objects.filter(secondary_school_id=school_id).order_by('-order_date')
+        except SecondarySchool.DoesNotExist:
+            return Response({'error': 'Secondary school not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    if not orders.exists():
+        return Response({'error': 'No orders found for the given school.'}, status=status.HTTP_404_NOT_FOUND)
+
+   
+    workbook = Workbook()
+    sheet = workbook.active
+    
+
+    sheet.append([ "Student Name", "Class Year", "Menu Items", "Quantity"])
+
+   
+    day_grouped_orders = defaultdict(lambda: {
+        "menu_items": [], "orders": [], "item_quantities": defaultdict(int), "teacher_groups": defaultdict(list),"class_groups": [],
+        "staff_orders": [], "staff_totals": {"total_quantity": 0, "total_price": 0.0}})
+
+    week_totals = defaultdict(int)  
+    week_staff_totals = {"total_quantity": 0, "total_price": 0.0} 
+
+   
+    for order in orders:
+        order_items = OrderItem.objects.filter(order=order)
+
+        for item in order_items:
+            if item.menu.name not in day_grouped_orders[order.selected_day]["menu_items"]:
+                day_grouped_orders[order.selected_day]["menu_items"].append(item.menu.name)
+
+         
+            day_grouped_orders[order.selected_day]["item_quantities"][item.menu.name] += item.quantity
+
+           
+            week_totals[item.menu.name] += item.quantity
+
+      
+        order_data = {
+            'order_id': order.id,
+            'order_date': str(order.order_date),
+            'total_price': order.total_price,
+            'status': order.status,
+            'selected_day': order.selected_day,
+        }
+
+      
+        if school_type == 'primary':
+            primary_student = PrimaryStudentsRegister.objects.filter(id=order.child_id).first()
+            if primary_student:
+                order_data['student_name'] = primary_student.username
+                order_data['class_year'] = primary_student.class_year  
+            else:
+                order_data['student_name'] = "Unknown"
+                order_data['class_year'] = "Unknown"  
+
+         
+            teacher = primary_student.teacher if primary_student and primary_student.teacher else None
+            order_data['teacher_name'] = teacher.teacher_name if teacher else "N/A"
+
+            day_grouped_orders[order.selected_day]["teacher_groups"][primary_student.teacher].append(order_data)
+
+        # Handling secondary school orders
+        elif school_type == 'secondary':
+            if order.user_type == 'student' and order.user_id:
+                student = SecondaryStudent.objects.filter(id=order.user_id).first()
+                if student:
+                    order_data['student_name'] = student.username
+                    order_data['class_year'] = student.class_year  
+                else:
+                    order_data['student_name'] = "Unknown"
+                    order_data['class_year'] = "Unknown" 
+            else:
+                order_data['student_name'] = "Unknown"
+                order_data['class_year'] = "Unknown"  
+
+            day_grouped_orders[order.selected_day]["class_groups"].append(order_data)
+
+    day_colors = {
+        "Monday": "FF0000",  
+        "Tuesday": "00FF00", 
+        "Wednesday": "0000FF",  
+        "Thursday": "FFFF00",  
+        "Friday": "FF00FF", 
+    }
+
+   
+    for day, data in day_grouped_orders.items():
+        totals_sheet_title = f"{day} - Totals"
+        totals_sheet = workbook.create_sheet(title=totals_sheet_title)
+        totals_sheet.sheet_properties.tabColor = day_colors[day]  # Apply tab color
+        totals_sheet.append(["Menu Item", "Total Quantity"])
+
+        for menu_name, total_quantity in data["item_quantities"].items():
+            totals_sheet.append([menu_name, total_quantity])
+
+        
+        if data["staff_totals"]["total_quantity"] > 0 and school_type == "primary":
+            totals_sheet.append(["Staff Orders - Total Quantity", data["staff_totals"]["total_quantity"]])
+            totals_sheet.append(["Staff Orders - Total Price", data["staff_totals"]["total_price"]])
+
+    
+    week_totals_sheet = workbook.create_sheet(title="Week Totals")
+    week_totals_sheet.append(["Menu Item", "Total Quantity"])
+
+    for menu_name, total_quantity in week_totals.items():
+        week_totals_sheet.append([menu_name, total_quantity])
+
+
+    if school_type == "primary":
+        week_totals_sheet.append(["Staff Orders - Total Quantity",  week_staff_totals["total_quantity"]])
+        week_totals_sheet.append(["Staff Orders - Total Price", week_staff_totals["total_price"]])
+
+    if school_type == "primary":
+        for day, data in day_grouped_orders.items():
+            for teacher_or_year, orders_group in data["teacher_groups"].items():
+                sheet_title = f"{teacher_or_year} - {day}" if teacher_or_year != "N/A" else f"Unknown - {day}"
+                sheet = workbook.create_sheet(title=sheet_title[:31])  # Limit title to 31 characters
+                sheet.sheet_properties.tabColor = day_colors[day]  # Apply tab color
+                sheet.append([ "Student Name", "Class Year",  "Menu Items", "Quantity"])
+
+               
+                for order_data in orders_group:
+                   
+                    order_items = OrderItem.objects.filter(order_id=order_data['order_id'])
+                    item_names = [item.menu.name for item in order_items]
+                    item_quantities = [item.quantity for item in order_items]
+                    for item_name, quantity in zip(item_names, item_quantities):
+                        sheet.append([order_data['student_name'], order_data['class_year'], item_name, quantity])
+
+    elif school_type == 'secondary':
+        for day, data in day_grouped_orders.items():
+            for order_data in data["class_groups"]:
+                
+                class_year = order_data.get('class_year', 'Unknown')
+                sheet_title = f"{class_year} - {day}" if class_year != "N/A" else f"Unknown - {day}"
+                sheet = workbook.create_sheet(title=sheet_title[:31])  
+                sheet.sheet_properties.tabColor = day_colors[day]  
+                sheet.append([ "Student Name", "Class Year",  "Menu Items", "Quantity"])
+
+                order_items = OrderItem.objects.filter(order_id=order_data['order_id'])
+                item_names = [item.menu.name for item in order_items]
+                item_quantities = [item.quantity for item in order_items]
+                for item_name, quantity in zip(item_names, item_quantities):
+                    sheet.append([order_data['student_name'], class_year, item_name, quantity])
+
+  
+        if school_type == "primary":
+            staff_orders_sheet = workbook.create_sheet(title=f"Staff Orders - {day}")
+            staff_orders_sheet.append([ "Staff Username", "Menu Items", "Quantity"])
+
+            for staff_order in data["staff_orders"]:
+                order_items = OrderItem.objects.filter(order_id=staff_order['order_id'])
+                item_names = [item.menu.name for item in order_items]
+                item_quantities = [item.quantity for item in order_items]
+                for item_name, quantity in zip(item_names, item_quantities):
+                    staff_orders_sheet.append([ 
+                                                 staff_order['staff_username'],
+                                                 item_name, quantity])
+
+   
+    current_date = now().strftime("%Y_%m_%d")
+    week_number = "Week2"  
+    filename = f"{school_type}_{school.secondary_school_name if school_type == 'secondary' else school.school_name}_Menu_with_Staff.xlsx"
+    fs = FileSystemStorage(location=settings.MEDIA_ROOT)
+    
+  
+    file_path = os.path.join(settings.MEDIA_ROOT, filename)
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+    workbook.save(file_path)
+    
+  
+    download_link = f"/menu_files/{filename}"
+
+    return Response({
+                 'message': 'File generated successfully!',
+                 'download_link': download_link  
+     }, status=status.HTTP_200_OK)

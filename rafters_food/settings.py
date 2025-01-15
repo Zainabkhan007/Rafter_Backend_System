@@ -52,6 +52,8 @@ INSTALLED_APPS = [
     'corsheaders',
 
 ]
+MEDIA_URL = '/menu_files/' 
+MEDIA_ROOT = BASE_DIR / 'menu_files'
 
 MIDDLEWARE = [
     # 'django.middleware.security.SecurityMiddleware',
@@ -181,9 +183,9 @@ EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_PORT = 587  
 EMAIL_USE_TLS = True 
 EMAIL_HOST = 'smtp.gmail.com' 
-EMAIL_HOST_USER = 'testingsites247365@gmail.com'  
-EMAIL_HOST_PASSWORD="djbsfnkdbvfvihrt"
-
+EMAIL_HOST_USER = 'zk8s4daf@gmail.com'  
+EMAIL_HOST_PASSWORD="marlgrkwabhfxqka"
+DEFAULT_FROM_EMAIL= 'testingsites247365@gmail.com'  
 MAIL_DEFAULT_SENDER = 'testingsites247365@gmail.com'
 
 STRIPE_PUBLIC_KEY=env('STRIPE_PUBLIC_KEY')
