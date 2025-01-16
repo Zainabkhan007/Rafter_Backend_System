@@ -231,7 +231,7 @@ class OrderSerializer(serializers.ModelSerializer):
     items = OrderItemSerializer(many=True, read_only=True)
     user_name = serializers.SerializerMethodField()  
     child_id = serializers.IntegerField(required=False, allow_null=True)  
-    payment_method_id = serializers.CharField(source='payment_id', required=False)
+    # payment_method_id = serializers.CharField(source='payment_id', required=False)
 
 
     week_number = serializers.IntegerField(default=datetime.now().isocalendar()[1], read_only=False)
@@ -239,7 +239,8 @@ class OrderSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Order
-        fields = '__all__'  
+        fields = ['items','user_name','child_id', 'week_number', 'year','order_date','selected_day','is_delivered','status','user_name','payment_id','items_name','primary_school','secondary_school','total_price','user_type','user_id']
+  
 
     def get_user_name(self, obj):
         """Return the user name based on the user type."""

@@ -45,19 +45,30 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'rest_framework',
+        'allauth',
+    'allauth.account',
+    'allauth.socialaccount',
     'django_rest_passwordreset',
     'admin_section',
     'whitenoise.runserver_nostatic',
     'corsheaders',
+    'dj_rest_auth',
+    'dj_rest_auth.registration',   
+  'rest_framework',
+   'rest_framework.authtoken',
 
 ]
+AUTHENTICATION_BACKENDS = (
+    'allauth.account.auth_backends.AuthenticationBackend',
+    'allauth.account.auth_backends.AuthenticationBackend',  # Django Allauth Backend
+    'django.contrib.auth.backends.ModelBackend', 
+)
 MEDIA_URL = '/menu_files/' 
 MEDIA_ROOT = BASE_DIR / 'menu_files'
 
 MIDDLEWARE = [
     # 'django.middleware.security.SecurityMiddleware',
-
+     'allauth.account.middleware.AccountMiddleware',
     'corsheaders.middleware.CorsMiddleware',
 
      'corsheaders.middleware.CorsMiddleware',
@@ -150,7 +161,11 @@ AUTH_PASSWORD_VALIDATORS = [
         'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
     },
 ]
-
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework.authentication.TokenAuthentication',  # Add token authentication
+    ],
+}
 
 # Internationalization
 # https://docs.djangoproject.com/en/5.1/topics/i18n/
@@ -163,7 +178,12 @@ USE_I18N = True
 
 USE_TZ = True
 
+SITE_ID = 1  
 
+
+ACCOUNT_EMAIL_VERIFICATION = 'mandatory'
+ACCOUNT_EMAIL_REQUIRED = True
+ACCOUNT_AUTHENTICATED_LOGIN_REDIRECTS = True
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.1/howto/static-files/
@@ -183,9 +203,9 @@ EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_PORT = 587  
 EMAIL_USE_TLS = True 
 EMAIL_HOST = 'smtp.gmail.com' 
-EMAIL_HOST_USER = 'zk8s4daf@gmail.com'  
-EMAIL_HOST_PASSWORD="marlgrkwabhfxqka"
-DEFAULT_FROM_EMAIL= 'testingsites247365@gmail.com'  
+EMAIL_HOST_USER = 'freelancewriter3377@gmail.com'  
+EMAIL_HOST_PASSWORD="xrnsvmfuakiceadt"
+DEFAULT_FROM_EMAIL= 'freelancewriter3377@gmail.com'  
 MAIL_DEFAULT_SENDER = 'testingsites247365@gmail.com'
 
 STRIPE_PUBLIC_KEY=env('STRIPE_PUBLIC_KEY')

@@ -2,8 +2,10 @@ from django.urls import path,include
 from . import views
 # from .views import StudentSearchView
 urlpatterns = [
+   # For registration
+    path('auth/password/reset/', views.password_reset, name='password_reset'),  # For sending the reset email
+    path('auth/password/reset/confirm/<uidb64>/<token>/', views.password_reset_confirm, name='password_reset_confirm'),
 
-    # path('password-reset/', views.request_password_reset, name='password-reset-request'),
     path("register/",views.register,name='register'),
     path('login/', views.login,name='login'),
     path('password_reset/', include('django_rest_passwordreset.urls', namespace='password_reset')),

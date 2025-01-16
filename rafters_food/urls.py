@@ -23,7 +23,13 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     
     path("admin_details/",include("admin_section.urls")),
-
+    # path('auth/', include('dj_rest_auth.urls')),  # Login, logout, password reset, etc.
+    
+    # # DJ Rest Auth Registration routes (for user registration)
+    # path('auth/registration/', include('dj_rest_auth.registration.urls')),  # For user registration
+    
+    # # Allauth's URLs for password reset and other features
+    # path('accounts/', include('allauth.urls')),  
 ]
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

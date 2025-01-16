@@ -40,6 +40,10 @@ from .models import *
 from django.core.mail import send_mail
 from django.core.files.storage import default_storage
 from django.core.files.base import ContentFile
+from django.contrib.auth.tokens import default_token_generator
+from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
+from django.contrib.auth import get_user_model
+from .custom_tokens import CustomPasswordResetTokenGenerator 
 logger = logging.getLogger(__name__)
 stripe.api_key = settings.STRIPE_SECRET_KEY
 ALLOWED_FILE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif']
@@ -126,11 +130,76 @@ def register(request):
         return Response(serializer.data, status=status.HTTP_201_CREATED)
     else:
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+ # Assuming this is your custom token generator
+
+# Using your custom token generator
+custom_token_generator = CustomPasswordResetTokenGenerator()
+
+@api_view(["POST"])
+def password_reset(request):
+    email = request.data.get('email')
+    if not email:
+        return Response({"error": "Email is required."}, status=400)
+
+    # Look for the user in your custom models (Parent, Staff, Student, CanteenStaff)
+    user = None
+    try:
+        user = ParentRegisteration.objects.get(email=email)
+    except ParentRegisteration.DoesNotExist:
+        try:
+            user = StaffRegisteration.objects.get(email=email)
+        except StaffRegisteration.DoesNotExist:
+            try:
+                user = SecondaryStudent.objects.get(email=email)
+            except SecondaryStudent.DoesNotExist:
+                try:
+                    user = CanteenStaff.objects.get(email=email)  # Check for CanteenStaff
+                except CanteenStaff.DoesNotExist:
+                    return Response({"error": "User not found."}, status=400)
+
+    # Generate the token using the custom token generator
+    token = custom_token_generator.make_token(user)
+
+    # Encode the user ID for the URL
+    uid = urlsafe_base64_encode(str(user.pk).encode())  # No need for .decode()
+
+    # Create the password reset link
+    reset_link = f'http://example.com/auth/password/reset/confirm/{uid}/{token}/'
+
+    # Send the reset link via email
+    send_mail(
+        'Password Reset Request',
+        f'Click the following link to reset your password: {reset_link}',
+        'freelancewriter3377@gmail.com',
+        [user.email],
+        fail_silently=False,
+    )
+
+    return Response({"message": "Password reset email sent."}, status=200)
 
 
+@api_view(["POST"])
+def password_reset_confirm(request, uidb64, token):
+    try:
+        uid = urlsafe_base64_decode(uidb64).decode('utf-8')  # Decode the user ID
+        user = ParentRegisteration.objects.get(pk=uid)
+    except (ParentRegisteration.DoesNotExist, ValueError):
+        return Response({"error": "Invalid user."}, status=400)
 
+    # Verify the token using the custom token generator
+    if custom_token_generator.check_token(user, token):
+        password = request.data.get("password")
+        password_confirmation = request.data.get("password_confirmation")
 
-    
+        if password != password_confirmation:
+            return Response({"error": "Passwords do not match."}, status=400)
+
+        user.password = make_password(password)
+        user.save()
+
+        return Response({"message": "Password reset successful."}, status=200)
+    else:
+        return Response({"error": "Invalid token."}, status=400)
 @api_view(["POST"])
 def login(request):
 
@@ -2373,7 +2442,7 @@ class CreateOrderAndPaymentAPIView(APIView):
             school_id = data.get('school_id', None)
             school_type = data.get('school_type', None)
             child_id = data.get('child_id', None)
-            payment_method_id = data.get("payment_method_id", None)
+            payment_id = data.get("payment_id", None)
             front_end_total_price = float(data.get("total_price", 0))
 
             
@@ -2448,8 +2517,7 @@ class CreateOrderAndPaymentAPIView(APIView):
                 elif school_type == 'secondary':
                     order_data['secondary_school'] = school_id
 
-                if 'payment_method_id' in data:
-                 order_data['payment_id'] = data['payment_method_id']
+                
                 order_serializer = OrderSerializer(data=order_data)
                 if not order_serializer.is_valid():
                     return Response(order_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -2506,7 +2574,7 @@ class CreateOrderAndPaymentAPIView(APIView):
 
                 created_orders.append(order_details)
 
-            if not payment_method_id:
+            if not payment_id:
                 if hasattr(user, 'credits') and user.credits >= order_total_price:
                     user.credits -= front_end_total_price
                     user.save()
@@ -2521,7 +2589,7 @@ class CreateOrderAndPaymentAPIView(APIView):
             payment_intent = stripe.PaymentIntent.create(
                 amount=total_price_in_cents,
                 currency="eur",
-                payment_method=payment_method_id,  # Correct payment method
+                payment_method=payment_id,  # Correct payment method
                 confirmation_method="manual",
                 confirm=True,
                 return_url=f"{request.scheme}://{request.get_host()}/payment-success/",
