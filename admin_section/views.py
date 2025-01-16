@@ -2429,7 +2429,6 @@ def get_current_week_and_year():
 
 
 
-stripe.api_key = "your_stripe_api_key_here"
 
 class CreateOrderAndPaymentAPIView(APIView):
     def post(self, request, *args, **kwargs):
@@ -2442,10 +2441,9 @@ class CreateOrderAndPaymentAPIView(APIView):
             school_id = data.get('school_id', None)
             school_type = data.get('school_type', None)
             child_id = data.get('child_id', None)
-            payment_id = data.get("payment_id", None)
+            payment_id = data.get("payment_id", None)  
             front_end_total_price = float(data.get("total_price", 0))
 
-            
             if not user_type or not user_id or not selected_days:
                 return Response({'error': 'User type, user ID, and selected days are required.'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -2483,7 +2481,7 @@ class CreateOrderAndPaymentAPIView(APIView):
                 if not menus_for_day:
                     return Response({'error': f'No menus available for {day}.'}, status=status.HTTP_404_NOT_FOUND)
 
-                order_total_price = 0 
+                order_total_price = 0  
                 order_items = []  
 
                 today = datetime.today()
@@ -2518,6 +2516,8 @@ class CreateOrderAndPaymentAPIView(APIView):
                     order_data['secondary_school'] = school_id
 
                 
+                order_data['payment_id'] = payment_id
+
                 order_serializer = OrderSerializer(data=order_data)
                 if not order_serializer.is_valid():
                     return Response(order_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -2539,9 +2539,12 @@ class CreateOrderAndPaymentAPIView(APIView):
                     order_items.append(order_item)
                     order_total_price += item_price * item['quantity']  
 
+           
                 order_instance.total_price = order_total_price
+                order_instance.payment_id = payment_id  
                 order_instance.save()
 
+          
                 order_details = {
                     'order_id': order_instance.id,
                     'selected_day': day,
@@ -2570,30 +2573,22 @@ class CreateOrderAndPaymentAPIView(APIView):
                 if order_instance.user_type in ['parent', 'staff']:
                     order_details['child_id'] = order_instance.child_id
 
-                order_details['order_date'] = order_details['order_date'].strftime('%d %b')
-
                 created_orders.append(order_details)
 
-            if not payment_id:
-                if hasattr(user, 'credits') and user.credits >= order_total_price:
-                    user.credits -= front_end_total_price
-                    user.save()
-                    return Response({
-                        'message': 'Orders created successfully! Credits deducted.',
-                        'orders': created_orders,
-                    }, status=status.HTTP_201_CREATED)
-                else:
-                    return Response({'error': 'Insufficient credits.'}, status=status.HTTP_400_BAD_REQUEST)
-
-            total_price_in_cents = int(front_end_total_price * 100) 
+          
+            total_price_in_cents = int(front_end_total_price * 100)
             payment_intent = stripe.PaymentIntent.create(
                 amount=total_price_in_cents,
                 currency="eur",
-                payment_method=payment_id,  # Correct payment method
+                payment_method=payment_id,  
                 confirmation_method="manual",
                 confirm=True,
                 return_url=f"{request.scheme}://{request.get_host()}/payment-success/",
             )
+
+           
+            for order_instance in created_orders:
+                order_instance['payment_intent'] = payment_intent.client_secret
 
             return Response({
                 'message': 'Orders and payment intent created successfully!',
@@ -2605,8 +2600,6 @@ class CreateOrderAndPaymentAPIView(APIView):
             return Response({"error": f"Card Error: {e.user_message}"}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
 
 @api_view(['POST'])
 def top_up_payment(request):
