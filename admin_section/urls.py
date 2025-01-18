@@ -3,8 +3,8 @@ from . import views
 # from .views import StudentSearchView
 urlpatterns = [
    # For registration
-    path('auth/password/reset/', views.password_reset, name='password_reset'),  # For sending the reset email
-    path('auth/password/reset/confirm/<uidb64>/<token>/', views.password_reset_confirm, name='password_reset_confirm'),
+    path('password-reset/', views.password_reset, name='password_reset'), 
+    path('password/reset/confirm/', views.password_reset_confirm, name='password_reset_confirm'),
 
     path("register/",views.register,name='register'),
     path('login/', views.login,name='login'),
@@ -84,6 +84,9 @@ urlpatterns = [
    path('top_up_payment/', views.top_up_payment, name='top_up_payment'),
 
    path('download_menu_all/',  views.download_menu, name='download_menu_all'),
+   path("get_menu/",views.get_active_status_menu,name='get_active_status_menu'),
+   path("get_user_count/",views.get_user_count,name='get_user_count'),
+
    
 
 ]
