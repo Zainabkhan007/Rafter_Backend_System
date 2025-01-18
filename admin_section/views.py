@@ -135,13 +135,15 @@ def register(request):
 # Using your custom token generator
 custom_token_generator = CustomPasswordResetTokenGenerator()
 
+custom_token_generator = CustomPasswordResetTokenGenerator()
+
 @api_view(["POST"])
 def password_reset(request):
     email = request.data.get('email')
     if not email:
         return Response({"error": "Email is required."}, status=400)
 
-    # Look for the user in your custom models (Parent, Staff, Student, CanteenStaff)
+
     user = None
     try:
         user = ParentRegisteration.objects.get(email=email)
@@ -153,20 +155,15 @@ def password_reset(request):
                 user = SecondaryStudent.objects.get(email=email)
             except SecondaryStudent.DoesNotExist:
                 try:
-                    user = CanteenStaff.objects.get(email=email)  # Check for CanteenStaff
+                    user = CanteenStaff.objects.get(email=email)  
                 except CanteenStaff.DoesNotExist:
                     return Response({"error": "User not found."}, status=400)
 
-    # Generate the token using the custom token generator
+   
     token = custom_token_generator.make_token(user)
 
-    # Encode the user ID for the URL
-    uid = urlsafe_base64_encode(str(user.pk).encode())  # No need for .decode()
+    reset_link = f'https://www.raftersfoodservices.ie/password/reset/confirm/{token}/'
 
-    # Create the password reset link
-    reset_link = f'http://example.com/auth/password/reset/confirm/{uid}/{token}/'
-
-    # Send the reset link via email
     send_mail(
         'Password Reset Request',
         f'Click the following link to reset your password: {reset_link}',
@@ -178,28 +175,43 @@ def password_reset(request):
     return Response({"message": "Password reset email sent."}, status=200)
 
 
+
+
 @api_view(["POST"])
-def password_reset_confirm(request, uidb64, token):
+def password_reset_confirm(request):
+ 
+    token = request.data.get("token")
+    password = request.data.get("password")
+    email = request.data.get("email")
+
+    if not token or not password or not email:
+        return Response({"error": "Token, password, and email must be provided."}, status=400)
+
     try:
-        uid = urlsafe_base64_decode(uidb64).decode('utf-8')  # Decode the user ID
-        user = ParentRegisteration.objects.get(pk=uid)
-    except (ParentRegisteration.DoesNotExist, ValueError):
-        return Response({"error": "Invalid user."}, status=400)
+       
+        user = None
+        for model in [ParentRegisteration, StaffRegisteration, SecondaryStudent, CanteenStaff]:
+            try:
+                user = model.objects.get(email=email)
+                break
+            except model.DoesNotExist:
+                continue
+        
+        if not user:
+            return Response({"error": "User not found."}, status=400)
 
-    # Verify the token using the custom token generator
-    if custom_token_generator.check_token(user, token):
-        password = request.data.get("password")
-        password_confirmation = request.data.get("password_confirmation")
+        
+        if custom_token_generator.check_token(user, token):
+            
+            user.password = password 
+            user.save()
 
-        if password != password_confirmation:
-            return Response({"error": "Passwords do not match."}, status=400)
+            return Response({"message": "Password reset successful."}, status=200)
+        else:
+            return Response({"error": "Invalid token."}, status=400)
 
-        user.password = make_password(password)
-        user.save()
-
-        return Response({"message": "Password reset successful."}, status=200)
-    else:
-        return Response({"error": "Invalid token."}, status=400)
+    except Exception as e:
+        return Response({"error": str(e)}, status=500)
 @api_view(["POST"])
 def login(request):
 
@@ -2093,6 +2105,7 @@ def get_all_orders(request):
             'year': order.year,
             'items': items_details,  
             'user_name': order.user_name,
+            'payment_id':order.payment_id,
         }
 
      
@@ -2102,9 +2115,11 @@ def get_all_orders(request):
     
         if order.primary_school:
             order_data['school_id'] = order.primary_school.id
+            order_data['school_name']=order.primary_school.school_name
             order_data['school_type'] = 'primary'
         elif order.secondary_school:
             order_data['school_id'] = order.secondary_school.id
+            order_data['school_name']=order.secondary_school.secondary_school_name
             order_data['school_type'] = 'secondary'
 
         
@@ -2879,3 +2894,109 @@ def download_menu(request):
                  'message': 'File generated successfully!',
                  'download_link': download_link  
      }, status=status.HTTP_200_OK)
+
+@api_view(["GET"])
+def get_user_count(request):
+    try:
+      
+        parent_count = ParentRegisteration.objects.count()
+        staff_count = StaffRegisteration.objects.count()
+        secondary_student_count = SecondaryStudent.objects.count()
+        primary_student_count = PrimaryStudentsRegister.objects.count()
+
+    
+        total_user_count = parent_count + staff_count + secondary_student_count + primary_student_count
+
+        response_data = {
+            "total_user_count": total_user_count,
+           
+        }
+
+        return Response(response_data, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+@api_view(["GET"])
+def get_active_status_menu(request):
+    today = timezone.now().date()
+
+    try:
+        
+        primary_schools = PrimarySchool.objects.all()
+        secondary_schools = SecondarySchool.objects.all()
+
+        schools_data = []
+
+      
+        for school in primary_schools:
+            menus = Menu.objects.filter(
+                primary_school_id=school.id,
+                start_date__lte=today,
+                end_date__gte=today
+            )
+         
+            weekly_menu = {
+                "Monday": [],
+                "Tuesday": [],
+                "Wednesday": [],
+                "Thursday": [],
+                "Friday": [],
+                "Saturday": [],
+                "Sunday": []
+            }
+
+            
+            for menu in menus:
+                day_of_week = menu.menu_day
+                if day_of_week in weekly_menu:
+                    weekly_menu[day_of_week].append(menu)
+
+          
+            active_status = not all(len(weekly_menu[day]) == 0 for day in weekly_menu)
+
+        
+            schools_data.append({
+                "school_type": "primary",
+                "school_id": school.id,
+                "school_name": school.school_name,
+                "is_active": active_status
+            })
+
+      
+        for school in secondary_schools:
+            menus = Menu.objects.filter(
+                secondary_school_id=school.id,
+                start_date__lte=today,
+                end_date__gte=today
+            )
+            
+            weekly_menu = {
+                "Monday": [],
+                "Tuesday": [],
+                "Wednesday": [],
+                "Thursday": [],
+                "Friday": [],
+                "Saturday": [],
+                "Sunday": []
+            }
+
+           
+            for menu in menus:
+                day_of_week = menu.menu_day
+                if day_of_week in weekly_menu:
+                    weekly_menu[day_of_week].append(menu)
+
+            active_status = not all(len(weekly_menu[day]) == 0 for day in weekly_menu)
+
+           
+            schools_data.append({
+                "school_type": "secondary",
+                "school_id": school.id,
+                "school_name": school.secondary_school_name,
+                "is_active": active_status
+            })
+
+        return Response({"schools": schools_data}, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
