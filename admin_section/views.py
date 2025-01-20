@@ -2456,7 +2456,7 @@ class CreateOrderAndPaymentAPIView(APIView):
             school_id = data.get('school_id', None)
             school_type = data.get('school_type', None)
             child_id = data.get('child_id', None)
-            payment_id = data.get("payment_id", None)  
+            payment_id = data.get("payment_id", None)
             front_end_total_price = float(data.get("total_price", 0))
 
             if not user_type or not user_id or not selected_days:
@@ -2483,7 +2483,7 @@ class CreateOrderAndPaymentAPIView(APIView):
             if user_type in ['student', 'parent'] and not school_id:
                 return Response({'error': 'School ID is required for students and parents.'}, status=status.HTTP_400_BAD_REQUEST)
 
-            created_orders = []  
+            created_orders = []
             days_dict = {day: [] for day in selected_days}
 
             for idx, day in enumerate(selected_days):
@@ -2496,8 +2496,8 @@ class CreateOrderAndPaymentAPIView(APIView):
                 if not menus_for_day:
                     return Response({'error': f'No menus available for {day}.'}, status=status.HTTP_404_NOT_FOUND)
 
-                order_total_price = 0  
-                order_items = []  
+                order_total_price = 0
+                order_items = []
 
                 today = datetime.today()
                 target_day = day.capitalize()
@@ -2530,9 +2530,7 @@ class CreateOrderAndPaymentAPIView(APIView):
                 elif school_type == 'secondary':
                     order_data['secondary_school'] = school_id
 
-                
                 order_data['payment_id'] = payment_id
-
                 order_serializer = OrderSerializer(data=order_data)
                 if not order_serializer.is_valid():
                     return Response(order_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -2545,25 +2543,23 @@ class CreateOrderAndPaymentAPIView(APIView):
                     if not menu_item:
                         return Response({'error': f'Menu item with name {item["item_name"]} not found for {day}.'}, status=status.HTTP_404_NOT_FOUND)
 
-                    item_price = float(item["price"])  
+                    item_price = float(item["price"])
                     order_item = OrderItem.objects.create(
                         menu=menu_item,
                         quantity=item['quantity'],
                         order=order_instance
                     )
                     order_items.append(order_item)
-                    order_total_price += item_price * item['quantity']  
+                    order_total_price += item_price * item['quantity']
 
-           
                 order_instance.total_price = order_total_price
                 order_instance.payment_id = payment_id  
                 order_instance.save()
 
-          
                 order_details = {
                     'order_id': order_instance.id,
                     'selected_day': day,
-                    'total_price': str(order_instance.total_price), 
+                    'total_price': str(order_instance.total_price),
                     'order_date': order_instance.order_date,
                     'status': 'pending',
                     'week_number': order_instance.week_number,
@@ -2571,37 +2567,43 @@ class CreateOrderAndPaymentAPIView(APIView):
                     'items': [
                         {
                             'item_name': item.menu.name,
-                            'price': item.menu.price, 
+                            'price': item.menu.price,
                             'quantity': item.quantity
                         } for item in order_items
                     ],
                     'user_name': order_instance.user_name,
                 }
 
-                if school_type == 'primary':
-                    order_details['school_id'] = school_id
-                    order_details['school_type'] = 'primary'
-                elif school_type == 'secondary':
-                    order_details['school_id'] = school_id
-                    order_details['school_type'] = 'secondary'
-
-                if order_instance.user_type in ['parent', 'staff']:
-                    order_details['child_id'] = order_instance.child_id
-
                 created_orders.append(order_details)
 
-          
+        
+            if not payment_id:
+                if user.credits < front_end_total_price:
+                    return Response({"error": "Insufficient credits to complete the order."}, status=status.HTTP_400_BAD_REQUEST)
+
+                user.credits -= front_end_total_price  
+                user.save()
+
+              
+                for order in created_orders:
+                    order['status'] = 'paid'  
+
+                return Response({
+                    'message': 'Orders created and credits deducted successfully!',
+                    'orders': created_orders
+                }, status=status.HTTP_201_CREATED)
+
+           
             total_price_in_cents = int(front_end_total_price * 100)
             payment_intent = stripe.PaymentIntent.create(
                 amount=total_price_in_cents,
                 currency="eur",
-                payment_method=payment_id,  
+                payment_method=payment_id,
                 confirmation_method="manual",
                 confirm=True,
                 return_url=f"{request.scheme}://{request.get_host()}/payment-success/",
             )
 
-           
             for order_instance in created_orders:
                 order_instance['payment_intent'] = payment_intent.client_secret
 
@@ -2615,6 +2617,7 @@ class CreateOrderAndPaymentAPIView(APIView):
             return Response({"error": f"Card Error: {e.user_message}"}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
 @api_view(['POST'])
 def top_up_payment(request):
