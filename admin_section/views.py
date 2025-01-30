@@ -2,6 +2,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.decorators import api_view, APIView
 import os
+import logging
 from rest_framework.generics import ListAPIView
 from .serializers import *
 import re
@@ -2693,210 +2694,176 @@ def get_custom_week_and_year():
     today = datetime.today()
     return today.isocalendar()[1], today.year  
 
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
+DAY_COLORS = {
+    "Monday": "FF0000",
+    "Tuesday": "00FF00",
+    "Wednesday": "0000FF",
+    "Thursday": "FFFF00",
+    "Friday": "FF00FF",
+}
 
+CLASS_YEARS = ["1st", "2nd", "3rd", "4th", "5th", "6th"]
 
+def fetch_orders(school_id, school_type):
+    orders = (
+        Order.objects.filter(primary_school_id=school_id).order_by('-order_date')
+        if school_type == 'primary'
+        else Order.objects.filter(secondary_school_id=school_id).order_by('-order_date')
+    )
 
+    # Log all orders and their attributes
+    logger.info(f"🔍 Total {school_type} orders found: {orders.count()}")
+    for order in orders:
+        logger.info(f"📌 Order ID: {order.id}, Day: {order.selected_day}, User Type: {order.user_type}, Child ID: {order.child_id}, User ID: {order.user_id}")
+
+    return orders
+
+def generate_workbook(school, orders, school_type):
+    workbook = Workbook()
+    workbook.remove(workbook.active)  # Remove default sheet
+
+    day_totals = defaultdict(lambda: defaultdict(int))
+    grouped_orders = defaultdict(lambda: defaultdict(list))
+
+    for order in orders:
+        order_items = OrderItem.objects.filter(order=order)
+        selected_day = order.selected_day
+
+        order_data = {
+            'student_name': "Unknown",
+            'class_year': None,
+            'teacher_name': None,
+            'order_items': {item.menu.name: item.quantity for item in order_items}
+        }
+
+        if school_type == 'primary':
+            student = PrimaryStudentsRegister.objects.filter(id=order.child_id).first()
+            if student:
+                order_data['student_name'] = student.username
+                order_data['teacher_name'] = student.teacher.teacher_name if student.teacher else "Unknown"
+                logger.info(f"👨‍🎓 Primary Student: {student.username}, Teacher: {order_data['teacher_name']}")
+
+            grouped_orders[selected_day][order_data['teacher_name']].append(order_data)
+
+        else:  # Secondary school
+            student = SecondaryStudent.objects.filter(id=order.user_id).first()
+
+            if student:
+                order_data['student_name'] = student.username
+
+                # Ensure `class_year` is mapped correctly
+                if student.class_year in CLASS_YEARS:
+                    order_data['class_year'] = student.class_year
+                else:
+                    order_data['class_year'] = "Unknown"
+
+                # Log details for debugging
+                logger.info(f"🎓 Secondary Student: {student.username}, Retrieved Class Year: {student.class_year}, Mapped Class Year: {order_data['class_year']}")
+
+            grouped_orders[selected_day][order_data['class_year']].append(order_data)
+
+        for menu_name, quantity in order_data['order_items'].items():
+            day_totals[selected_day][menu_name] += quantity
+
+    # Log grouped orders
+    for day, entity_orders in grouped_orders.items():
+        for entity, orders in entity_orders.items():
+            logger.info(f"📅 {day} - {entity}: {len(orders)} orders")
+
+    # Create Sheets for Each Day and Ensure All Teachers/Class Years Are Present
+    for day in DAY_COLORS.keys():
+        entity_list = Teacher.objects.filter(school=school) if school_type == 'primary' else CLASS_YEARS
+
+        for entity in entity_list:
+            entity_name = entity.teacher_name if school_type == 'primary' else entity
+
+            sheet_title = f"{entity_name} - {day}"
+            sheet = workbook.create_sheet(title=sheet_title[:31])  # Sheet name limit
+            sheet.sheet_properties.tabColor = DAY_COLORS.get(day, "FFFFFF")
+            sheet.append(["Student Name", "Menu Items", "Quantity"])
+
+            orders_for_entity = grouped_orders.get(day, {}).get(entity_name, [])
+
+            if orders_for_entity:
+                for order_data in orders_for_entity:
+                    for menu_name, quantity in order_data['order_items'].items():
+                        sheet.append([order_data['student_name'], menu_name, quantity])
+            else:
+                sheet.append(["No orders", "", ""])  # Empty row when no orders
+
+        # Staff Orders
+        staff_orders_day = Order.objects.filter(staff__isnull=False, selected_day=day,
+                                                primary_school=school if school_type == 'primary' else None)
+        staff_sheet = workbook.create_sheet(title=f"Staff Orders - {day}")
+        staff_sheet.sheet_properties.tabColor = DAY_COLORS.get(day, "FFFFFF")
+        staff_sheet.append(["Staff Username", "Menu Items", "Quantity"])
+
+        if staff_orders_day.exists():
+            for order in staff_orders_day:
+                order_items = OrderItem.objects.filter(order=order)
+                for item in order_items:
+                    staff_sheet.append([order.staff.username, item.menu.name, item.quantity])
+        else:
+            staff_sheet.append(["No staff orders", "", ""])  # Empty row when no orders
+
+    # Day Totals Sheet
+    day_totals_sheet = workbook.create_sheet(title="Day Totals")
+    day_totals_sheet.append(["Day", "Menu Item", "Total Quantity"])
+    for day, items in day_totals.items():
+        for menu_name, quantity in items.items():
+            day_totals_sheet.append([day, menu_name, quantity])
+
+    return workbook
 
 @api_view(['POST'])
 def download_menu(request):
-    school_id = request.data.get('school_id')
-    school_type = request.data.get('school_type')
+    try:
+        school_id = request.data.get('school_id')
+        school_type = request.data.get('school_type')
 
+        logger.info(f"🔍 Received request for school_id={school_id}, school_type={school_type}")
 
-    if not school_id or not school_type:
-        return Response({'error': 'Both school_id and school_type are required.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not school_id or not school_type:
+            return Response({'error': 'Both school_id and school_type are required.'}, status=status.HTTP_400_BAD_REQUEST)
 
-    if school_type not in ['primary', 'secondary']:
-        return Response({'error': 'Invalid school_type. It should be either "primary" or "secondary".'}, status=status.HTTP_400_BAD_REQUEST)
+        if school_type not in ['primary', 'secondary']:
+            return Response({'error': 'Invalid school_type. It should be either "primary" or "secondary".'}, status=status.HTTP_400_BAD_REQUEST)
 
-    if school_type == 'primary':
-        try:
-            school = PrimarySchool.objects.get(id=school_id)
-            orders = Order.objects.filter(primary_school_id=school_id).order_by('-order_date')
-        except PrimarySchool.DoesNotExist:
-            return Response({'error': 'Primary school not found.'}, status=status.HTTP_404_NOT_FOUND)
-
-    elif school_type == 'secondary':
-        try:
-            school = SecondarySchool.objects.get(id=school_id)
-            orders = Order.objects.filter(secondary_school_id=school_id).order_by('-order_date')
-        except SecondarySchool.DoesNotExist:
-            return Response({'error': 'Secondary school not found.'}, status=status.HTTP_404_NOT_FOUND)
-
-    if not orders.exists():
-        return Response({'error': 'No orders found for the given school.'}, status=status.HTTP_404_NOT_FOUND)
-
-   
-    workbook = Workbook()
-    sheet = workbook.active
-    
-
-    sheet.append([ "Student Name", "Class Year", "Menu Items", "Quantity"])
-
-   
-    day_grouped_orders = defaultdict(lambda: {
-        "menu_items": [], "orders": [], "item_quantities": defaultdict(int), "teacher_groups": defaultdict(list),"class_groups": [],
-        "staff_orders": [], "staff_totals": {"total_quantity": 0, "total_price": 0.0}})
-
-    week_totals = defaultdict(int)  
-    week_staff_totals = {"total_quantity": 0, "total_price": 0.0} 
-
-   
-    for order in orders:
-        order_items = OrderItem.objects.filter(order=order)
-
-        for item in order_items:
-            if item.menu.name not in day_grouped_orders[order.selected_day]["menu_items"]:
-                day_grouped_orders[order.selected_day]["menu_items"].append(item.menu.name)
-
-         
-            day_grouped_orders[order.selected_day]["item_quantities"][item.menu.name] += item.quantity
-
-           
-            week_totals[item.menu.name] += item.quantity
-
-      
-        order_data = {
-            'order_id': order.id,
-            'order_date': str(order.order_date),
-            'total_price': order.total_price,
-            'status': order.status,
-            'selected_day': order.selected_day,
-        }
-
-      
         if school_type == 'primary':
-            primary_student = PrimaryStudentsRegister.objects.filter(id=order.child_id).first()
-            if primary_student:
-                order_data['student_name'] = primary_student.username
-                order_data['class_year'] = primary_student.class_year  
-            else:
-                order_data['student_name'] = "Unknown"
-                order_data['class_year'] = "Unknown"  
+            school = PrimarySchool.objects.get(id=school_id)
+            logger.info(f"🏫 Primary school found: {school.school_name}")
 
-         
-            teacher = primary_student.teacher if primary_student and primary_student.teacher else None
-            order_data['teacher_name'] = teacher.teacher_name if teacher else "N/A"
+        else:
+            school = SecondarySchool.objects.get(id=school_id)
+            logger.info(f"🏫 Secondary school found: {school.secondary_school_name}")
 
-            day_grouped_orders[order.selected_day]["teacher_groups"][primary_student.teacher].append(order_data)
+        orders = fetch_orders(school_id, school_type)
 
-        # Handling secondary school orders
-        elif school_type == 'secondary':
-            if order.user_type == 'student' and order.user_id:
-                student = SecondaryStudent.objects.filter(id=order.user_id).first()
-                if student:
-                    order_data['student_name'] = student.username
-                    order_data['class_year'] = student.class_year  
-                else:
-                    order_data['student_name'] = "Unknown"
-                    order_data['class_year'] = "Unknown" 
-            else:
-                order_data['student_name'] = "Unknown"
-                order_data['class_year'] = "Unknown"  
+        if not orders.exists():
+            logger.warning(f"⚠️ No orders found for {school_type} school ID {school_id}")
+            return Response({'error': 'No orders found for the given school.'}, status=status.HTTP_404_NOT_FOUND)
 
-            day_grouped_orders[order.selected_day]["class_groups"].append(order_data)
+        workbook = generate_workbook(school, orders, school_type)
 
-    day_colors = {
-        "Monday": "FF0000",  
-        "Tuesday": "00FF00", 
-        "Wednesday": "0000FF",  
-        "Thursday": "FFFF00",  
-        "Friday": "FF00FF", 
-    }
+        filename = f"{school_type}_{school.secondary_school_name if school_type == 'secondary' else school.school_name}_Menu.xlsx"
+        file_path = os.path.join(settings.MEDIA_ROOT, filename)
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        workbook.save(file_path)
 
-   
-    for day, data in day_grouped_orders.items():
-        totals_sheet_title = f"{day} - Totals"
-        totals_sheet = workbook.create_sheet(title=totals_sheet_title)
-        totals_sheet.sheet_properties.tabColor = day_colors[day]  # Apply tab color
-        totals_sheet.append(["Menu Item", "Total Quantity"])
+        logger.info(f"✔ File generated successfully: {filename}")
 
-        for menu_name, total_quantity in data["item_quantities"].items():
-            totals_sheet.append([menu_name, total_quantity])
+        return Response({
+            'message': 'File generated successfully!',
+            'download_link': f"/menu_files/{filename}"
+        }, status=status.HTTP_200_OK)
 
-        
-        if data["staff_totals"]["total_quantity"] > 0 and school_type == "primary":
-            totals_sheet.append(["Staff Orders - Total Quantity", data["staff_totals"]["total_quantity"]])
-            totals_sheet.append(["Staff Orders - Total Price", data["staff_totals"]["total_price"]])
-
-    
-    week_totals_sheet = workbook.create_sheet(title="Week Totals")
-    week_totals_sheet.append(["Menu Item", "Total Quantity"])
-
-    for menu_name, total_quantity in week_totals.items():
-        week_totals_sheet.append([menu_name, total_quantity])
-
-
-    if school_type == "primary":
-        week_totals_sheet.append(["Staff Orders - Total Quantity",  week_staff_totals["total_quantity"]])
-        week_totals_sheet.append(["Staff Orders - Total Price", week_staff_totals["total_price"]])
-
-    if school_type == "primary":
-        for day, data in day_grouped_orders.items():
-            for teacher_or_year, orders_group in data["teacher_groups"].items():
-                sheet_title = f"{teacher_or_year} - {day}" if teacher_or_year != "N/A" else f"Unknown - {day}"
-                sheet = workbook.create_sheet(title=sheet_title[:31])  # Limit title to 31 characters
-                sheet.sheet_properties.tabColor = day_colors[day]  # Apply tab color
-                sheet.append([ "Student Name", "Class Year",  "Menu Items", "Quantity"])
-
-               
-                for order_data in orders_group:
-                   
-                    order_items = OrderItem.objects.filter(order_id=order_data['order_id'])
-                    item_names = [item.menu.name for item in order_items]
-                    item_quantities = [item.quantity for item in order_items]
-                    for item_name, quantity in zip(item_names, item_quantities):
-                        sheet.append([order_data['student_name'], order_data['class_year'], item_name, quantity])
-
-    elif school_type == 'secondary':
-        for day, data in day_grouped_orders.items():
-            for order_data in data["class_groups"]:
-                
-                class_year = order_data.get('class_year', 'Unknown')
-                sheet_title = f"{class_year} - {day}" if class_year != "N/A" else f"Unknown - {day}"
-                sheet = workbook.create_sheet(title=sheet_title[:31])  
-                sheet.sheet_properties.tabColor = day_colors[day]  
-                sheet.append([ "Student Name", "Class Year",  "Menu Items", "Quantity"])
-
-                order_items = OrderItem.objects.filter(order_id=order_data['order_id'])
-                item_names = [item.menu.name for item in order_items]
-                item_quantities = [item.quantity for item in order_items]
-                for item_name, quantity in zip(item_names, item_quantities):
-                    sheet.append([order_data['student_name'], class_year, item_name, quantity])
-
-  
-        if school_type == "primary":
-            staff_orders_sheet = workbook.create_sheet(title=f"Staff Orders - {day}")
-            staff_orders_sheet.append([ "Staff Username", "Menu Items", "Quantity"])
-
-            for staff_order in data["staff_orders"]:
-                order_items = OrderItem.objects.filter(order_id=staff_order['order_id'])
-                item_names = [item.menu.name for item in order_items]
-                item_quantities = [item.quantity for item in order_items]
-                for item_name, quantity in zip(item_names, item_quantities):
-                    staff_orders_sheet.append([ 
-                                                 staff_order['staff_username'],
-                                                 item_name, quantity])
-
-   
-    current_date = now().strftime("%Y_%m_%d")
-    week_number = "Week2"  
-    filename = f"{school_type}_{school.secondary_school_name if school_type == 'secondary' else school.school_name}_Menu_with_Staff.xlsx"
-    fs = FileSystemStorage(location=settings.MEDIA_ROOT)
-    
-  
-    file_path = os.path.join(settings.MEDIA_ROOT, filename)
-    os.makedirs(os.path.dirname(file_path), exist_ok=True)
-    workbook.save(file_path)
-    
-  
-    download_link = f"/menu_files/{filename}"
-
-    return Response({
-                 'message': 'File generated successfully!',
-                 'download_link': download_link  
-     }, status=status.HTTP_200_OK)
+    except Exception as e:
+        logger.error(f"🚨 Unexpected Error: {e}")
+        return Response({'error': 'An unexpected error occurred.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(["GET"])
 def get_user_count(request):
