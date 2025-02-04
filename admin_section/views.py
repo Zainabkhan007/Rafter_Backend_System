@@ -1093,18 +1093,18 @@ def get_allergy(request):
         allergy = Allergens.objects.all()
         serializer = AllergenSerializer(allergy,many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
-# Menu
 
 @api_view(['POST'])
 def add_menu(request):
     school_id = request.data.get('school_id')
     school_type = request.data.get('school_type')
     cycle_name = request.data.get('cycle_name')
-    menu_date = datetime.now().date()  
+    menu_date = datetime.now().date()
 
-    if not cycle_name.isalnum() and " " not in cycle_name:
+    if not cycle_name or (not cycle_name.isalnum() and " " not in cycle_name):
         return Response({'error': 'Cycle Name cannot contain special characters!'}, status=status.HTTP_400_BAD_REQUEST)
 
+    # Fetch School
     if school_type == 'primary':
         try:
             school = PrimarySchool.objects.get(id=school_id)
@@ -1118,24 +1118,41 @@ def add_menu(request):
     else:
         return Response({'error': 'Invalid school type'}, status=status.HTTP_400_BAD_REQUEST)
 
-  
-    if school_type == 'primary':
-        if Menu.objects.filter(primary_school=school, cycle_name=cycle_name).exists():
-            return Response({'error': 'A menu with the same cycle name already exists for this school.'}, status=status.HTTP_400_BAD_REQUEST)
-    elif school_type == 'secondary':
-        if Menu.objects.filter(secondary_school=school, cycle_name=cycle_name).exists():
-            return Response({'error': 'A menu with the same cycle name already exists for this school.'}, status=status.HTTP_400_BAD_REQUEST)
+    # Check for duplicate cycle names
+    menu_exists = Menu.objects.filter(
+        cycle_name=cycle_name,
+        primary_school=school if school_type == 'primary' else None,
+        secondary_school=school if school_type == 'secondary' else None
+    ).exists()
 
-    days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
+    if menu_exists:
+        return Response({'error': 'A menu with the same cycle name already exists for this school.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Extract only the days that have valid menu data
+    valid_days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
+    menu_days = []
+
+    for day in valid_days:
+        categories = request.data.get(f'category_{day}', [])
+        item_names = request.data.get(f'item_names_{day}', [])
+        prices = request.data.get(f'price_{day}', [])
+
+        # Ensure data exists and is not empty or null
+        if categories and item_names and prices and all(categories) and all(item_names) and all(prices):
+            menu_days.append(day)
+
+    if not menu_days:
+        return Response({'error': 'At least one valid day menu must be provided.'}, status=status.HTTP_400_BAD_REQUEST)
+
     created_menus = []
 
-   
-    for day in days:
-        
-        categories = request.data.get(f'category_{day}')
-        item_names = request.data.get(f'item_names_{day}')
-        prices = request.data.get(f'price_{day}')
+    # Validate all data before saving anything
+    for day in menu_days:
+        categories = request.data.get(f'category_{day}', [])
+        item_names = request.data.get(f'item_names_{day}', [])
+        prices = request.data.get(f'price_{day}', [])
 
+        # Validate data types and consistency
         if not isinstance(categories, list) or not isinstance(item_names, list) or not isinstance(prices, list):
             return Response({'error': f'Invalid data format for {day}. Expecting lists of categories, item names, and prices.'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1144,7 +1161,7 @@ def add_menu(request):
 
         for category_id, menu_name, price in zip(categories, item_names, prices):
             if not category_id or not menu_name or not price:
-                return Response({'error': f'Incomplete data for {day}. Ensure all fields are filled.'}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({'error': f'Incomplete data for {day}. Ensure all fields are filled correctly.'}, status=status.HTTP_400_BAD_REQUEST)
 
             try:
                 price = float(price)
@@ -1158,10 +1175,18 @@ def add_menu(request):
             except Categories.DoesNotExist:
                 return Response({'error': f'Category {category_id} not found for {menu_name} on {day}.'}, status=status.HTTP_404_NOT_FOUND)
 
-       
+    # If all validation passes, save the menu
+    for day in menu_days:
+        categories = request.data.get(f'category_{day}', [])
+        item_names = request.data.get(f'item_names_{day}', [])
+        prices = request.data.get(f'price_{day}', [])
+
+        for category_id, menu_name, price in zip(categories, item_names, prices):
+            category = Categories.objects.get(id=category_id)  # We already validated existence
+
             menu = Menu(
                 name=menu_name,
-                price=price,
+                price=float(price),
                 primary_school=school if school_type == 'primary' else None,
                 secondary_school=school if school_type == 'secondary' else None,
                 menu_day=day,
