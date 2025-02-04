@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/5.1/ref/settings/
 
 from pathlib import Path
 import environ
+from decouple import config
 
 import os
 env = environ.Env(
@@ -19,7 +20,7 @@ env = environ.Env(
     DEBUG=(bool, False)
 )
 ROOT_URLCONF = 'rafters_food.urls'
-ADMIN_PASSWORD = 'password123'
+ADMIN_PASSWORD = config('ADMIN_PASSWORD')
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 environ.Env.read_env()
@@ -200,13 +201,15 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend' 
 
 
-EMAIL_PORT = 587  
-EMAIL_USE_TLS = True 
-EMAIL_HOST = 'smtp.gmail.com' 
-EMAIL_HOST_USER = 'freelancewriter3377@gmail.com'  
-EMAIL_HOST_PASSWORD="xrnsvmfuakiceadt"
-DEFAULT_FROM_EMAIL= 'freelancewriter3377@gmail.com'  
-MAIL_DEFAULT_SENDER = 'testingsites247365@gmail.com'
+EMAIL_PORT = config('EMAIL_PORT', cast=int)
+EMAIL_USE_TLS = config('EMAIL_USE_TLS', cast=bool)
+EMAIL_HOST = config('EMAIL_HOST')
+EMAIL_HOST_USER = config('EMAIL_HOST_USER')
+EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD')
+DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL')
+MAIL_DEFAULT_SENDER = config('MAIL_DEFAULT_SENDER')
 
-STRIPE_PUBLIC_KEY=env('STRIPE_PUBLIC_KEY')
-STRIPE_SECRET_KEY=env('STRIPE_SECRET_KEY')
+# Stripe configuration
+STRIPE_PUBLIC_KEY = config('STRIPE_PUBLIC_KEY')
+STRIPE_SECRET_KEY = config('STRIPE_SECRET_KEY')
+print("Loaded ADMIN_PASSWORD:", ADMIN_PASSWORD)
