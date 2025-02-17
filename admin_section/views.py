@@ -2719,60 +2719,41 @@ DAY_COLORS = {
 }
 
 CLASS_YEARS = ["1st", "2nd", "3rd", "4th", "5th", "6th"]
-
 def fetch_orders(school_id, school_type):
     current_time = now()
-    current_week_number = current_time.isocalendar()[1]  # ISO week number
+    current_week_number = current_time.isocalendar()[1]
     current_year = current_time.year
 
-    # Determine if today is Friday after 2 PM
     is_friday_afternoon = current_time.weekday() == 4 and current_time.hour >= 14
+    target_week = current_week_number + 1 if is_friday_afternoon else current_week_number
 
-    # Set the target week based on the day and time
-    if is_friday_afternoon:
-        target_week = current_week_number + 1
-    else:
-        target_week = current_week_number
+    # Fetch orders based on school type
+    orders = Order.objects.filter(
+        primary_school_id=school_id if school_type == 'primary' else None,
+        secondary_school_id=school_id if school_type == 'secondary' else None,
+        week_number=target_week,
+        year=current_year
+    ).order_by('-order_date')
 
-    # Filter orders by school type, school ID, and target week
-    orders = (
-        Order.objects.filter(
-            primary_school_id=school_id,
-            week_number=target_week,
-            year=current_year
-        ).order_by('-order_date')
-        if school_type == 'primary'
-        else Order.objects.filter(
-            secondary_school_id=school_id,
-            week_number=target_week,
-            year=current_year
-        ).order_by('-order_date')
-    )
+    student_orders = orders.exclude(user_type="staff")  # Separate student orders
+    staff_orders = orders.filter(user_type="staff")  # Separate staff orders
 
-    # Log all orders and their attributes
-    logger.info(f"🔍 Total {school_type} orders found for week {target_week}: {orders.count()}")
-    for order in orders:
-        logger.info(f"📌 Order ID: {order.id}, Day: {order.selected_day}, User Type: {order.user_type}, Child ID: {order.child_id}, User ID: {order.user_id}")
+    logger.info(f"🔍 Total {school_type} student orders: {student_orders.count()}")
+    logger.info(f"👨‍🏫 Total {school_type} staff orders: {staff_orders.count()}")
 
-    return orders
-
-
-def generate_workbook(school, orders, school_type):
+    return student_orders, staff_orders
+def generate_workbook(school, student_orders, staff_orders, school_type):
     workbook = Workbook()
-    workbook.remove(workbook.active)  # Remove default sheet
+    workbook.remove(workbook.active)
 
     day_totals = defaultdict(lambda: defaultdict(int))
     grouped_orders = defaultdict(lambda: defaultdict(list))
+    staff_orders_by_day = defaultdict(list)  # Ensure staff orders are stored
 
     # Define styles
     header_font = Font(bold=True, size=12, color="FFFFFF")
     header_fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
-    border = Border(
-        left=Side(style="thin"),
-        right=Side(style="thin"),
-        top=Side(style="thin"),
-        bottom=Side(style="thin"),
-    )
+    border = Border(left=Side(style="thin"), right=Side(style="thin"), top=Side(style="thin"), bottom=Side(style="thin"))
     center_align = Alignment(horizontal="center", vertical="center")
 
     def apply_styling(sheet):
@@ -2781,8 +2762,8 @@ def generate_workbook(school, orders, school_type):
                 cell.border = border
                 cell.alignment = center_align
 
-    # Process orders if available
-    for order in orders:
+    # Process student orders
+    for order in student_orders:
         order_items = OrderItem.objects.filter(order=order)
         selected_day = order.selected_day
 
@@ -2801,7 +2782,7 @@ def generate_workbook(school, orders, school_type):
 
             grouped_orders[selected_day][order_data['teacher_name']].append(order_data)
 
-        else:  # Secondary school
+        else:  # Secondary School
             student = SecondaryStudent.objects.filter(id=order.user_id).first()
             if student:
                 order_data['student_name'] = student.username
@@ -2812,8 +2793,28 @@ def generate_workbook(school, orders, school_type):
         for menu_name, quantity in order_data['order_items'].items():
             day_totals[selected_day][menu_name] += quantity
 
+    # Process staff orders
+    for order in staff_orders:
+        order_items = OrderItem.objects.filter(order=order)
+        selected_day = order.selected_day
+
+        staff_order_data = {
+            'staff_name': "Unknown",
+            'order_items': {item.menu.name: item.quantity for item in order_items}
+        }
+
+        staff = StaffRegisteration.objects.filter(id=order.user_id).first()
+        if staff:
+            staff_order_data['staff_name'] = staff.username
+
+        staff_orders_by_day[selected_day].append(staff_order_data)
+
+        for menu_name, quantity in staff_order_data['order_items'].items():
+            day_totals[selected_day][menu_name] += quantity
+
     # Create sheets for each day
     for day in DAY_COLORS.keys():
+        # Add teacher/class sheets
         entity_list = Teacher.objects.filter(school=school) if school_type == 'primary' else CLASS_YEARS
 
         for entity in entity_list:
@@ -2823,7 +2824,6 @@ def generate_workbook(school, orders, school_type):
             sheet = workbook.create_sheet(title=sheet_title[:31])
             sheet.sheet_properties.tabColor = DAY_COLORS.get(day, "FFFFFF")
 
-            # Add headers with styling
             headers = ["Student Name", "Menu Items", "Quantity"]
             sheet.append(headers)
             for col_num, cell in enumerate(sheet[1], start=1):
@@ -2831,36 +2831,57 @@ def generate_workbook(school, orders, school_type):
                 cell.fill = header_fill
                 cell.border = border
                 cell.alignment = center_align
-                sheet.column_dimensions[chr(64 + col_num)].width = 20  # Adjust column width
+                sheet.column_dimensions[chr(64 + col_num)].width = 20
 
             orders_for_entity = grouped_orders.get(day, {}).get(entity_name, [])
-            if orders_for_entity:
-                for order_data in orders_for_entity:
-                    for menu_name, quantity in order_data['order_items'].items():
-                        sheet.append([order_data['student_name'], menu_name, quantity])
-            else:
-                sheet.append(["No orders", "", ""])  # Add empty row for no orders
+            for order_data in orders_for_entity:
+                for menu_name, quantity in order_data['order_items'].items():
+                    sheet.append([order_data['student_name'], menu_name, quantity])
 
             apply_styling(sheet)
 
-    # Day Totals Sheet
-    day_totals_sheet = workbook.create_sheet(title="Day Totals")
-    day_totals_sheet.append(["Day", "Menu Item", "Total Quantity"])
-    for col_num, cell in enumerate(day_totals_sheet[1], start=1):
-        cell.font = header_font
-        cell.fill = header_fill
-        cell.border = border
-        cell.alignment = center_align
-        day_totals_sheet.column_dimensions[chr(64 + col_num)].width = 20
+        # **Always Add Staff Orders Sheet for Each Day**
+        staff_sheet = workbook.create_sheet(title=f"Staff {day}")
+        staff_sheet.sheet_properties.tabColor = "CCCCCC"
 
-    for day, items in day_totals.items():
-        for menu_name, quantity in items.items():
-            day_totals_sheet.append([day, menu_name, quantity])
+        staff_sheet.append(["Staff Name", "Menu Items", "Quantity"])
+        for col_num, cell in enumerate(staff_sheet[1], start=1):
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.border = border
+            cell.alignment = center_align
+            staff_sheet.column_dimensions[chr(64 + col_num)].width = 20
 
-    apply_styling(day_totals_sheet)
+        if day not in staff_orders_by_day or not staff_orders_by_day[day]:
+            staff_sheet.append(["No orders", "", ""])  # Ensure the sheet appears
+        else:
+            for order_data in staff_orders_by_day[day]:
+                for menu_name, quantity in order_data['order_items'].items():
+                    staff_sheet.append([order_data['staff_name'], menu_name, quantity])
+
+        apply_styling(staff_sheet)
+
+        # **Add Day Total Sheet**
+        day_total_sheet = workbook.create_sheet(title=f"{day} Total")
+        day_total_sheet.sheet_properties.tabColor = "FFD700"
+
+        day_total_sheet.append(["Menu Item", "Total Quantity"])
+        for col_num, cell in enumerate(day_total_sheet[1], start=1):
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.border = border
+            cell.alignment = center_align
+            day_total_sheet.column_dimensions[chr(64 + col_num)].width = 20
+
+        if day in day_totals:
+            for menu_name, quantity in day_totals[day].items():
+                day_total_sheet.append([menu_name, quantity])
+        else:
+            day_total_sheet.append(["No orders", ""])  # Ensure it always appears
+
+        apply_styling(day_total_sheet)
 
     return workbook
-
 @api_view(['POST'])
 def download_menu(request):
     try:
@@ -2883,13 +2904,17 @@ def download_menu(request):
             school = SecondarySchool.objects.get(id=school_id)
             logger.info(f"🏫 Secondary school found: {school.secondary_school_name}")
 
-        orders = fetch_orders(school_id, school_type)
+        # 🔹 Unpacking student_orders and staff_orders correctly
+        student_orders, staff_orders = fetch_orders(school_id, school_type)
 
-        if not orders.exists():
+        # 🔹 Fix: Check if either student_orders or staff_orders is empty
+        if not student_orders.exists() and not staff_orders.exists():
             logger.warning(f"⚠️ No orders found for {school_type} school ID {school_id}")
-            orders = []  # Pass an empty list to generate_workbook
+            student_orders = []  # Empty list to avoid errors
+            staff_orders = []  # Empty list to avoid errors
 
-        workbook = generate_workbook(school, orders, school_type)
+        # 🔹 Pass both student_orders and staff_orders to generate_workbook
+        workbook = generate_workbook(school, student_orders, staff_orders, school_type)
 
         filename = f"{school_type}_{school.secondary_school_name if school_type == 'secondary' else school.school_name}_Menu.xlsx"
         file_path = os.path.join(settings.MEDIA_ROOT, filename)
@@ -2906,6 +2931,9 @@ def download_menu(request):
     except Exception as e:
         logger.error(f"🚨 Unexpected Error: {e}")
         return Response({'error': 'An unexpected error occurred.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
 @api_view(["GET"])
 def get_user_count(request):
     try:
