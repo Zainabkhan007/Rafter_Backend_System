@@ -1096,110 +1096,42 @@ def get_allergy(request):
 
 @api_view(['POST'])
 def add_menu(request):
-    school_id = request.data.get('school_id')
-    school_type = request.data.get('school_type')
     cycle_name = request.data.get('cycle_name')
-    menu_date = datetime.now().date()
+    school_name = request.data.get('school_name')
 
-    if not cycle_name or (not cycle_name.isalnum() and " " not in cycle_name):
-        return Response({'error': 'Cycle Name cannot contain special characters!'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    if not cycle_name:
+        return Response({'error': 'Cycle name is required'}, status=status.HTTP_400_BAD_REQUEST)
+    if not school_name:
+        return Response({'error': 'School name is required'}, status=status.HTTP_400_BAD_REQUEST)
 
-    # Fetch School
-    if school_type == 'primary':
+  
+    school = None
+    try:
+ 
+        school = PrimarySchool.objects.get(school_name=school_name)
+    except PrimarySchool.DoesNotExist:
         try:
-            school = PrimarySchool.objects.get(id=school_id)
-        except PrimarySchool.DoesNotExist:
-            return Response({'error': 'Primary school not found'}, status=status.HTTP_404_NOT_FOUND)
-    elif school_type == 'secondary':
-        try:
-            school = SecondarySchool.objects.get(id=school_id)
+            school = SecondarySchool.objects.get(secondary_school_name=school_name)
         except SecondarySchool.DoesNotExist:
-            return Response({'error': 'Secondary school not found'}, status=status.HTTP_404_NOT_FOUND)
-    else:
-        return Response({'error': 'Invalid school type'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': f'School named "{school_name}" not found'}, status=status.HTTP_404_NOT_FOUND)
 
-    # Check for duplicate cycle names
-    menu_exists = Menu.objects.filter(
-        cycle_name=cycle_name,
-        primary_school=school if school_type == 'primary' else None,
-        secondary_school=school if school_type == 'secondary' else None
-    ).exists()
+   
+    menus = Menu.objects.filter(cycle_name=cycle_name)
 
-    if menu_exists:
-        return Response({'error': 'A menu with the same cycle name already exists for this school.'}, status=status.HTTP_400_BAD_REQUEST)
+  
+    if not menus.exists():
+        return Response({'error': f'No menus found for cycle name "{cycle_name}"'}, status=status.HTTP_404_NOT_FOUND)
 
-    # Extract only the days that have valid menu data
-    valid_days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
-    menu_days = []
+   
+    updated_menus = []
+    for menu in menus:
+        menu.school = school
+        menu.save()
+        updated_menus.append(MenuSerializer(menu).data)
 
-    for day in valid_days:
-        categories = request.data.get(f'category_{day}', [])
-        item_names = request.data.get(f'item_names_{day}', [])
-        prices = request.data.get(f'price_{day}', [])
-
-        # Ensure data exists and is not empty or null
-        if categories and item_names and prices and all(categories) and all(item_names) and all(prices):
-            menu_days.append(day)
-
-    if not menu_days:
-        return Response({'error': 'At least one valid day menu must be provided.'}, status=status.HTTP_400_BAD_REQUEST)
-
-    created_menus = []
-
-    # Validate all data before saving anything
-    for day in menu_days:
-        categories = request.data.get(f'category_{day}', [])
-        item_names = request.data.get(f'item_names_{day}', [])
-        prices = request.data.get(f'price_{day}', [])
-
-        # Validate data types and consistency
-        if not isinstance(categories, list) or not isinstance(item_names, list) or not isinstance(prices, list):
-            return Response({'error': f'Invalid data format for {day}. Expecting lists of categories, item names, and prices.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        if len(categories) != len(item_names) or len(item_names) != len(prices):
-            return Response({'error': f'Inconsistent data length for {day}. Categories, item names, and prices must have the same number of items.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        for category_id, menu_name, price in zip(categories, item_names, prices):
-            if not category_id or not menu_name or not price:
-                return Response({'error': f'Incomplete data for {day}. Ensure all fields are filled correctly.'}, status=status.HTTP_400_BAD_REQUEST)
-
-            try:
-                price = float(price)
-                if price < 0:
-                    return Response({'error': f'Price for {menu_name} on {day} must be positive.'}, status=status.HTTP_400_BAD_REQUEST)
-            except ValueError:
-                return Response({'error': f'Invalid price format for {menu_name} on {day}.'}, status=status.HTTP_400_BAD_REQUEST)
-
-            try:
-                category = Categories.objects.get(id=category_id)
-            except Categories.DoesNotExist:
-                return Response({'error': f'Category {category_id} not found for {menu_name} on {day}.'}, status=status.HTTP_404_NOT_FOUND)
-
-    # If all validation passes, save the menu
-    for day in menu_days:
-        categories = request.data.get(f'category_{day}', [])
-        item_names = request.data.get(f'item_names_{day}', [])
-        prices = request.data.get(f'price_{day}', [])
-
-        for category_id, menu_name, price in zip(categories, item_names, prices):
-            category = Categories.objects.get(id=category_id)  # We already validated existence
-
-            menu = Menu(
-                name=menu_name,
-                price=float(price),
-                primary_school=school if school_type == 'primary' else None,
-                secondary_school=school if school_type == 'secondary' else None,
-                menu_day=day,
-                cycle_name=cycle_name,
-                menu_date=menu_date,
-                category=category
-            )
-            menu.save()
-            created_menus.append(MenuSerializer(menu).data)
-
-    return Response({'message': 'Menus created successfully!', 'menus': created_menus}, status=status.HTTP_201_CREATED)
-
-
+   
+    return Response({'message': 'Menus assigned to school successfully!', 'menus': updated_menus}, status=status.HTTP_200_OK)
 @api_view(['POST'])
 def activate_cycle(request):
     if request.method == 'POST':
@@ -2984,21 +2916,32 @@ def get_active_status_menu(request):
                 "Sunday": []
             }
 
-            
+            active_cycle_name = "No active cycle"  
+            start_date = None
+            end_date = None
+
             for menu in menus:
                 day_of_week = menu.menu_day
                 if day_of_week in weekly_menu:
                     weekly_menu[day_of_week].append(menu)
 
-          
+                
+                if not active_cycle_name or menu.cycle_name:
+                    active_cycle_name = menu.cycle_name  
+                    start_date = menu.start_date
+                    end_date = menu.end_date
+
+       
             active_status = not all(len(weekly_menu[day]) == 0 for day in weekly_menu)
 
-        
             schools_data.append({
                 "school_type": "primary",
                 "school_id": school.id,
                 "school_name": school.school_name,
-                "is_active": active_status
+                "is_active": active_status,
+                "active_cycle_name": active_cycle_name,
+                "start_date": start_date,
+                "end_date": end_date
             })
 
       
@@ -3019,23 +2962,182 @@ def get_active_status_menu(request):
                 "Sunday": []
             }
 
-           
+            active_cycle_name = "No active cycle"  
+            start_date = None
+            end_date = None
+
             for menu in menus:
                 day_of_week = menu.menu_day
                 if day_of_week in weekly_menu:
                     weekly_menu[day_of_week].append(menu)
 
-            active_status = not all(len(weekly_menu[day]) == 0 for day in weekly_menu)
+              
+                if not active_cycle_name or menu.cycle_name:
+                    active_cycle_name = menu.cycle_name  
+                    start_date = menu.start_date
+                    end_date = menu.end_date
 
            
+            active_status = not all(len(weekly_menu[day]) == 0 for day in weekly_menu)
+
             schools_data.append({
                 "school_type": "secondary",
                 "school_id": school.id,
                 "school_name": school.secondary_school_name,
-                "is_active": active_status
+                "is_active": active_status,
+                "active_cycle_name": active_cycle_name,
+                "start_date": start_date,
+                "end_date": end_date
             })
 
         return Response({"schools": schools_data}, status=status.HTTP_200_OK)
 
     except Exception as e:
         return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['POST'])
+def create_cycle(request):
+
+    cycle_name = request.data.get('cycle_name')
+    menu_date = datetime.now().date()  
+
+    if not cycle_name.isalnum() and " " not in cycle_name:
+        return Response({'error': 'Cycle Name cannot contain special characters!'}, status=status.HTTP_400_BAD_REQUEST)
+
+    
+
+  
+    if Menu.objects.filter( cycle_name=cycle_name).exists():
+            return Response({'error': 'A menu with the same cycle name already exists '}, status=status.HTTP_400_BAD_REQUEST)
+  
+
+    days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
+    created_menus = []
+
+   
+    for day in days:
+        
+        categories = request.data.get(f'category_{day}')
+        item_names = request.data.get(f'item_names_{day}')
+        prices = request.data.get(f'price_{day}')
+
+        if not isinstance(categories, list) or not isinstance(item_names, list) or not isinstance(prices, list):
+            return Response({'error': f'Invalid data format for {day}. Expecting lists of categories, item names, and prices.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if len(categories) != len(item_names) or len(item_names) != len(prices):
+            return Response({'error': f'Inconsistent data length for {day}. Categories, item names, and prices must have the same number of items.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        for category_id, menu_name, price in zip(categories, item_names, prices):
+            if not category_id or not menu_name or not price:
+                return Response({'error': f'Incomplete data for {day}. Ensure all fields are filled.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            try:
+                price = float(price)
+                if price < 0:
+                    return Response({'error': f'Price for {menu_name} on {day} must be positive.'}, status=status.HTTP_400_BAD_REQUEST)
+            except ValueError:
+                return Response({'error': f'Invalid price format for {menu_name} on {day}.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            try:
+                category = Categories.objects.get(id=category_id)
+            except Categories.DoesNotExist:
+                return Response({'error': f'Category {category_id} not found for {menu_name} on {day}.'}, status=status.HTTP_404_NOT_FOUND)
+
+       
+            menu = Menu(
+                name=menu_name,
+                price=price,
+               
+                menu_day=day,
+                cycle_name=cycle_name,
+                menu_date=menu_date,
+                category=category
+            )
+            menu.save()
+            created_menus.append(MenuSerializer(menu).data)
+
+    return Response({'message': 'Menus created successfully!', 'menus': created_menus}, status=status.HTTP_201_CREATED)
+
+@api_view(['POST', 'PUT', 'DELETE'])
+def get_cycle_menus(request):
+    cycle_name = request.data.get('cycle_name')
+
+    
+    if not cycle_name:
+        return Response({'error': 'Cycle name is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if request.method == 'POST':
+        
+        menus = Menu.objects.filter(cycle_name=cycle_name)
+
+        if not menus.exists():
+            return Response({'error': f'No menus found for cycle name: {cycle_name}'}, status=status.HTTP_404_NOT_FOUND)
+
+        
+        serialized_menus = MenuSerializer(menus, many=True)
+
+        return Response({'message': 'Menus fetched successfully!', 'menus': serialized_menus.data}, status=status.HTTP_200_OK)
+
+    elif request.method == 'PUT':
+      
+        menus = Menu.objects.filter(cycle_name=cycle_name)
+
+        if not menus.exists():
+            return Response({'error': f'No menus found for cycle name: {cycle_name}'}, status=status.HTTP_404_NOT_FOUND)
+
+        
+        updated_data = request.data.get('updated_data')
+
+        if not updated_data:
+            return Response({'error': 'No data provided for updating menus'}, status=status.HTTP_400_BAD_REQUEST)
+
+        updated_menus = []
+        for menu_item in menus:
+           
+            menu_data = updated_data.get(str(menu_item.id))
+
+            if menu_data:
+                menu_item.name = menu_data.get('name', menu_item.name)
+                menu_item.price = menu_data.get('price', menu_item.price)
+
+                
+                menu_item.save()
+                updated_menus.append(MenuSerializer(menu_item).data)
+
+        return Response({'message': 'Menus updated successfully!', 'menus': updated_menus}, status=status.HTTP_200_OK)
+
+    elif request.method == 'DELETE':
+        
+        menus = Menu.objects.filter(cycle_name=cycle_name)
+
+     
+        if not menus.exists():
+            return Response({'error': f'No menus found for cycle name: {cycle_name}'}, status=status.HTTP_404_NOT_FOUND)
+
+        deleted_count, _ = menus.delete()
+
+        return Response({'message': f'{deleted_count} menus deleted successfully.'}, status=status.HTTP_200_OK)
+@api_view(['GET'])
+def get_all_cycles_with_menus(request):
+   
+    cycle_names = Menu.objects.values_list('cycle_name', flat=True).distinct()
+
+
+    if not cycle_names:
+        return Response({'error': 'No cycle names found'}, status=status.HTTP_404_NOT_FOUND)
+    
+    cycles_with_menus = []
+
+    
+    for cycle_name in cycle_names:
+        menus = Menu.objects.filter(cycle_name=cycle_name)
+        
+        
+        serialized_menus = MenuSerializer(menus, many=True)
+       
+        cycles_with_menus.append({
+            'cycle_name': cycle_name,
+            'menus': serialized_menus.data
+        })
+    
+    return Response({'message': 'Cycles and their menus fetched successfully!', 'cycles': cycles_with_menus}, status=status.HTTP_200_OK)
