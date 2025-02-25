@@ -48,6 +48,9 @@ urlpatterns = [
     path("get_allergy/",views.get_allergy,name='get_allergy'),
 #    Menu
     path("add_menu/",views.add_menu,name='add_menu'),
+    path("create_cycle/",views.create_cycle,name='create_cycle'),
+    path("get_cycle_menus/",views.get_cycle_menus,name='get_cycle_menus'),
+    path("get_all_cycles_with_menus/",views.get_all_cycles_with_menus,name='get_all_cycles_with_menus'),
     path("get_complete_menu/",views.get_complete_menu,name='get_complete_menu'),
     path("activate_cycle/",views.activate_cycle,name='activate_cycle'),
 
