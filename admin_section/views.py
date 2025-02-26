@@ -2906,7 +2906,6 @@ def get_active_status_menu(request):
 
         schools_data = []
 
-        # Loop through primary schools
         for school in primary_schools:
             menus = Menu.objects.filter(
                 primary_school_id=school.id,
@@ -2924,10 +2923,11 @@ def get_active_status_menu(request):
                 "Sunday": []
             }
 
-            active_cycle_name = "No active cycle"
-            start_datetime = None
-            end_datetime = None
-            is_active_time = None
+            active_cycle_name = "No active cycle"  
+            start_date = None
+            end_date = None
+            start_time = None
+            end_time = None
 
             for menu in menus:
                 day_of_week = menu.menu_day
@@ -2935,26 +2935,13 @@ def get_active_status_menu(request):
                     weekly_menu[day_of_week].append(menu)
 
                 if not active_cycle_name or menu.cycle_name:
-                    active_cycle_name = menu.cycle_name
-                    start_datetime = menu.start_date
-                    end_datetime = menu.end_date
-                    is_active_time = menu.is_active_time
+                    active_cycle_name = menu.cycle_name  
+                    start_date = menu.start_date
+                    end_date = menu.end_date
+                   
+                    start_time = menu.is_active_time.strftime('%I:%M %p') if menu.is_active_time else None
+                    end_time = menu.end_date.strftime('%I:%M %p') if menu.end_date else None
 
-          
-            if isinstance(start_datetime, datetime):
-                start_datetime = start_datetime.strftime("%Y-%m-%d %I:%M %p") 
-            elif isinstance(start_datetime, date):
-              
-                start_datetime = datetime.combine(start_datetime, datetime.min.time()).strftime("%Y-%m-%d %I:%M %p")  
-
-            if isinstance(end_datetime, datetime):
-                end_datetime = end_datetime.strftime("%Y-%m-%d %I:%M %p") 
-            elif isinstance(end_datetime, date):
-                
-                end_datetime = datetime.combine(end_datetime, datetime.min.time()).strftime("%Y-%m-%d %I:%M %p")  
-
-            if isinstance(is_active_time, datetime):
-                is_active_time = is_active_time.strftime("%Y-%m-%d %I:%M %p")  
             active_status = not all(len(weekly_menu[day]) == 0 for day in weekly_menu)
 
             schools_data.append({
@@ -2963,12 +2950,11 @@ def get_active_status_menu(request):
                 "school_name": school.school_name,
                 "is_active": active_status,
                 "active_cycle_name": active_cycle_name,
-                "start_datetime": start_datetime, 
-                "end_datetime": end_datetime,  
-     
+                "start_datetime": f"{start_date} {start_time}" if start_date else None,
+                "end_datetime": f"{end_date} {end_time}" if end_date else None
             })
 
-     
+       
         for school in secondary_schools:
             menus = Menu.objects.filter(
                 secondary_school_id=school.id,
@@ -2986,10 +2972,11 @@ def get_active_status_menu(request):
                 "Sunday": []
             }
 
-            active_cycle_name = "No active cycle"
-            start_datetime = None
-            end_datetime = None
-            is_active_time = None
+            active_cycle_name = "No active cycle"  
+            start_date = None
+            end_date = None
+            start_time = None
+            end_time = None
 
             for menu in menus:
                 day_of_week = menu.menu_day
@@ -2997,26 +2984,12 @@ def get_active_status_menu(request):
                     weekly_menu[day_of_week].append(menu)
 
                 if not active_cycle_name or menu.cycle_name:
-                    active_cycle_name = menu.cycle_name
-                    start_datetime = menu.start_date
-                    end_datetime = menu.end_date
-                    is_active_time = menu.is_active_time
-
-            
-            if isinstance(start_datetime, datetime):
-                start_datetime = start_datetime.strftime("%Y-%m-%d %I:%M %p") 
-            elif isinstance(start_datetime, date):
-              
-                start_datetime = datetime.combine(start_datetime, datetime.min.time()).strftime("%Y-%m-%d %I:%M %p") 
-
-            if isinstance(end_datetime, datetime):
-                end_datetime = end_datetime.strftime("%Y-%m-%d %I:%M %p")  
-            elif isinstance(end_datetime, date):
-              
-                end_datetime = datetime.combine(end_datetime, datetime.min.time()).strftime("%Y-%m-%d %I:%M %p")  # e.g., "2025-03-01 12:00 AM"
-
-            if isinstance(is_active_time, datetime):
-                is_active_time = is_active_time.strftime("%Y-%m-%d %I:%M %p")  
+                    active_cycle_name = menu.cycle_name  
+                    start_date = menu.start_date
+                    end_date = menu.end_date
+                   
+                    start_time = menu.is_active_time.strftime('%I:%M %p') if menu.is_active_time else None
+                    end_time = menu.end_date.strftime('%I:%M %p') if menu.end_date else None
 
             active_status = not all(len(weekly_menu[day]) == 0 for day in weekly_menu)
 
@@ -3026,8 +2999,8 @@ def get_active_status_menu(request):
                 "school_name": school.secondary_school_name,
                 "is_active": active_status,
                 "active_cycle_name": active_cycle_name,
-                "start_datetime": start_datetime,
-                "end_datetime": end_datetime,
+                "start_datetime": f"{start_date} {start_time}" if start_date else None,
+                "end_datetime": f"{end_date} {end_time}" if end_date else None
             })
 
         return Response({"schools": schools_data}, status=status.HTTP_200_OK)
