@@ -1096,42 +1096,51 @@ def get_allergy(request):
 
 @api_view(['POST'])
 def add_menu(request):
-    cycle_name = request.data.get('cycle_name')
-    school_name = request.data.get('school_name')
+      cycle_name = request.data.get('cycle_name')
+    school_type = request.data.get('school_type')
+    school_id = request.data.get('school_id')
 
-    
     if not cycle_name:
         return Response({'error': 'Cycle name is required'}, status=status.HTTP_400_BAD_REQUEST)
-    if not school_name:
-        return Response({'error': 'School name is required'}, status=status.HTTP_400_BAD_REQUEST)
+    if not school_type:
+        return Response({'error': 'School type is required'}, status=status.HTTP_400_BAD_REQUEST)
+    if not school_id:
+        return Response({'error': 'School ID is required'}, status=status.HTTP_400_BAD_REQUEST)
 
-  
     school = None
     try:
- 
-        school = PrimarySchool.objects.get(school_name=school_name)
+        if school_type == 'primary':
+            school = PrimarySchool.objects.get(id=school_id)
+        elif school_type == 'secondary':
+            school = SecondarySchool.objects.get(id=school_id)
+        else:
+            return Response({'error': 'Invalid school type. Must be "primary" or "secondary"'}, status=status.HTTP_400_BAD_REQUEST)
     except PrimarySchool.DoesNotExist:
-        try:
-            school = SecondarySchool.objects.get(secondary_school_name=school_name)
-        except SecondarySchool.DoesNotExist:
-            return Response({'error': f'School named "{school_name}" not found'}, status=status.HTTP_404_NOT_FOUND)
+        return Response({'error': f'Primary school with ID {school_id} not found'}, status=status.HTTP_404_NOT_FOUND)
+    except SecondarySchool.DoesNotExist:
+        return Response({'error': f'Secondary school with ID {school_id} not found'}, status=status.HTTP_404_NOT_FOUND)
 
-   
     menus = Menu.objects.filter(cycle_name=cycle_name)
 
-  
     if not menus.exists():
         return Response({'error': f'No menus found for cycle name "{cycle_name}"'}, status=status.HTTP_404_NOT_FOUND)
 
-   
+  
     updated_menus = []
     for menu in menus:
-        menu.school = school
+       
+        if school_type == 'primary':
+            menu.primary_school = school
+            menu.secondary_school = None  
+        elif school_type == 'secondary':
+            menu.secondary_school = school
+            menu.primary_school = None  
+        
         menu.save()
         updated_menus.append(MenuSerializer(menu).data)
 
-   
     return Response({'message': 'Menus assigned to school successfully!', 'menus': updated_menus}, status=status.HTTP_200_OK)
+
 @api_view(['POST'])
 def activate_cycle(request):
     if request.method == 'POST':
