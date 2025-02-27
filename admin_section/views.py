@@ -1152,27 +1152,34 @@ def activate_cycle(request):
         school_type = request.data.get('school_type')
         cycle_name = request.data.get('cycle_name')
 
+      
         if not cycle_name.isalnum() and " " not in cycle_name:
             return Response({'error': 'Cycle Name cannot contain special characters!'}, status=status.HTTP_400_BAD_REQUEST)
 
-    
+  
         school_model = PrimarySchool if school_type == 'primary' else SecondarySchool
         school = school_model.objects.filter(id=school_id).first()
-
 
         if not school:
             return Response({'error': f'{school_type.capitalize()} School not found'}, status=status.HTTP_404_NOT_FOUND)
 
-        Menu.objects.filter(
-            primary_school=school if school_type == 'primary' else None,
-            secondary_school=school if school_type == 'secondary' else None
-        ).update(is_active=False)  
+        
+        if school_type == 'primary':
+            Menu.objects.filter(
+                primary_school=school,
+                is_active=True 
+            ).update(is_active=False)
+        else:
+            Menu.objects.filter(
+                secondary_school=school,
+                is_active=True
+            ).update(is_active=False)
 
-      
         menus = Menu.objects.filter(
             cycle_name=cycle_name,
             primary_school=school if school_type == 'primary' else None,
-            secondary_school=school if school_type == 'secondary' else None
+            secondary_school=school if school_type == 'secondary' else None,
+            is_active=False  
         )
 
         if not menus:
@@ -1192,7 +1199,6 @@ def activate_cycle(request):
                 'is_active': menu.is_active
             })
 
-      
         return Response({
             'message': f'Cycle "{cycle_name}" activated successfully!',
             'menus': updated_menus
