@@ -1096,7 +1096,7 @@ def get_allergy(request):
 
 @api_view(['POST'])
 def add_menu(request):
-      cycle_name = request.data.get('cycle_name')
+    cycle_name = request.data.get('cycle_name')
     school_type = request.data.get('school_type')
     school_id = request.data.get('school_id')
 
