@@ -1142,6 +1142,8 @@ def add_menu(request):
     return Response({'message': 'Menus assigned to school successfully!', 'menus': updated_menus}, status=status.HTTP_200_OK)
 
 
+
+
 @api_view(['POST'])
 def activate_cycle(request):
     if request.method == 'POST':
@@ -1164,7 +1166,7 @@ def activate_cycle(request):
         Menu.objects.filter(
             primary_school=school if school_type == 'primary' else None,
             secondary_school=school if school_type == 'secondary' else None
-        ).update(status=False)  
+        ).update(is_active=False)  
 
       
         menus = Menu.objects.filter(
@@ -1178,7 +1180,7 @@ def activate_cycle(request):
 
         updated_menus = []
         for menu in menus:
-            menu.status = True  
+            menu.is_active = True  
             menu.save()
 
             updated_menus.append({
@@ -1187,7 +1189,7 @@ def activate_cycle(request):
                 'price': str(menu.price),
                 'menu_day': menu.menu_day,
                 'cycle_name': menu.cycle_name,
-                'status': menu.status
+                'is_active': menu.is_active
             })
 
       
@@ -2873,80 +2875,124 @@ def get_user_count(request):
 def get_active_status_menu(request):
     today = timezone.now().date()
 
- 
     primary_schools = PrimarySchool.objects.all()
     secondary_schools = SecondarySchool.objects.all()
 
     schools_data = []
 
-        
+ 
     for school in primary_schools:
-            menus = Menu.objects.filter(primary_school_id=school.id,status=True)
+        menus = Menu.objects.filter(primary_school_id=school.id)
 
-          
-            weekly_menu = {
-                "Monday": [],
-                "Tuesday": [],
-                "Wednesday": [],
-                "Thursday": [],
-                "Friday": [],
-                "Saturday": [],
-                "Sunday": []
-            }
+     
+        weekly_menu = {
+            "Monday": [],
+            "Tuesday": [],
+            "Wednesday": [],
+            "Thursday": [],
+            "Friday": [],
+            "Saturday": [],
+            "Sunday": []
+        }
 
-            
-            for menu in menus:
-                day_of_week = menu.menu_day
-                if day_of_week in weekly_menu:
-                    weekly_menu[day_of_week].append(menu)
+        
+        for menu in menus:
+            day_of_week = menu.menu_day
+            if day_of_week in weekly_menu:
+                weekly_menu[day_of_week].append(menu)
 
-            status = not all(len(weekly_menu[day]) == 0 for day in weekly_menu)
+        
+        is_active = not all(len(weekly_menu[day]) == 0 for day in weekly_menu)
 
-          
-            if status:
-              schools_data.append({
+        
+        if is_active:
+            active_cycle = None
+            for day, day_menus in weekly_menu.items():
+                if day == today.strftime("%A"):  
+                    for menu in day_menus:
+                        if menu.is_active:  
+                            active_cycle = menu.cycle_name
+                            break
+                if active_cycle:
+                    break
+
+        
+        if is_active:
+            if active_cycle: 
+                schools_data.append({
+                    "school_type": "primary",
+                    "school_id": school.id,
+                    "school_name": school.school_name,
+                    "is_active": is_active,
+                    "cycle_name": active_cycle  
+                })
+        else:
+        
+            schools_data.append({
                 "school_type": "primary",
                 "school_id": school.id,
                 "school_name": school.school_name,
-                "status": status,
-            
+                "is_active": is_active,
+                "cycle_name": None  
             })
 
-       
+
     for school in secondary_schools:
-            menus = Menu.objects.filter(secondary_school_id=school.id,status=True)
+        menus = Menu.objects.filter(secondary_school_id=school.id)
 
+
+        weekly_menu = {
+            "Monday": [],
+            "Tuesday": [],
+            "Wednesday": [],
+            "Thursday": [],
+            "Friday": [],
+            "Saturday": [],
+            "Sunday": []
+        }
+
+        
+        for menu in menus:
+            day_of_week = menu.menu_day
+            if day_of_week in weekly_menu:
+                weekly_menu[day_of_week].append(menu)
+
+     
+        is_active = not all(len(weekly_menu[day]) == 0 for day in weekly_menu)
+
+       
+        if is_active:
+            active_cycle = None
+            for day, day_menus in weekly_menu.items():
+                if day == today.strftime("%A"):  
+                    for menu in day_menus:
+                        if menu.is_active: 
+                            active_cycle = menu.cycle_name
+                            break
+                if active_cycle:
+                    break
+
+    
+        if is_active:
+            if active_cycle:  
+                schools_data.append({
+                    "school_type": "secondary",
+                    "school_id": school.id,
+                    "school_name": school.secondary_school_name,
+                    "is_active": is_active,
+                    "cycle_name": active_cycle  
+                })
+        else:
           
-            weekly_menu = {
-                "Monday": [],
-                "Tuesday": [],
-                "Wednesday": [],
-                "Thursday": [],
-                "Friday": [],
-                "Saturday": [],
-                "Sunday": []
-            }
-
-            
-            for menu in menus:
-                day_of_week = menu.menu_day
-                if day_of_week in weekly_menu:
-                    weekly_menu[day_of_week].append(menu)
-
-            status = not all(len(weekly_menu[day]) == 0 for day in weekly_menu)
-
-            if status:
-              schools_data.append({
+            schools_data.append({
                 "school_type": "secondary",
                 "school_id": school.id,
                 "school_name": school.secondary_school_name,
-                "status": status,
-                
+                "is_active": is_active,
+                "cycle_name": None  
             })
 
     return Response({"schools": schools_data})
-
-    
 
 
 
@@ -2980,13 +3026,12 @@ def deactivate_menus(request):
         if not menus.exists():
             return Response({"message": "No menus found for the specified school."}, status=status.HTTP_404_NOT_FOUND)
 
-        menus.update(status=False)
+        menus.update(is_active=False)
 
         return Response({"message": "All menus for the school have been deactivated successfully."}, status=status.HTTP_200_OK)
 
     except Exception as e:
         return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 @api_view(['POST'])
 def create_cycle(request):
