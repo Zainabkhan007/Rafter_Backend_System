@@ -135,7 +135,7 @@ class Menu(models.Model):
     menu_day = models.CharField(max_length=100, null=True, blank=True) 
     menu_date = models.DateField(default=datetime.today)  
     cycle_name = models.CharField(max_length=100)
-    status=models.CharField(max_length=100, null=True, blank=True)
+    is_active=models.CharField(max_length=100, null=True, blank=True)
 
     primary_school = models.ForeignKey(PrimarySchool, null=True, blank=True, on_delete=models.CASCADE, related_name="menus")
     secondary_school = models.ForeignKey(SecondarySchool, null=True, blank=True, on_delete=models.CASCADE, related_name="menus")
