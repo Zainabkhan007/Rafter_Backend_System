@@ -188,7 +188,7 @@ class CategoriesSerializer(serializers.ModelSerializer):
 
 
 class MenuSerializer(serializers.ModelSerializer):
-    is_active = serializers.BooleanField(read_only=True)
+
     
     primary_school_name = serializers.CharField(source='primary_school.school_name', read_only=True, required=False, allow_null=True)
     secondary_school_name = serializers.CharField(source='secondary_school.school_name', read_only=True, required=False, allow_null=True)
