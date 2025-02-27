@@ -1141,36 +1141,22 @@ def add_menu(request):
 
     return Response({'message': 'Menus assigned to school successfully!', 'menus': updated_menus}, status=status.HTTP_200_OK)
 
+
 @api_view(['POST'])
 def activate_cycle(request):
     if request.method == 'POST':
+    
         school_id = request.data.get('school_id')
         school_type = request.data.get('school_type')
         cycle_name = request.data.get('cycle_name')
-        start_datetime = request.data.get('start_datetime')  
-        end_datetime = request.data.get('end_datetime')
 
-      
         if not cycle_name.isalnum() and " " not in cycle_name:
             return Response({'error': 'Cycle Name cannot contain special characters!'}, status=status.HTTP_400_BAD_REQUEST)
-
-      
-        try:
-            if start_datetime:
-                start_datetime = datetime.strptime(start_datetime, '%Y-%m-%d %I:%M %p')  
-            else:
-                start_datetime = None  
-            
-            if end_datetime:
-                end_datetime = datetime.strptime(end_datetime, '%Y-%m-%d %I:%M %p')  
-            else:
-                end_datetime = None  
-        except ValueError:
-            return Response({'error': 'Invalid datetime format. Use YYYY-MM-DD HH:MM AM/PM.'}, status=status.HTTP_400_BAD_REQUEST)
 
     
         school_model = PrimarySchool if school_type == 'primary' else SecondarySchool
         school = school_model.objects.filter(id=school_id).first()
+
 
         if not school:
             return Response({'error': f'{school_type.capitalize()} School not found'}, status=status.HTTP_404_NOT_FOUND)
@@ -1178,9 +1164,9 @@ def activate_cycle(request):
         Menu.objects.filter(
             primary_school=school if school_type == 'primary' else None,
             secondary_school=school if school_type == 'secondary' else None
-        ).update(is_active_time=None, end_date=datetime.today().date())
+        ).update(status=False)  
 
-        
+      
         menus = Menu.objects.filter(
             cycle_name=cycle_name,
             primary_school=school if school_type == 'primary' else None,
@@ -1192,18 +1178,8 @@ def activate_cycle(request):
 
         updated_menus = []
         for menu in menus:
-            
-            if start_datetime:
-                menu.start_date = start_datetime.date()  
-            if end_datetime:
-                menu.end_date = end_datetime.date()  
-
-            menu.is_active_time = datetime.now()  
+            menu.status = True  
             menu.save()
-
-        
-            start_time = start_datetime.strftime('%I:%M %p') if start_datetime else None
-            end_time = end_datetime.strftime('%I:%M %p') if end_datetime else None
 
             updated_menus.append({
                 'id': menu.id,
@@ -1211,20 +1187,17 @@ def activate_cycle(request):
                 'price': str(menu.price),
                 'menu_day': menu.menu_day,
                 'cycle_name': menu.cycle_name,
-                'start_date': str(menu.start_date) if menu.start_date else None,
-                'start_time': start_time,  
-                'end_date': str(menu.end_date) if menu.end_date else None,
-                'end_time': end_time,  
-                'is_active': menu.is_active
+                'status': menu.status
             })
 
+      
         return Response({
             'message': f'Cycle "{cycle_name}" activated successfully!',
             'menus': updated_menus
         }, status=status.HTTP_200_OK)
 
 
-#
+
 @api_view(['POST', 'GET', 'DELETE'])
 def get_complete_menu(request):
     if request.method == 'POST':
@@ -2900,19 +2873,17 @@ def get_user_count(request):
 def get_active_status_menu(request):
     today = timezone.now().date()
 
-    try:
-        primary_schools = PrimarySchool.objects.all()
-        secondary_schools = SecondarySchool.objects.all()
+ 
+    primary_schools = PrimarySchool.objects.all()
+    secondary_schools = SecondarySchool.objects.all()
 
-        schools_data = []
+    schools_data = []
 
-        for school in primary_schools:
-            menus = Menu.objects.filter(
-                primary_school_id=school.id,
-                start_date__lte=today,
-                end_date__gte=today
-            )
-         
+        
+    for school in primary_schools:
+            menus = Menu.objects.filter(primary_school_id=school.id,status=True)
+
+          
             weekly_menu = {
                 "Monday": [],
                 "Tuesday": [],
@@ -2923,45 +2894,29 @@ def get_active_status_menu(request):
                 "Sunday": []
             }
 
-            active_cycle_name = "No active cycle"  
-            start_date = None
-            end_date = None
-            start_time = None
-            end_time = None
-
+            
             for menu in menus:
                 day_of_week = menu.menu_day
                 if day_of_week in weekly_menu:
                     weekly_menu[day_of_week].append(menu)
 
-                if not active_cycle_name or menu.cycle_name:
-                    active_cycle_name = menu.cycle_name  
-                    start_date = menu.start_date
-                    end_date = menu.end_date
-                   
-                    start_time = menu.is_active_time.strftime('%I:%M %p') if menu.is_active_time else None
-                    end_time = menu.end_date.strftime('%I:%M %p') if menu.end_date else None
+            status = not all(len(weekly_menu[day]) == 0 for day in weekly_menu)
 
-            active_status = not all(len(weekly_menu[day]) == 0 for day in weekly_menu)
-
-            schools_data.append({
+          
+            if status:
+              schools_data.append({
                 "school_type": "primary",
                 "school_id": school.id,
                 "school_name": school.school_name,
-                "is_active": active_status,
-                "active_cycle_name": active_cycle_name,
-                "start_datetime": f"{start_date} {start_time}" if start_date else None,
-                "end_datetime": f"{end_date} {end_time}" if end_date else None
+                "status": status,
+            
             })
 
        
-        for school in secondary_schools:
-            menus = Menu.objects.filter(
-                secondary_school_id=school.id,
-                start_date__lte=today,
-                end_date__gte=today
-            )
-            
+    for school in secondary_schools:
+            menus = Menu.objects.filter(secondary_school_id=school.id,status=True)
+
+          
             weekly_menu = {
                 "Monday": [],
                 "Tuesday": [],
@@ -2972,42 +2927,65 @@ def get_active_status_menu(request):
                 "Sunday": []
             }
 
-            active_cycle_name = "No active cycle"  
-            start_date = None
-            end_date = None
-            start_time = None
-            end_time = None
-
+            
             for menu in menus:
                 day_of_week = menu.menu_day
                 if day_of_week in weekly_menu:
                     weekly_menu[day_of_week].append(menu)
 
-                if not active_cycle_name or menu.cycle_name:
-                    active_cycle_name = menu.cycle_name  
-                    start_date = menu.start_date
-                    end_date = menu.end_date
-                   
-                    start_time = menu.is_active_time.strftime('%I:%M %p') if menu.is_active_time else None
-                    end_time = menu.end_date.strftime('%I:%M %p') if menu.end_date else None
+            status = not all(len(weekly_menu[day]) == 0 for day in weekly_menu)
 
-            active_status = not all(len(weekly_menu[day]) == 0 for day in weekly_menu)
-
-            schools_data.append({
+            if status:
+              schools_data.append({
                 "school_type": "secondary",
                 "school_id": school.id,
                 "school_name": school.secondary_school_name,
-                "is_active": active_status,
-                "active_cycle_name": active_cycle_name,
-                "start_datetime": f"{start_date} {start_time}" if start_date else None,
-                "end_datetime": f"{end_date} {end_time}" if end_date else None
+                "status": status,
+                
             })
 
-        return Response({"schools": schools_data}, status=status.HTTP_200_OK)
+    return Response({"schools": schools_data})
+
+    
+
+
+
+@api_view(["POST"])
+def deactivate_menus(request):
+    try:
+       
+        school_type = request.data.get("school_type") 
+        school_id = request.data.get("school_id")  
+   
+        if school_type not in ['primary', 'secondary']:
+            return Response({"error": "Invalid school type. Must be 'primary' or 'secondary'."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        if not isinstance(school_id, int) or school_id <= 0:
+            return Response({"error": "Invalid school ID."}, status=status.HTTP_400_BAD_REQUEST)
+        
+       
+        if school_type == 'primary':
+            school = PrimarySchool.objects.filter(id=school_id).first()
+            if not school:
+                return Response({"error": "Primary school not found."}, status=status.HTTP_404_NOT_FOUND)
+            menus = Menu.objects.filter(primary_school_id=school.id)
+        
+        elif school_type == 'secondary':
+            school = SecondarySchool.objects.filter(id=school_id).first()
+            if not school:
+                return Response({"error": "Secondary school not found."}, status=status.HTTP_404_NOT_FOUND)
+            menus = Menu.objects.filter(secondary_school_id=school.id)
+
+       
+        if not menus.exists():
+            return Response({"message": "No menus found for the specified school."}, status=status.HTTP_404_NOT_FOUND)
+
+        menus.update(status=False)
+
+        return Response({"message": "All menus for the school have been deactivated successfully."}, status=status.HTTP_200_OK)
 
     except Exception as e:
-        return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
+        return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(['POST'])
