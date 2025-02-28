@@ -1120,26 +1120,38 @@ def add_menu(request):
     except SecondarySchool.DoesNotExist:
         return Response({'error': f'Secondary school with ID {school_id} not found'}, status=status.HTTP_404_NOT_FOUND)
 
+   
     menus = Menu.objects.filter(cycle_name=cycle_name)
 
     if not menus.exists():
         return Response({'error': f'No menus found for cycle name "{cycle_name}"'}, status=status.HTTP_404_NOT_FOUND)
 
-  
     updated_menus = []
     for menu in menus:
        
+        new_menu = Menu(
+            name=menu.name,
+            price=menu.price,
+            cycle_name=menu.cycle_name,
+            menu_day=menu.menu_day,
+            menu_date=menu.menu_date,
+            category=menu.category,
+        )
+
+       
         if school_type == 'primary':
-            menu.primary_school = school
-            menu.secondary_school = None  
+            new_menu.primary_school = school
+            new_menu.secondary_school = None
         elif school_type == 'secondary':
-            menu.secondary_school = school
-            menu.primary_school = None  
-        
-        menu.save()
-        updated_menus.append(MenuSerializer(menu).data)
+            new_menu.secondary_school = school
+            new_menu.primary_school = None  
+
+       
+        new_menu.save()
+        updated_menus.append(MenuSerializer(new_menu).data)
 
     return Response({'message': 'Menus assigned to school successfully!', 'menus': updated_menus}, status=status.HTTP_200_OK)
+
 @api_view(['POST'])
 def activate_cycle(request):
     if request.method == 'POST':
