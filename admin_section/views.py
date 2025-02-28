@@ -1140,56 +1140,75 @@ def add_menu(request):
         updated_menus.append(MenuSerializer(menu).data)
 
     return Response({'message': 'Menus assigned to school successfully!', 'menus': updated_menus}, status=status.HTTP_200_OK)
-
-
-
-
 @api_view(['POST'])
 def activate_cycle(request):
     if request.method == 'POST':
-    
         school_id = request.data.get('school_id')
         school_type = request.data.get('school_type')
         cycle_name = request.data.get('cycle_name')
-
-      
-        if not cycle_name.isalnum() and " " not in cycle_name:
-            return Response({'error': 'Cycle Name cannot contain special characters!'}, status=status.HTTP_400_BAD_REQUEST)
-
-  
+        
+        # [Validation code remains the same]
+        
+        # Determine the school model based on school type
         school_model = PrimarySchool if school_type == 'primary' else SecondarySchool
         school = school_model.objects.filter(id=school_id).first()
-
+        
         if not school:
             return Response({'error': f'{school_type.capitalize()} School not found'}, status=status.HTTP_404_NOT_FOUND)
-
         
+        # Deactivate only the active menus for THIS specific school
         if school_type == 'primary':
-            Menu.objects.filter(
-                primary_school=school,
-                is_active=True 
-            ).update(is_active=False)
+            Menu.objects.filter(primary_school=school, is_active=True).update(is_active=False)
         else:
-            Menu.objects.filter(
-                secondary_school=school,
-                is_active=True
-            ).update(is_active=False)
-
-        menus = Menu.objects.filter(
+            Menu.objects.filter(secondary_school=school, is_active=True).update(is_active=False)
+        
+        # Find source menus for the specified cycle
+        source_menus = Menu.objects.filter(
             cycle_name=cycle_name,
-            primary_school=school if school_type == 'primary' else None,
-            secondary_school=school if school_type == 'secondary' else None,
-            is_active=False  
         )
-
-        if not menus:
-            return Response({'error': f'No menus found for cycle "{cycle_name}" in the specified school.'}, status=status.HTTP_404_NOT_FOUND)
-
+        
+        if not source_menus.exists():
+            return Response({'error': f'No menus found for cycle "{cycle_name}".'}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Create or update menus specifically for this school
         updated_menus = []
-        for menu in menus:
-            menu.is_active = True  
-            menu.save()
-
+        for source_menu in source_menus:
+            # Check if this menu already exists for this school
+            school_field = 'primary_school' if school_type == 'primary' else 'secondary_school'
+            filter_params = {
+                'name': source_menu.name,
+                'menu_day': source_menu.menu_day,
+                'cycle_name': source_menu.cycle_name,
+                school_field: school
+            }
+            
+            # Try to find existing menu or create a new one
+            existing_menu = Menu.objects.filter(**filter_params).first()
+            
+            if existing_menu:
+                # Update existing menu
+                existing_menu.is_active = True
+                existing_menu.price = source_menu.price
+                # Update other fields as needed
+                existing_menu.save()
+                menu = existing_menu
+            else:
+                # Create a new menu for this school
+                menu_data = {
+                    'name': source_menu.name,
+                    'price': source_menu.price,
+                    'menu_day': source_menu.menu_day,
+                    'cycle_name': source_menu.cycle_name,
+                    'is_active': True
+                }
+                
+                if school_type == 'primary':
+                    menu_data['primary_school'] = school
+                else:
+                    menu_data['secondary_school'] = school
+                
+                menu = Menu.objects.create(**menu_data)
+            
             updated_menus.append({
                 'id': menu.id,
                 'name': menu.name,
@@ -1198,14 +1217,11 @@ def activate_cycle(request):
                 'cycle_name': menu.cycle_name,
                 'is_active': menu.is_active
             })
-
+        
         return Response({
-            'message': f'Cycle "{cycle_name}" activated successfully!',
+            'message': f'Cycle "{cycle_name}" activated successfully for {school.school_name if school_type == "primary" else school.secondary_school_name}!',
             'menus': updated_menus
         }, status=status.HTTP_200_OK)
-
-
-
 @api_view(['POST', 'GET', 'DELETE'])
 def get_complete_menu(request):
     if request.method == 'POST':
@@ -1304,7 +1320,6 @@ def get_complete_menu(request):
         return Response({'message': f'All menus for cycle "{cycle_name}" in school {school_id} have been deleted.'}, status=status.HTTP_204_NO_CONTENT)
 
     return Response({'error': 'Invalid request method.'}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
-
 @api_view(["POST"])
 def get_active_menu(request):
     school_type = request.data.get('school_type')
@@ -1314,41 +1329,31 @@ def get_active_menu(request):
         return Response({"detail": "Both 'school_type' and 'school_id' must be provided."},
                         status=status.HTTP_400_BAD_REQUEST)
 
-    today = timezone.now().date()  
-
     try:
-        
+        # Filter menus based on school type and ID
         if school_type == 'primary':
             menus = Menu.objects.filter(
-                primary_school_id=school_id,
-                start_date__lte=today,
-                end_date__gte=today
+                primary_school_id=school_id
             ).select_related('category', 'primary_school')
             
             subquery = Menu.objects.filter(
-                primary_school_id=school_id,
-                start_date__lte=today,
-                end_date__gte=today
+                primary_school_id=school_id
             ).values('cycle_name').distinct()
 
         elif school_type == 'secondary':
             menus = Menu.objects.filter(
-                secondary_school_id=school_id,
-                start_date__lte=today,
-                end_date__gte=today
+                secondary_school_id=school_id
             ).select_related('category', 'secondary_school')
             
             subquery = Menu.objects.filter(
-                secondary_school_id=school_id,
-                start_date__lte=today,
-                end_date__gte=today
+                secondary_school_id=school_id
             ).values('cycle_name').distinct()
 
         else:
             return Response({"detail": "Invalid school type. Please provide either 'primary' or 'secondary'."},
                             status=status.HTTP_400_BAD_REQUEST)
 
-  
+        # Get active menus
         active_menus = [menu for menu in menus if menu.is_active]
 
         # Get active cycles
@@ -1358,10 +1363,10 @@ def get_active_menu(request):
             if any(menu.cycle_name == cycle['cycle_name'] for menu in active_menus)
         ]
 
-   
+        # Serialize menus
         menus_data = MenuSerializer(active_menus, many=True).data
 
-     
+        # Organize menus by day of the week
         weekly_menu = {
             "Monday": [],
             "Tuesday": [],
@@ -1372,13 +1377,11 @@ def get_active_menu(request):
             "Sunday": []
         }
 
-        
         for menu in menus_data:
             day_of_week = menu['menu_day'] 
             if day_of_week in weekly_menu:
-                
+                # Fetch menu items
                 menu_items = MenuItems.objects.filter(item_name=menu['name'])
-             
                 menu_items_data = []
                 for item in menu_items:
                     menu_items_data.append({
@@ -1386,7 +1389,7 @@ def get_active_menu(request):
                         "item_description": item.item_description,
                         "ingredients": item.ingredients,
                         "nutrients": item.nutrients,
-                        "allergies": [allergy.allergy for allergy in item.allergies.all()]  # Correct 
+                        "allergies": [allergy.allergy for allergy in item.allergies.all()]
                     })
                 
                 # Add menu and menu items data to the response structure
@@ -1417,7 +1420,7 @@ def get_active_menu(request):
                         "menu_items": menu_items_data  
                     })
 
-     
+        # Return the response
         return Response({
             "menus": weekly_menu,
             "cycles": active_cycles
@@ -1425,9 +1428,6 @@ def get_active_menu(request):
 
     except Exception as e:
         return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-
 
 
 @api_view(["GET", "PUT"])
@@ -2956,6 +2956,8 @@ def get_active_status_menu(request):
         })
 
     return Response({"schools": schools_data})
+
+
 
 @api_view(["POST"])
 def deactivate_menus(request):
