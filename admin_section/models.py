@@ -154,7 +154,8 @@ class MenuItems(models.Model):
     item_description=models.CharField(max_length=255,null=False)
     nutrients = JSONField(default=list)  # To store the list of nutrients as JSON
     ingredients = models.TextField(null=True, blank=True)
-    allergies = models.ManyToManyField(Allergens,null=True, blank=True, related_name='menuitems')  
+    allergies = models.ManyToManyField(Allergens,null=True, blank=True, related_name='menuitems') 
+    image = models.ImageField(upload_to='menu_items/', blank=True, null=True) 
     def __str__(self):
         return f"{self.id} Items:   {self.item_name}"
     

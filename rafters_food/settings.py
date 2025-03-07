@@ -13,20 +13,18 @@ https://docs.djangoproject.com/en/5.1/ref/settings/
 from pathlib import Path
 import environ
 from decouple import config
-
 import os
+
 env = environ.Env(
-    # set casting, default value
     DEBUG=(bool, False)
 )
+
 ROOT_URLCONF = 'rafters_food.urls'
 ADMIN_PASSWORD = config('ADMIN_PASSWORD')
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 environ.Env.read_env()
-
-# Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = 'django-insecure-td7slw974l-a6!kd1txk2+4f7r-voiiy&uzcc9g^1uraniz5kz'
@@ -36,9 +34,7 @@ DEBUG = True
 
 ALLOWED_HOSTS = ['*']
 
-
 # Application definition
-
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
@@ -46,45 +42,50 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-        'allauth',
+    
+    'allauth',
     'allauth.account',
     'allauth.socialaccount',
     'django_rest_passwordreset',
+    
     'admin_section',
     'whitenoise.runserver_nostatic',
     'corsheaders',
     'dj_rest_auth',
-    'dj_rest_auth.registration',   
-  'rest_framework',
-   'rest_framework.authtoken',
-
+    'dj_rest_auth.registration',
+    'rest_framework',
+    'rest_framework.authtoken',
 ]
+
 AUTHENTICATION_BACKENDS = (
     'allauth.account.auth_backends.AuthenticationBackend',
-    'allauth.account.auth_backends.AuthenticationBackend',  # Django Allauth Backend
-    'django.contrib.auth.backends.ModelBackend', 
+    'django.contrib.auth.backends.ModelBackend',
 )
-MEDIA_URL = '/menu_files/' 
-MEDIA_ROOT = BASE_DIR / 'menu_files'
 
+# Static files (CSS, JavaScript, Images)
+STATIC_URL = '/static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+
+# WhiteNoise configuration for static file compression and caching
+STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+
+# Media files (Uploaded images and files)
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
+
+# Middleware
 MIDDLEWARE = [
-    # 'django.middleware.security.SecurityMiddleware',
-     'allauth.account.middleware.AccountMiddleware',
+    'allauth.account.middleware.AccountMiddleware',
     'corsheaders.middleware.CorsMiddleware',
-
-     'corsheaders.middleware.CorsMiddleware',
-
     'django.middleware.common.CommonMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
-
-   
     'django.middleware.csrf.CsrfViewMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-   
 ]
+
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_HEADERS = [
     'content-type',
@@ -92,20 +93,6 @@ CORS_ALLOW_HEADERS = [
     'accept',
     'x-requested-with',
 ]
-
-
-# Allow methods
-CORS_ALLOW_METHODS = [
-    'GET',
-    'POST',
-    'PUT',
-    'DELETE',
-    'OPTIONS',
-]
-CORS_ALLOW_CREDENTIALS = True
-
-
-# Allow methods
 CORS_ALLOW_METHODS = [
     'GET',
     'POST',
@@ -118,7 +105,7 @@ CORS_ALLOW_CREDENTIALS = True
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [ 'templates'],
+        'DIRS': ['templates'],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -133,10 +120,7 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'rafters_food.wsgi.application'
 
-
 # Database
-# https://docs.djangoproject.com/en/5.1/ref/settings/#databases
-
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
@@ -144,63 +128,33 @@ DATABASES = {
     }
 }
 
-
 # Password validation
-# https://docs.djangoproject.com/en/5.1/ref/settings/#auth-password-validators
-
 AUTH_PASSWORD_VALIDATORS = [
-    {
-        'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
-    },
-    {
-        'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
-    },
-    {
-        'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator',
-    },
-    {
-        'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
-    },
+    {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
 ]
+
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
-        'rest_framework.authentication.TokenAuthentication',  # Add token authentication
+        'rest_framework.authentication.TokenAuthentication',
     ],
 }
 
 # Internationalization
-# https://docs.djangoproject.com/en/5.1/topics/i18n/
-
 LANGUAGE_CODE = 'en-us'
-
 TIME_ZONE = 'UTC'
-
 USE_I18N = True
-
 USE_TZ = True
 
-SITE_ID = 1  
-
-
+SITE_ID = 1
 ACCOUNT_EMAIL_VERIFICATION = 'mandatory'
 ACCOUNT_EMAIL_REQUIRED = True
 ACCOUNT_AUTHENTICATED_LOGIN_REDIRECTS = True
 
-# Static files (CSS, JavaScript, Images)
-# https://docs.djangoproject.com/en/5.1/howto/static-files/
-
-STATIC_URL = 'static/'
-STATIC_ROOT = BASE_DIR / "staticfiles"
-STATICFILES_STORAGES =  "whitenoise.storage.CompressedManifestStaticFilesStorage"
-    
-
-# Default primary key field type
-# https://docs.djangoproject.com/en/5.1/ref/settings/#default-auto-field
-
-DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
-EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend' 
-
-
+# Email Backend
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_PORT = config('EMAIL_PORT', cast=int)
 EMAIL_USE_TLS = config('EMAIL_USE_TLS', cast=bool)
 EMAIL_HOST = config('EMAIL_HOST')
@@ -212,4 +166,7 @@ MAIL_DEFAULT_SENDER = config('MAIL_DEFAULT_SENDER')
 # Stripe configuration
 STRIPE_PUBLIC_KEY = config('STRIPE_PUBLIC_KEY')
 STRIPE_SECRET_KEY = config('STRIPE_SECRET_KEY')
+
+DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
 print("Loaded ADMIN_PASSWORD:", ADMIN_PASSWORD)

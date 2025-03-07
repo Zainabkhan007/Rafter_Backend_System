@@ -45,6 +45,10 @@ from django.contrib.auth.tokens import default_token_generator
 from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
 from django.contrib.auth import get_user_model
 from .custom_tokens import CustomPasswordResetTokenGenerator 
+from rest_framework.decorators import api_view, parser_classes
+from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.response import Response
+from rest_framework import status
 logger = logging.getLogger(__name__)
 stripe.api_key = settings.STRIPE_SECRET_KEY
 ALLOWED_FILE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif']
@@ -1234,6 +1238,7 @@ def activate_cycle(request):
             'message': f'Cycle "{cycle_name}" activated successfully for {school.school_name if school_type == "primary" else school.secondary_school_name}!',
             'menus': updated_menus
         }, status=status.HTTP_200_OK)
+
 @api_view(['POST', 'GET', 'DELETE'])
 def get_complete_menu(request):
     if request.method == 'POST':
@@ -1332,6 +1337,9 @@ def get_complete_menu(request):
         return Response({'message': f'All menus for cycle "{cycle_name}" in school {school_id} have been deleted.'}, status=status.HTTP_204_NO_CONTENT)
 
     return Response({'error': 'Invalid request method.'}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+
+
 @api_view(["POST"])
 def get_active_menu(request):
     school_type = request.data.get('school_type')
@@ -1342,7 +1350,6 @@ def get_active_menu(request):
                         status=status.HTTP_400_BAD_REQUEST)
 
     try:
-        # Filter menus based on school type and ID
         if school_type == 'primary':
             menus = Menu.objects.filter(
                 primary_school_id=school_id
@@ -1365,20 +1372,16 @@ def get_active_menu(request):
             return Response({"detail": "Invalid school type. Please provide either 'primary' or 'secondary'."},
                             status=status.HTTP_400_BAD_REQUEST)
 
-        # Get active menus
         active_menus = [menu for menu in menus if menu.is_active]
 
-        # Get active cycles
         active_cycles = [
             {"cycle": cycle['cycle_name']} 
             for cycle in subquery 
             if any(menu.cycle_name == cycle['cycle_name'] for menu in active_menus)
         ]
 
-        # Serialize menus
         menus_data = MenuSerializer(active_menus, many=True).data
 
-        # Organize menus by day of the week
         weekly_menu = {
             "Monday": [],
             "Tuesday": [],
@@ -1390,49 +1393,33 @@ def get_active_menu(request):
         }
 
         for menu in menus_data:
-            day_of_week = menu['menu_day'] 
+            day_of_week = menu['menu_day']
             if day_of_week in weekly_menu:
-                # Fetch menu items
                 menu_items = MenuItems.objects.filter(item_name=menu['name'])
                 menu_items_data = []
+
                 for item in menu_items:
                     menu_items_data.append({
                         "item_name": item.item_name,
                         "item_description": item.item_description,
                         "ingredients": item.ingredients,
                         "nutrients": item.nutrients,
-                        "allergies": [allergy.allergy for allergy in item.allergies.all()]
-                    })
-                
-                # Add menu and menu items data to the response structure
-                if school_type == 'primary':
-                    primary_school_name = menu.get('primary_school_name', None)
-                    category_name = menu.get('category', None)  
-                    weekly_menu[day_of_week].append({
-                        'id': menu['id'],
-                        "name": menu['name'],
-                        "price": menu['price'],
-                        "menu_date": menu['menu_date'],
-                        "cycle_name": menu['cycle_name'],
-                        "category": category_name,  
-                        "is_active": menu['is_active'],
-                        "menu_items": menu_items_data 
-                    })
-                elif school_type == 'secondary':
-                    secondary_school_name = menu.get('secondary_school_name', None)
-                    category_name = menu.get('category', None)  
-                    weekly_menu[day_of_week].append({
-                        'id': menu['id'],
-                        "name": menu['name'],
-                        "price": menu['price'],
-                        "menu_date": menu['menu_date'],
-                        "cycle_name": menu['cycle_name'],
-                        "category": category_name, 
-                        "is_active": menu['is_active'],
-                        "menu_items": menu_items_data  
+                        "allergies": [allergy.allergy for allergy in item.allergies.all()],
+                        "image_url": request.build_absolute_uri(item.image.url) if item.image else None
                     })
 
-        # Return the response
+                category_name = menu.get('category', None)  
+                weekly_menu[day_of_week].append({
+                    'id': menu['id'],
+                    "name": menu['name'],
+                    "price": menu['price'],
+                    "menu_date": menu['menu_date'],
+                    "cycle_name": menu['cycle_name'],
+                    "category": category_name,  
+                    "is_active": menu['is_active'],
+                    "menu_items": menu_items_data
+                })
+
         return Response({
             "menus": weekly_menu,
             "cycles": active_cycles
@@ -1440,8 +1427,6 @@ def get_active_menu(request):
 
     except Exception as e:
         return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
 @api_view(["GET", "PUT"])
 def edit_menu(request, id):
     print(f"Received request to edit menu item with id: {id}")
@@ -1538,14 +1523,16 @@ def get_custom_week_and_year():
 # MenuItems
 @csrf_exempt
 @api_view(['POST'])
+@parser_classes([MultiPartParser, FormParser])
 def add_menu_item(request):
     if request.method == 'POST':
-        serializer = MenuItemsSerializer(data=request.data)
+        serializer = MenuItemsSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         else:
             return Response({"error": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
 
 @csrf_exempt
 @api_view(['GET',])
@@ -3132,25 +3119,43 @@ def get_cycle_menus(request):
         return Response({'message': f'{deleted_count} menus deleted successfully.'}, status=status.HTTP_200_OK)
 @api_view(['GET'])
 def get_all_cycles_with_menus(request):
-   
-    cycle_names = Menu.objects.values_list('cycle_name', flat=True).distinct()
 
+    cycle_names = Menu.objects.values_list('cycle_name', flat=True).distinct()
 
     if not cycle_names:
         return Response({'error': 'No cycle names found'}, status=status.HTTP_404_NOT_FOUND)
-    
+
     cycles_with_menus = []
 
-    
     for cycle_name in cycle_names:
-        menus = Menu.objects.filter(cycle_name=cycle_name)
-        
-        
-        serialized_menus = MenuSerializer(menus, many=True)
-       
+ 
+        menus = (
+            Menu.objects.filter(cycle_name=cycle_name, is_active=True)
+            .order_by('id') 
+            .values(
+                'id', 
+                'cycle_name', 
+                'name', 
+                'category', 
+                'menu_date', 
+                'menu_day', 
+                'price', 
+                'primary_school', 
+                'secondary_school'
+            )
+        )
+
+        serialized_menus = list(menus)
+
         cycles_with_menus.append({
             'cycle_name': cycle_name,
-            'menus': serialized_menus.data
+            'menus': serialized_menus
         })
-    
-    return Response({'message': 'Cycles and their menus fetched successfully!', 'cycles': cycles_with_menus}, status=status.HTTP_200_OK)
+
+    return Response(
+        {
+            'message': 'Cycles and their menus fetched successfully!',
+            'cycles': cycles_with_menus
+        },
+        status=status.HTTP_200_OK
+    )
