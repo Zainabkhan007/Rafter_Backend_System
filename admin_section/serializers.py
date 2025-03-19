@@ -209,20 +209,26 @@ class MenuSerializer(serializers.ModelSerializer):
         return representation
 
 
-
 class MenuItemsSerializer(serializers.ModelSerializer):
+    allergies = serializers.SlugRelatedField(queryset=Allergens.objects.all(), slug_field='allergy', many=True, required=False)
     image_url = serializers.SerializerMethodField()
 
     class Meta:
         model = MenuItems
         fields = ['id', 'item_name', 'item_description', 'ingredients', 'nutrients', 'allergies', 'image', 'image_url']
-
+    
     def get_image_url(self, obj):
         request = self.context.get('request')
         if obj.image and request:
             return request.build_absolute_uri(obj.image.url)
         return None
-
+    
+    # Optionally validate the image field
+    def validate(self, data):
+        # Ensure image is optional
+        if 'image' in data and not data['image']:
+            data['image'] = None
+        return data
 class OrderItemSerializer(serializers.ModelSerializer):
     item_name = serializers.CharField(source='menu.name', read_only=True)
     menu = MenuSerializer() 

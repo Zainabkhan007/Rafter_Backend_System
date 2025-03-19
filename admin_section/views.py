@@ -47,6 +47,7 @@ from django.contrib.auth import get_user_model
 from .custom_tokens import CustomPasswordResetTokenGenerator 
 from rest_framework.decorators import api_view, parser_classes
 from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.parsers import JSONParser
 from rest_framework.response import Response
 from rest_framework import status
 logger = logging.getLogger(__name__)
@@ -1523,7 +1524,7 @@ def get_custom_week_and_year():
 # MenuItems
 @csrf_exempt
 @api_view(['POST'])
-@parser_classes([MultiPartParser, FormParser])
+@parser_classes([JSONParser])  # Use JSONParser here as you're sending JSON data
 def add_menu_item(request):
     if request.method == 'POST':
         serializer = MenuItemsSerializer(data=request.data, context={'request': request})
