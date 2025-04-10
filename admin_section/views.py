@@ -2818,43 +2818,47 @@ def download_menu(request):
         if school_type not in ['primary', 'secondary']:
             return Response({'error': 'Invalid school_type. It should be either "primary" or "secondary".'}, status=status.HTTP_400_BAD_REQUEST)
 
+        # Fetching the school
         if school_type == 'primary':
             school = PrimarySchool.objects.get(id=school_id)
             logger.info(f"🏫 Primary school found: {school.school_name}")
-
         else:
             school = SecondarySchool.objects.get(id=school_id)
             logger.info(f"🏫 Secondary school found: {school.secondary_school_name}")
 
-        # 🔹 Unpacking student_orders and staff_orders correctly
+        # Fetching orders
         student_orders, staff_orders = fetch_orders(school_id, school_type)
 
-        # 🔹 Fix: Check if either student_orders or staff_orders is empty
+        # Handling empty orders
         if not student_orders.exists() and not staff_orders.exists():
             logger.warning(f"⚠️ No orders found for {school_type} school ID {school_id}")
             student_orders = []  # Empty list to avoid errors
             staff_orders = []  # Empty list to avoid errors
 
-        # 🔹 Pass both student_orders and staff_orders to generate_workbook
+        # Generating the workbook
         workbook = generate_workbook(school, student_orders, staff_orders, school_type)
 
+        # Filename setup
         filename = f"{school_type}_{school.secondary_school_name if school_type == 'secondary' else school.school_name}_Menu.xlsx"
-        file_path = os.path.join(settings.MEDIA_ROOT, filename)
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        
+        # Automatically creating the directory for menu files if it doesn't exist
+        menu_files_directory = settings.MENU_FILES_ROOT
+        if not os.path.exists(menu_files_directory):
+            os.makedirs(menu_files_directory)  # Create the directory if it doesn't exist
+
+        file_path = os.path.join(menu_files_directory, filename)
         workbook.save(file_path)
 
         logger.info(f"✔ File generated successfully: {filename}")
 
         return Response({
             'message': 'File generated successfully!',
-            'download_link': f"/menu_files/{filename}"
+            'download_link': f"{settings.MENU_FILES_URL}{filename}"  # Correct URL to access the file
         }, status=status.HTTP_200_OK)
 
     except Exception as e:
         logger.error(f"🚨 Unexpected Error: {e}")
         return Response({'error': 'An unexpected error occurred.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
 
 @api_view(["GET"])
 def get_user_count(request):
