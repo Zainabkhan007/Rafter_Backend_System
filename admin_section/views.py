@@ -53,95 +53,95 @@ from rest_framework import status
 logger = logging.getLogger(__name__)
 stripe.api_key = settings.STRIPE_SECRET_KEY
 ALLOWED_FILE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif']
+
+
 @api_view(["POST"])
 def register(request):
-    user_type = request.data.get('user_type')
-    serializer = None
-
-    email = request.data.get('email')
+    email = request.data.get("email")
     if not email:
         return Response({"error": "Email is required."}, status=status.HTTP_400_BAD_REQUEST)
 
-    if StaffRegisteration.objects.filter(email=email).exists():
-        return Response({"error": "Email already registered as staff."}, status=status.HTTP_400_BAD_REQUEST)
-    if ParentRegisteration.objects.filter(email=email).exists():
-        return Response({"error": "Email already registered as parent."}, status=status.HTTP_400_BAD_REQUEST)
-    if SecondaryStudent.objects.filter(email=email).exists():
-        return Response({"error": "Email already registered as student."}, status=status.HTTP_400_BAD_REQUEST)
-    if CanteenStaff.objects.filter(email=email).exists():
-        return Response({"error": "Email already registered as canteen."}, status=status.HTTP_400_BAD_REQUEST)
+    if UnverifiedUser.objects.filter(email=email).exists():
+        return Response({"error": "A verification email has already been sent. Please check your inbox."}, status=status.HTTP_400_BAD_REQUEST)
 
-    school_id = None
-    school_type = None
-    if user_type in ['student', 'staff','canteenstaff']:
-        school_id = request.data.get('school_id')
-        school_type = request.data.get('school_type')
+    # Check for duplicate in final user models
+    if StaffRegisteration.objects.filter(email=email).exists() or \
+       ParentRegisteration.objects.filter(email=email).exists() or \
+       SecondaryStudent.objects.filter(email=email).exists() or \
+       CanteenStaff.objects.filter(email=email).exists():
+        return Response({"error": "Email already registered."}, status=status.HTTP_400_BAD_REQUEST)
 
-    if user_type in ['student', 'staff','canteenstaff'] and (not school_id or not school_type):
-        return Response({"error": "School ID and school type are required for staff and student."}, status=status.HTTP_400_BAD_REQUEST)
+    # Save data to temp model
+    unverified = UnverifiedUser.objects.create(
+        email=email,
+        data=request.data
+    )
 
-    valid_school_types = ['primary', 'secondary']
-    if school_type and school_type not in valid_school_types:
-        return Response({"error": "Invalid school type provided."}, status=status.HTTP_400_BAD_REQUEST)
+    verification_link = f"{settings.FRONTEND_URL}/verify-email/{unverified.token}/"
+    send_mail(
+        subject="Verify your email",
+        message=f"Click the link to verify your email: {verification_link}",
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        recipient_list=[email],
+    )
 
-    school = None
-    if school_type and school_id:
-        if school_type == "primary":
-            try:
-                school = PrimarySchool.objects.get(id=school_id)
-            except PrimarySchool.DoesNotExist:
-                return Response({"error": "Primary school with this ID does not exist."}, status=status.HTTP_400_BAD_REQUEST)
-        elif school_type == "secondary":
-            try:
-                school = SecondarySchool.objects.get(id=school_id)
-            except SecondarySchool.DoesNotExist:
-                return Response({"error": "Secondary school with this ID does not exist."}, status=status.HTTP_400_BAD_REQUEST)
-
-    if user_type == "parent":
-        serializer = ParentRegisterationSerializer(data=request.data)
-    elif user_type == "student":
-        if school:
-            request.data['school'] = school.id  
-        serializer = SecondaryStudentSerializer(data=request.data)
-    elif user_type == "staff":
-        if school:
-            if school_type == "primary":
-                request.data['primary_school'] = school.id
-            elif school_type == "secondary":
-                request.data['secondary_school'] = school.id
-        serializer = StaffRegisterationSerializer(data=request.data)
-    elif user_type == "canteenstaff":
-        if school:
-            if school_type == "primary":
-                request.data['primary_school'] = school.id
-            elif school_type == "secondary":
-                request.data['secondary_school'] = school.id
-        serializer = CanteenStaffSerializer(data=request.data)
-    else:
-        return Response({"error": "Invalid user type"}, status=status.HTTP_400_BAD_REQUEST)
-
-    password = request.data.get('password')
-    password_confirmation = request.data.get('password_confirmation')
-
-    if password != password_confirmation:
-        return Response({"error": "Passwords do not match."}, status=status.HTTP_400_BAD_REQUEST)
-
-    allergies = request.data.get('allergies', [])
-    for allergy in allergies:
-        if not Allergens.objects.filter(allergy=allergy).exists():
-            return Response({"error": f"Allergen '{allergy}' does not exist in the database."}, status=status.HTTP_400_BAD_REQUEST)
-
-    if serializer.is_valid():
-        serializer.save()
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
-    else:
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
- # Assuming this is your custom token generator
+    return Response({"message": "Verification email sent. Please check your inbox."}, status=status.HTTP_200_OK)
 
 # Using your custom token generator
 custom_token_generator = CustomPasswordResetTokenGenerator()
 
 custom_token_generator = CustomPasswordResetTokenGenerator()
+@api_view(["GET"])
+def verify_email(request, token):
+    try:
+        # Fetch the unverified user
+        unverified = UnverifiedUser.objects.get(token=token)
+        
+        # Check if the token has expired (1 hour expiration)
+        if timezone.now() > unverified.created_at + timedelta(hours=1):  # Expiration time of 1 hour
+            return Response({"error": "Verification link has expired."}, status=status.HTTP_400_BAD_REQUEST)
+
+    except UnverifiedUser.DoesNotExist:
+        return Response({"error": "Invalid or expired verification link."}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Proceed with the verification process
+    user_data = unverified.data
+    user_type = user_data.get("user_type")
+    school_type = user_data.get("school_type")
+    school_id = user_data.get("school_id")
+
+    school = None
+    if school_type == "primary":
+        school = PrimarySchool.objects.get(id=school_id)
+    elif school_type == "secondary":
+        school = SecondarySchool.objects.get(id=school_id)
+
+    # Choose the serializer based on the user type
+    if user_type == "parent":
+        serializer = ParentRegisterationSerializer(data=user_data)
+    elif user_type == "student":
+        user_data["school"] = school.id
+        serializer = SecondaryStudentSerializer(data=user_data)
+    elif user_type == "staff":
+        key = "primary_school" if school_type == "primary" else "secondary_school"
+        user_data[key] = school.id
+        serializer = StaffRegisterationSerializer(data=user_data)
+    elif user_type == "canteenstaff":
+        key = "primary_school" if school_type == "primary" else "secondary_school"
+        user_data[key] = school.id
+        serializer = CanteenStaffSerializer(data=user_data)
+    else:
+        return Response({"error": "Invalid user type."}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Validate and save the serializer
+    if serializer.is_valid():
+        serializer.save()
+        # Delete the unverified record to mark the process as complete
+        unverified.delete()
+        return Response({"message": "Email verified successfully. Account created. Please log in."}, status=status.HTTP_201_CREATED)
+    else:
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
 
 @api_view(["POST"])
 def password_reset(request):

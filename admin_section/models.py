@@ -1,5 +1,6 @@
+import uuid
 from django.db import models
-from datetime import datetime
+from datetime import datetime, timedelta
 from django.utils import timezone
 from django.contrib.postgres.fields import ArrayField
 from django.db.models import JSONField
@@ -68,8 +69,15 @@ class StaffRegisteration(models.Model):
         return f" {self.id}"
 
 
+def get_expiry_time():
+    return timezone.now() + timedelta(hours=1)
 
-
+class UnverifiedUser(models.Model):
+    email = models.EmailField()
+    data = models.JSONField()
+    token = models.UUIDField(default=uuid.uuid4, editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expiry_time = models.DateTimeField(default=get_expiry_time)
 
 class Teacher(models.Model):
     teacher_name = models.CharField(max_length=30)

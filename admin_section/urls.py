@@ -7,6 +7,7 @@ urlpatterns = [
     path('password/reset/confirm/', views.password_reset_confirm, name='password_reset_confirm'),
 
     path("register/",views.register,name='register'),
+    path('verify-email/<uuid:token>/', views.verify_email, name='verify_email'),
     path('login/', views.login,name='login'),
     path('password_reset/', include('django_rest_passwordreset.urls', namespace='password_reset')),
     path('admin_login/', views.admin_login,name='admin_login'),
