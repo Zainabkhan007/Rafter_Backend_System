@@ -79,11 +79,24 @@ def register(request):
 
     verification_link = f"{settings.FRONTEND_URL}/verify-email/{unverified.token}/"
     send_mail(
-        subject="Verify your email",
-        message=f"Click the link to verify your email: {verification_link}",
-        from_email=settings.DEFAULT_FROM_EMAIL,
-        recipient_list=[email],
-    )
+    subject="Action Required: Confirm Your Email Address",
+    message=f"""
+Hi there,
+
+Thank you for registering with us.
+
+To complete your registration, please confirm your email address by clicking the link below:
+
+{verification_link}
+
+If you did not create an account with us, you can safely ignore this email.
+
+Best regards,  
+The Rafters Team
+""",
+    from_email=settings.DEFAULT_FROM_EMAIL,
+    recipient_list=[email],
+)
 
     return Response({"message": "Verification email sent. Please check your inbox."}, status=status.HTTP_200_OK)
 
