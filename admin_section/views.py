@@ -2294,7 +2294,6 @@ def get_orders_by_school(request):
         'orders': order_details
     }, status=status.HTTP_200_OK)
 
-
 @api_view(['POST'])
 def contactmessage(request):
     """
@@ -2307,36 +2306,28 @@ def contactmessage(request):
     subject = request.data.get('subject')
     message = request.data.get('message')
     photo = request.FILES.get('photo')  
-   
+    
     if not full_name or not email or not subject or not message:
         return Response({"error": "Full name, email, subject, and message are required."}, status=status.HTTP_400_BAD_REQUEST)
 
-   
     if not re.match(r'^[^@]+@[^@]+\.[^@]+$', email):
         return Response({"error": "Invalid email format."}, status=status.HTTP_400_BAD_REQUEST)
 
- 
     if phone and not re.match(r'^\+?[0-9\s\-]+$', phone):
         return Response({"error": "Invalid phone number format."}, status=status.HTTP_400_BAD_REQUEST)
 
- 
     photo_filename = None
     if photo:
         file_extension = photo.name.split('.')[-1].lower()
         if file_extension not in ALLOWED_FILE_EXTENSIONS:
             return Response({"error": "Invalid file type. Only PNG, JPG, JPEG, and GIF files are allowed."}, status=status.HTTP_400_BAD_REQUEST)
 
-        
         if photo.size > 1024 * 1024:
             return Response({"error": "File size too large. Maximum size is 1MB."}, status=status.HTTP_400_BAD_REQUEST)
 
-      
         fs = FileSystemStorage(location='media/contact_photos')
-        
-    
         photo_filename = fs.save(photo.name, photo)
 
-  
     try:
         contact_message = ContactMessage.objects.create(
             full_name=full_name,
@@ -2347,20 +2338,37 @@ def contactmessage(request):
             photo_filename=photo_filename if photo_filename else ""  
         )
 
-       
+        # HTML email content
+        html_message = f"""
+        <html>
+            <body>
+                <h2 style="color:#4CAF50;">New Contact Message</h2>
+                <p><strong>Name:</strong> {full_name}</p>
+                <p><strong>Email:</strong> {email}</p>
+                <p><strong>Phone:</strong> {phone if phone else 'Not provided'}</p>
+                <p><strong>Subject:</strong> {subject}</p>
+                <p><strong>Message:</strong></p>
+                <blockquote style="border-left: 4px solid #4CAF50; padding-left: 15px;">
+                    {message}
+                </blockquote>
+                <p><em>We will respond to you shortly. Thank you for reaching out!</em></p>
+            </body>
+        </html>
+        """
+
         send_mail(
             subject=f"New Contact Message: {subject}",
-            message=message,
-            from_email=settings.MAIL_DEFAULT_SENDER,
-            recipient_list=["freelancewriter3377@gmail.com"],
+            message=message,  # Plain text message (you can remove this if you want only HTML email)
+            from_email=settings.DEFAULT_FROM_EMAIL,  
+            recipient_list=[settings.MAIL_DEFAULT_SENDER],  # This will send to the email set in MAIL_DEFAULT_SENDER
             fail_silently=False,
+            html_message=html_message  # Include HTML content
         )
 
         return Response({"message": "Thank you for your message! We will get back to you shortly."}, status=status.HTTP_201_CREATED)
 
     except Exception as e:
         return Response({"error": f"An error occurred: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-    
 
 @api_view(['POST'])
 def top_up_credits(request):
@@ -2662,7 +2670,7 @@ def fetch_orders(school_id, school_type):
     is_friday_afternoon = current_time.weekday() == 4 and current_time.hour >= 14
     target_week = current_week_number + 1 if is_friday_afternoon else current_week_number
 
-    # Fetch orders based on school type
+
     orders = Order.objects.filter(
         primary_school_id=school_id if school_type == 'primary' else None,
         secondary_school_id=school_id if school_type == 'secondary' else None,
@@ -2670,8 +2678,8 @@ def fetch_orders(school_id, school_type):
         year=current_year
     ).order_by('-order_date')
 
-    student_orders = orders.exclude(user_type="staff")  # Separate student orders
-    staff_orders = orders.filter(user_type="staff")  # Separate staff orders
+    student_orders = orders.exclude(user_type="staff") 
+    staff_orders = orders.filter(user_type="staff")  
 
     logger.info(f"🔍 Total {school_type} student orders: {student_orders.count()}")
     logger.info(f"👨‍🏫 Total {school_type} staff orders: {staff_orders.count()}")
