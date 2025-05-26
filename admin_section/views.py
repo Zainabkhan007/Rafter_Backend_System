@@ -2545,8 +2545,15 @@ class CreateOrderAndPaymentAPIView(APIView):
 
                 created_orders.append(order_details)
 
-        
+            if user_type in ['parent', 'staff'] and child_id:
+                for order in created_orders:
+                    order['status'] = 'paid'
+                return Response({
+                    'message': 'Orders created successfully with free meal for child.',
+                    'orders': created_orders
+                }, status=status.HTTP_201_CREATED)
             if not payment_id:
+                
                 if user.credits < front_end_total_price:
                     return Response({"error": "Insufficient credits to complete the order."}, status=status.HTTP_400_BAD_REQUEST)
 
