@@ -182,12 +182,13 @@ def password_reset(request):
     token = custom_token_generator.make_token(user)
 
     reset_link = f'https://www.raftersfoodservices.ie/password/reset/confirm/{token}/'
+    from_email = os.getenv('DEFAULT_FROM_EMAIL', 'support@raftersfoodservices.ie')
 
     send_mail(
-        'Password Reset Request',
-        f'Click the following link to reset your password: {reset_link}',
-        'freelancewriter3377@gmail.com',
-        [user.email],
+        subject='Password Reset Request',
+        message=f'Click the following link to reset your password: {reset_link}',
+        from_email=from_email,
+        recipient_list=[user.email],
         fail_silently=False,
     )
 
