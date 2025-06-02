@@ -182,12 +182,13 @@ def password_reset(request):
     token = custom_token_generator.make_token(user)
 
     reset_link = f'https://www.raftersfoodservices.ie/password/reset/confirm/{token}/'
+    from_email = os.getenv('DEFAULT_FROM_EMAIL', 'support@raftersfoodservices.ie')
 
     send_mail(
-        'Password Reset Request',
-        f'Click the following link to reset your password: {reset_link}',
-        'freelancewriter3377@gmail.com',
-        [user.email],
+        subject='Password Reset Request',
+        message=f'Click the following link to reset your password: {reset_link}',
+        from_email=from_email,
+        recipient_list=[user.email],
         fail_silently=False,
     )
 
@@ -2545,8 +2546,15 @@ class CreateOrderAndPaymentAPIView(APIView):
 
                 created_orders.append(order_details)
 
-        
+            if user_type in ['parent', 'staff'] and child_id:
+                for order in created_orders:
+                    order['status'] = 'paid'
+                return Response({
+                    'message': 'Orders created successfully with free meal for child.',
+                    'orders': created_orders
+                }, status=status.HTTP_201_CREATED)
             if not payment_id:
+                
                 if user.credits < front_end_total_price:
                     return Response({"error": "Insufficient credits to complete the order."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -3021,41 +3029,50 @@ def deactivate_menus(request):
     except Exception as e:
         return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+
+
 @api_view(['POST'])
 def create_cycle(request):
 
     cycle_name = request.data.get('cycle_name')
-    menu_date = datetime.now().date()  
+    menu_date = datetime.now().date()
 
+    # Validate cycle name
     if not cycle_name.isalnum() and " " not in cycle_name:
         return Response({'error': 'Cycle Name cannot contain special characters!'}, status=status.HTTP_400_BAD_REQUEST)
 
-    
+    # Check if a menu with the same cycle name already exists
+    if Menu.objects.filter(cycle_name=cycle_name).exists():
+        return Response({'error': 'A menu with the same cycle name already exists.'}, status=status.HTTP_400_BAD_REQUEST)
 
-  
-    if Menu.objects.filter( cycle_name=cycle_name).exists():
-            return Response({'error': 'A menu with the same cycle name already exists '}, status=status.HTTP_400_BAD_REQUEST)
-  
-
+    # Define the days
     days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
     created_menus = []
 
-   
+    # Iterate through each day
     for day in days:
-        
         categories = request.data.get(f'category_{day}')
         item_names = request.data.get(f'item_names_{day}')
         prices = request.data.get(f'price_{day}')
 
+        # Skip processing for this day if any of the required fields are None, empty list, or filled with only null or empty values
+        if not categories or not item_names or not prices or \
+           all(val is None or val == "" for val in categories + item_names + prices):
+            continue
+
+        # Check if the data for the day is in the correct format (list of values)
         if not isinstance(categories, list) or not isinstance(item_names, list) or not isinstance(prices, list):
             return Response({'error': f'Invalid data format for {day}. Expecting lists of categories, item names, and prices.'}, status=status.HTTP_400_BAD_REQUEST)
 
+        # Ensure the lengths of the lists are consistent
         if len(categories) != len(item_names) or len(item_names) != len(prices):
             return Response({'error': f'Inconsistent data length for {day}. Categories, item names, and prices must have the same number of items.'}, status=status.HTTP_400_BAD_REQUEST)
 
+        # Process each menu item for the day
         for category_id, menu_name, price in zip(categories, item_names, prices):
-            if not category_id or not menu_name or not price:
-                return Response({'error': f'Incomplete data for {day}. Ensure all fields are filled.'}, status=status.HTTP_400_BAD_REQUEST)
+            # Skip invalid or incomplete data (empty or null values)
+            if category_id is None or not menu_name or price is None or price == "":
+                continue
 
             try:
                 price = float(price)
@@ -3064,16 +3081,16 @@ def create_cycle(request):
             except ValueError:
                 return Response({'error': f'Invalid price format for {menu_name} on {day}.'}, status=status.HTTP_400_BAD_REQUEST)
 
+            # Check if the category exists
             try:
                 category = Categories.objects.get(id=category_id)
             except Categories.DoesNotExist:
                 return Response({'error': f'Category {category_id} not found for {menu_name} on {day}.'}, status=status.HTTP_404_NOT_FOUND)
 
-       
+            # Create and save the menu item
             menu = Menu(
                 name=menu_name,
                 price=price,
-               
                 menu_day=day,
                 cycle_name=cycle_name,
                 menu_date=menu_date,
@@ -3082,7 +3099,9 @@ def create_cycle(request):
             menu.save()
             created_menus.append(MenuSerializer(menu).data)
 
+    # Return a success response with the created menus
     return Response({'message': 'Menus created successfully!', 'menus': created_menus}, status=status.HTTP_201_CREATED)
+
 
 @api_view(['POST', 'PUT', 'DELETE'])
 def get_cycle_menus(request):
@@ -3154,9 +3173,9 @@ def get_all_cycles_with_menus(request):
     cycles_with_menus = []
 
     for cycle_name in cycle_names:
- 
+        # Fetch all menus, regardless of the is_active status
         menus = (
-            Menu.objects.filter(cycle_name=cycle_name, is_active=True)
+            Menu.objects.filter(cycle_name=cycle_name)  # Removed is_active=True
             .order_by('id') 
             .values(
                 'id', 
