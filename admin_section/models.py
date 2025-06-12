@@ -76,6 +76,7 @@ class UnverifiedUser(models.Model):
     email = models.EmailField()
     data = models.JSONField()
     token = models.UUIDField(default=uuid.uuid4, editable=False)
+    is_verified = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     expiry_time = models.DateTimeField(default=get_expiry_time)
 
