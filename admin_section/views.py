@@ -12,7 +12,9 @@ from django.utils.timezone import now
 import logging
 from collections import defaultdict
 from django.utils.timezone import localtime
-
+from urllib.parse import quote
+from django.core.signing import TimestampSigner, BadSignature, SignatureExpired
+from django.utils.crypto import get_random_string
 from io import BytesIO
 from openpyxl import Workbook
 from datetime import date
@@ -54,6 +56,8 @@ logger = logging.getLogger(__name__)
 stripe.api_key = settings.STRIPE_SECRET_KEY
 ALLOWED_FILE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif']
 
+from django.utils import timezone
+from datetime import timedelta
 
 @api_view(["POST"])
 def register(request):
@@ -61,26 +65,36 @@ def register(request):
     if not email:
         return Response({"error": "Email is required."}, status=status.HTTP_400_BAD_REQUEST)
 
-    if UnverifiedUser.objects.filter(email=email).exists():
-        return Response({"error": "A verification email has already been sent. Please check your inbox."}, status=status.HTTP_400_BAD_REQUEST)
-
-    # Check for duplicate in final user models
+    # Check if already registered (verified user)
     if StaffRegisteration.objects.filter(email=email).exists() or \
        ParentRegisteration.objects.filter(email=email).exists() or \
        SecondaryStudent.objects.filter(email=email).exists() or \
        CanteenStaff.objects.filter(email=email).exists():
         return Response({"error": "Email already registered."}, status=status.HTTP_400_BAD_REQUEST)
 
-    # Save data to temp model
-    unverified = UnverifiedUser.objects.create(
+    # Check if email exists in UnverifiedUser
+    existing_unverified = UnverifiedUser.objects.filter(email=email).first()
+    if existing_unverified:
+        # Optional: Check if the old one is very recent (e.g., within 60 seconds), then don't resend
+        if existing_unverified.created_at > timezone.now() - timedelta(seconds=60):
+            return Response(
+                {"error": "A verification email has already been sent recently. Please check your inbox."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Otherwise, delete the old one to create a new record
+        existing_unverified.delete()
+
+    # Create new unverified user
+    new_unverified = UnverifiedUser.objects.create(
         email=email,
         data=request.data
     )
 
-    verification_link = f"{settings.FRONTEND_URL}/verify-email/{unverified.token}/"
+    verification_link = f"{settings.FRONTEND_URL}/verify-email/{new_unverified.token}/"
     send_mail(
-    subject="Action Required: Confirm Your Email Address",
-    message=f"""
+        subject="Action Required: Confirm Your Email Address",
+        message=f"""
 Hi there,
 
 Thank you for registering with us.
@@ -94,11 +108,16 @@ If you did not create an account with us, you can safely ignore this email.
 Best regards,  
 The Rafters Team
 """,
-    from_email=settings.DEFAULT_FROM_EMAIL,
-    recipient_list=[email],
-)
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        recipient_list=[email],
+    )
 
-    return Response({"message": "Verification email sent. Please check your inbox."}, status=status.HTTP_200_OK)
+    return Response(
+        {"message": "Verification email sent. Please check your inbox."},
+        status=status.HTTP_200_OK
+    )
+
+
 
 # Using your custom token generator
 custom_token_generator = CustomPasswordResetTokenGenerator()
@@ -107,53 +126,72 @@ custom_token_generator = CustomPasswordResetTokenGenerator()
 @api_view(["GET"])
 def verify_email(request, token):
     try:
-        # Fetch the unverified user
         unverified = UnverifiedUser.objects.get(token=token)
-        
-        # Check if the token has expired (1 hour expiration)
-        if timezone.now() > unverified.created_at + timedelta(hours=1):  # Expiration time of 1 hour
-            return Response({"error": "Verification link has expired."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # If already verified
+        if unverified.is_verified:
+            return Response(
+                {"message": "This email is already verified."},
+                status=status.HTTP_200_OK
+            )
+
+        # Token expired
+        if timezone.now() > unverified.created_at + timedelta(hours=1): 
+            old_data = unverified.data
+            email = old_data.get("email")
+
+            # Delete the expired token
+            unverified.delete()
+
+            # Generate new token and save
+            
+           
+            new_unverified = UnverifiedUser.objects.create(
+            email=email,
+        data=old_data,
+        )
+
+            # Send new verification email
+            new_link = f"{settings.FRONTEND_URL}/verify-email/{new_unverified.token}/"
+            send_mail(
+                subject="New Verification Link - Rafters",
+                message=f"""
+Hi there,
+
+Your previous verification link has expired. Please use the new one below:
+
+{new_link}
+
+This link is valid for 1 hour.
+
+Best regards,  
+The Rafters Team
+""",
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[email],
+            )
+
+            return Response(
+                {"error": "Verification link has expired. A new one has been sent to your email."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Mark as verified
+        unverified.is_verified = True
+        unverified.save()
+
+        return Response(
+            {"message": "Email verified successfully."},
+            status=status.HTTP_200_OK
+        )
 
     except UnverifiedUser.DoesNotExist:
-        return Response({"error": "Invalid or expired verification link."}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {"error": "Invalid verification link."},
+            status=status.HTTP_400_BAD_REQUEST
+        )
 
-    # Proceed with the verification process
-    user_data = unverified.data
-    user_type = user_data.get("user_type")
-    school_type = user_data.get("school_type")
-    school_id = user_data.get("school_id")
 
-    school = None
-    if school_type == "primary":
-        school = PrimarySchool.objects.get(id=school_id)
-    elif school_type == "secondary":
-        school = SecondarySchool.objects.get(id=school_id)
-
-    # Choose the serializer based on the user type
-    if user_type == "parent":
-        serializer = ParentRegisterationSerializer(data=user_data)
-    elif user_type == "student":
-        user_data["school"] = school.id
-        serializer = SecondaryStudentSerializer(data=user_data)
-    elif user_type == "staff":
-        key = "primary_school" if school_type == "primary" else "secondary_school"
-        user_data[key] = school.id
-        serializer = StaffRegisterationSerializer(data=user_data)
-    elif user_type == "canteenstaff":
-        key = "primary_school" if school_type == "primary" else "secondary_school"
-        user_data[key] = school.id
-        serializer = CanteenStaffSerializer(data=user_data)
-    else:
-        return Response({"error": "Invalid user type."}, status=status.HTTP_400_BAD_REQUEST)
-
-    # Validate and save the serializer
-    if serializer.is_valid():
-        serializer.save()
-        # Delete the unverified record to mark the process as complete
-        unverified.delete()
-        return Response({"message": "Email verified successfully. Account created. Please log in."}, status=status.HTTP_201_CREATED)
-    else:
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 @api_view(["POST"])
@@ -162,31 +200,28 @@ def password_reset(request):
     if not email:
         return Response({"error": "Email is required."}, status=400)
 
-
     user = None
-    try:
-        user = ParentRegisteration.objects.get(email=email)
-    except ParentRegisteration.DoesNotExist:
+    for model in [ParentRegisteration, StaffRegisteration, SecondaryStudent, CanteenStaff]:
         try:
-            user = StaffRegisteration.objects.get(email=email)
-        except StaffRegisteration.DoesNotExist:
-            try:
-                user = SecondaryStudent.objects.get(email=email)
-            except SecondaryStudent.DoesNotExist:
-                try:
-                    user = CanteenStaff.objects.get(email=email)  
-                except CanteenStaff.DoesNotExist:
-                    return Response({"error": "User not found."}, status=400)
+            user = model.objects.get(email=email)
+            break
+        except model.DoesNotExist:
+            continue
 
+    if not user:
+        return Response({"error": "User not found."}, status=400)
+
+    signer = TimestampSigner()
+    signed_token = signer.sign(user.email)
    
-    token = custom_token_generator.make_token(user)
 
-    reset_link = f'https://www.raftersfoodservices.ie/password/reset/confirm/{token}/'
+    encoded_token = quote(signed_token)
+    reset_link = f'https://www.raftersfoodservices.ie/password-reset?token={encoded_token}'
     from_email = os.getenv('DEFAULT_FROM_EMAIL', 'support@raftersfoodservices.ie')
 
     send_mail(
         subject='Password Reset Request',
-        message=f'Click the following link to reset your password: {reset_link}',
+        message=f'Click the following link to reset your password of the Rafters Food Services user Account: {reset_link}',
         from_email=from_email,
         recipient_list=[user.email],
         fail_silently=False,
@@ -194,44 +229,38 @@ def password_reset(request):
 
     return Response({"message": "Password reset email sent."}, status=200)
 
-
-
-
 @api_view(["POST"])
 def password_reset_confirm(request):
- 
     token = request.data.get("token")
     password = request.data.get("password")
-    email = request.data.get("email")
 
-    if not token or not password or not email:
-        return Response({"error": "Token, password, and email must be provided."}, status=400)
+    if not token or not password:
+        return Response({"error": "Token and password must be provided."}, status=400)
 
     try:
-       
-        user = None
-        for model in [ParentRegisteration, StaffRegisteration, SecondaryStudent, CanteenStaff]:
-            try:
-                user = model.objects.get(email=email)
-                break
-            except model.DoesNotExist:
-                continue
-        
-        if not user:
-            return Response({"error": "User not found."}, status=400)
+        signer = TimestampSigner()
+        email = signer.unsign(token, max_age=3600)  # 1 hour expiry
+    except (BadSignature, SignatureExpired):
+        return Response({"error": "Invalid or expired token."}, status=400)
 
-        
-        if custom_token_generator.check_token(user, token):
-            
-            user.password = password 
-            user.save()
+    # Search for user in all custom models
+    user = None
+    for model in [ParentRegisteration, StaffRegisteration, SecondaryStudent, CanteenStaff]:
+        try:
+            user = model.objects.get(email=email)
+            break
+        except model.DoesNotExist:
+            continue
 
-            return Response({"message": "Password reset successful."}, status=200)
-        else:
-            return Response({"error": "Invalid token."}, status=400)
+    if not user:
+        return Response({"error": "User not found."}, status=400)
 
-    except Exception as e:
-        return Response({"error": str(e)}, status=500)
+    # Set and hash new password
+    user.password = make_password(password)
+    user.save()
+
+    return Response({"message": "Password reset successful."}, status=200)
+
 @api_view(["POST"])
 def login(request):
 
