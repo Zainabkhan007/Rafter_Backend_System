@@ -3254,3 +3254,18 @@ def get_all_cycles_with_menus(request):
         },
         status=status.HTTP_200_OK
     )
+
+@api_view(['GET'])
+def all_users_report(request):
+    data = []
+
+    for parent in ParentRegisteration.objects.all():
+        data.append({"id": parent.id, "email": parent.email, "type": "parent"})
+
+    for student in SecondaryStudent.objects.all():
+        data.append({"id": student.id, "email": student.email, "type": "student"})
+
+    for staff in StaffRegisteration.objects.all():
+        data.append({"id": staff.id, "email": staff.email, "type": "staff"})
+
+    return Response(data)
