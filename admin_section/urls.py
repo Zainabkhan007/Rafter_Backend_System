@@ -20,6 +20,7 @@ urlpatterns = [
 
     path('add_child/', views.add_child, name='add_child'),
     path('edit_child/<int:child_id>/', views.edit_child, name='edit_child'),
+    path('all-users/', views.all_users_report, name='all_users_report'),
     
 
     # Primary School Urls
