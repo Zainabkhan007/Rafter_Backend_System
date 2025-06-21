@@ -1,3 +1,5 @@
+import jwt
+import requests
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.decorators import api_view, APIView
@@ -55,6 +57,7 @@ from rest_framework import status
 logger = logging.getLogger(__name__)
 stripe.api_key = settings.STRIPE_SECRET_KEY
 ALLOWED_FILE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif']
+from .models import Allergens
 
 from django.utils import timezone
 from datetime import timedelta
@@ -62,39 +65,44 @@ from datetime import timedelta
 @api_view(["POST"])
 def register(request):
     email = request.data.get("email")
+    login_method = request.data.get("login_method", "email")  # default to email if not provided
+
     if not email:
         return Response({"error": "Email is required."}, status=status.HTTP_400_BAD_REQUEST)
 
-    # Check if already registered (verified user)
+    # Check if already registered
     if StaffRegisteration.objects.filter(email=email).exists() or \
        ParentRegisteration.objects.filter(email=email).exists() or \
        SecondaryStudent.objects.filter(email=email).exists() or \
        CanteenStaff.objects.filter(email=email).exists():
         return Response({"error": "Email already registered."}, status=status.HTTP_400_BAD_REQUEST)
 
-    # Check if email exists in UnverifiedUser
     existing_unverified = UnverifiedUser.objects.filter(email=email).first()
-    if existing_unverified:
-        # Optional: Check if the old one is very recent (e.g., within 60 seconds), then don't resend
-        if existing_unverified.created_at > timezone.now() - timedelta(seconds=60):
-            return Response(
-                {"error": "A verification email has already been sent recently. Please check your inbox."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
 
-        # Otherwise, delete the old one to create a new record
+    # Handle recent attempts (only apply for email flow)
+    if existing_unverified:
+        if login_method == "email":
+            if existing_unverified.created_at > timezone.now() - timedelta(seconds=60):
+                return Response(
+                    {"error": "A verification email has already been sent recently. Please check your inbox."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        # Delete any old unverified user regardless of method
         existing_unverified.delete()
 
-    # Create new unverified user
+    # Create new unverified user (for both email and social logins)
     new_unverified = UnverifiedUser.objects.create(
         email=email,
-        data=request.data
+        data=request.data,
+        login_method=login_method
     )
 
-    verification_link = f"{settings.FRONTEND_URL}/verify-email/{new_unverified.token}/"
-    send_mail(
-        subject="Action Required: Confirm Your Email Address",
-        message=f"""
+    # If it's email login, send verification email
+    if login_method == "email":
+        verification_link = f"{settings.FRONTEND_URL}/verify-email/{new_unverified.token}/"
+        send_mail(
+            subject="Action Required: Confirm Your Email Address",
+            message=f"""
 Hi there,
 
 Thank you for registering with us.
@@ -108,15 +116,23 @@ If you did not create an account with us, you can safely ignore this email.
 Best regards,  
 The Rafters Team
 """,
-        from_email=settings.DEFAULT_FROM_EMAIL,
-        recipient_list=[email],
-    )
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[email],
+        )
+        return Response(
+            {"message": "Verification email sent. Please check your inbox."},
+            status=status.HTTP_200_OK
+        )
 
+    # For social login flow
     return Response(
-        {"message": "Verification email sent. Please check your inbox."},
+        {
+            "message": "OAuth login successful. Additional info required.",
+            "token": str(new_unverified.token),
+            "provider": login_method
+        },
         status=status.HTTP_200_OK
     )
-
 
 
 # Using your custom token generator
@@ -3269,3 +3285,142 @@ def all_users_report(request):
         data.append({"id": staff.id, "email": staff.email, "type": "staff"})
 
     return Response(data)
+
+
+@api_view(["POST"])
+def social_callback_register(request):
+    id_token = request.data.get("access_token")
+    provider = request.data.get("provider")
+    email = None 
+
+    if provider == "google":
+        try:
+            decoded = jwt.decode(id_token, options={"verify_signature": False})
+            email = decoded.get("email")
+            
+            if not email:
+                return Response({"error": "No email in ID token"}, status=400)
+                
+        except jwt.DecodeError:
+            return Response({"error": "Invalid ID token"}, status=400)
+        except Exception as e:
+            return Response({"error": f"Error decoding token: {str(e)}"}, status=400)
+
+    if not email:
+        return Response({"error": "Unable to fetch email from token."}, status=400)
+
+    if (ParentRegisteration.objects.filter(email=email).exists() or 
+       StaffRegisteration.objects.filter(email=email).exists() or 
+       SecondaryStudent.objects.filter(email=email).exists()):
+        return Response({"error": "Email already registered."}, status=400)
+
+    # Check if user already in UnverifiedUser
+    unverified = UnverifiedUser.objects.filter(email=email).first()
+
+    if not unverified:
+        unverified = UnverifiedUser.objects.create(
+            email=email,
+            data={},
+            login_method=provider,
+        )
+
+    return Response({
+        "message": "OAuth login successful. Additional info required.",
+        "token": str(unverified.token),
+        "provider": provider,
+    }, status=200)
+
+
+@api_view(["POST"])
+def complete_social_signup(request):
+    token = request.data.get("token")
+    role = request.data.get("role")  # 'parent', 'student', 'staff'
+    data = request.data.get("data")
+
+    unverified = UnverifiedUser.objects.filter(
+        token=token, login_method__in=["google", "facebook", "microsoft"]
+    ).first()
+
+    if not unverified:
+        return Response({"error": "Invalid or expired token"}, status=400)
+
+    # Convert allergy names to IDs
+    allergy_names = data.pop("allergies", [])
+    allergy_ids = list(
+        Allergens.objects.filter(allergy__in=allergy_names).values_list("id", flat=True)
+    )
+
+    # Clean up
+    data.pop("user_type", None)
+    data.pop("schoolName", None)
+    data.pop("password", None)
+    data.pop("retypePassword", None)
+
+    created_user = None
+
+    if role == "parent":
+        created_user = ParentRegisteration.objects.create(
+            first_name=data.get("first_name", ""),
+            last_name=data.get("last_name", ""),
+            username=data.get("username", ""),
+            email=unverified.email,
+            phone_no=data.get("phone_no"),
+            password="social_dummy_password"
+        )
+
+    elif role == "student":
+        school_id = data.get("school_id")
+        school = SecondarySchool.objects.filter(id=school_id).first()
+        created_user = SecondaryStudent.objects.create(
+            first_name=data.get("first_name", ""),
+            last_name=data.get("last_name", ""),
+            username=data.get("username", ""),
+            email=unverified.email,
+            phone_no=data.get("phone_no"),
+            class_year=data.get("student_class", ""),
+            school=school,
+            password="social_dummy_password"
+        )
+
+    elif role == "staff":
+        school_type = data.get("school_type", "").lower()
+        school_id = data.get("school_id")
+
+        primary_school = None
+        secondary_school = None
+
+        if school_type == "primary":
+            primary_school = PrimarySchool.objects.filter(id=school_id).first()
+        elif school_type == "secondary":
+            secondary_school = SecondarySchool.objects.filter(id=school_id).first()
+
+        created_user = StaffRegisteration.objects.create(
+            first_name=data.get("first_name", ""),
+            last_name=data.get("last_name", ""),
+            username=data.get("username", ""),
+            email=unverified.email,
+            phone_no=data.get("phone_no"),
+            password="social_dummy_password",
+            primary_school=primary_school,
+            secondary_school=secondary_school,
+        )
+
+    # Set allergies if applicable
+    if created_user and allergy_ids:
+        created_user.allergies.set(allergy_ids)
+
+    # Remove the unverified entry
+    unverified.delete()
+
+    # JWT tokens (same as login)
+    refresh = RefreshToken.for_user(created_user)
+    access_token = str(refresh.access_token)
+    refresh_token = str(refresh)
+
+    return Response({
+        'access': access_token,
+        'refresh': refresh_token,
+        'user_type': role,
+        'user_id': created_user.id,
+        'message': 'Signup and login successful'
+    }, status=status.HTTP_200_OK)
