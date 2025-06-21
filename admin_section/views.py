@@ -3287,20 +3287,42 @@ def all_users_report(request):
     return Response(data)
 
 
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from rest_framework import status
+from rest_framework_simplejwt.tokens import RefreshToken
+import jwt
+from admin_section.models import (
+    UnverifiedUser,
+    ParentRegisteration,
+    StaffRegisteration,
+    SecondaryStudent
+)
+
+def generate_login_response(user, user_type):
+    refresh = RefreshToken.for_user(user)
+    return Response({
+        "access": str(refresh.access_token),
+        "refresh": str(refresh),
+        "user_type": user_type,
+        "user_id": user.id,
+        "message": "Login successful"
+    }, status=200)
+
 @api_view(["POST"])
 def social_callback_register(request):
     id_token = request.data.get("access_token")
     provider = request.data.get("provider")
-    email = None 
+    email = None
 
     if provider == "google":
         try:
             decoded = jwt.decode(id_token, options={"verify_signature": False})
             email = decoded.get("email")
-            
+
             if not email:
                 return Response({"error": "No email in ID token"}, status=400)
-                
+
         except jwt.DecodeError:
             return Response({"error": "Invalid ID token"}, status=400)
         except Exception as e:
@@ -3309,14 +3331,21 @@ def social_callback_register(request):
     if not email:
         return Response({"error": "Unable to fetch email from token."}, status=400)
 
-    if (ParentRegisteration.objects.filter(email=email).exists() or 
-       StaffRegisteration.objects.filter(email=email).exists() or 
-       SecondaryStudent.objects.filter(email=email).exists()):
-        return Response({"error": "Email already registered."}, status=400)
+    # If already registered, login and return JWTs
+    parent = ParentRegisteration.objects.filter(email=email).first()
+    if parent:
+        return generate_login_response(parent, "parent")
 
-    # Check if user already in UnverifiedUser
+    staff = StaffRegisteration.objects.filter(email=email).first()
+    if staff:
+        return generate_login_response(staff, "staff")
+
+    student = SecondaryStudent.objects.filter(email=email).first()
+    if student:
+        return generate_login_response(student, "student")
+
+    # If not registered, proceed with social signup flow
     unverified = UnverifiedUser.objects.filter(email=email).first()
-
     if not unverified:
         unverified = UnverifiedUser.objects.create(
             email=email,
@@ -3329,7 +3358,6 @@ def social_callback_register(request):
         "token": str(unverified.token),
         "provider": provider,
     }, status=200)
-
 
 @api_view(["POST"])
 def complete_social_signup(request):
