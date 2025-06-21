@@ -19,26 +19,47 @@ DEBUG = True
 ALLOWED_HOSTS = ['*']
 
 INSTALLED_APPS = [
+    # Django built-in apps
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    
+    'django.contrib.sites',  
     'allauth',
     'allauth.account',
     'allauth.socialaccount',
-    'django_rest_passwordreset',
-    
-    'admin_section',
-    'whitenoise.runserver_nostatic',
-    'corsheaders',
+    'allauth.socialaccount.providers.google',
+    'allauth.socialaccount.providers.facebook',
+    'allauth.socialaccount.providers.microsoft',
+
     'dj_rest_auth',
     'dj_rest_auth.registration',
     'rest_framework',
     'rest_framework.authtoken',
+    'django_rest_passwordreset',
+    'corsheaders',
+    'whitenoise.runserver_nostatic',
+
+    # Your apps
+    'admin_section',
 ]
+SOCIALACCOUNT_PROVIDERS = {
+    'google': {
+        'SCOPE': ['email', 'profile'],
+        'AUTH_PARAMS': {'access_type': 'online'},
+    },
+    'facebook': {
+        'METHOD': 'oauth2',
+        'SCOPE': ['email'],
+        'FIELDS': ['email', 'name'],
+    },
+    'microsoft': {
+        'SCOPE': ['User.Read'],
+    },
+}
+
 
 AUTHENTICATION_BACKENDS = (
     'allauth.account.auth_backends.AuthenticationBackend',
