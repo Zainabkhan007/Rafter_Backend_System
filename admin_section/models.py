@@ -24,6 +24,8 @@ class SecondarySchool(models.Model):
         return f"{self.secondary_school_name}-{self.id}"
 class Allergens(models.Model):
     allergy = models.CharField(max_length=50)
+
+
 class ParentRegisteration(models.Model):
     first_name=models.CharField(max_length=30)
     last_name=models.CharField(max_length=30)
@@ -79,6 +81,11 @@ class UnverifiedUser(models.Model):
     is_verified = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     expiry_time = models.DateTimeField(default=get_expiry_time)
+    login_method = models.CharField(
+        max_length=20,
+        choices=[('email', 'Email'), ('google', 'Google'), ('facebook', 'Facebook'), ('microsoft', 'Microsoft')],
+        default='email'
+    )
 
 class Teacher(models.Model):
     teacher_name = models.CharField(max_length=30)
