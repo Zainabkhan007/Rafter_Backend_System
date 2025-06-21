@@ -1,6 +1,8 @@
 asgiref==3.8.1
 certifi==2024.12.14
+cffi==1.17.1
 charset-normalizer==3.4.1
+cryptography==45.0.4
 dj-rest-auth==7.0.1
 Django==5.1.4
 django-allauth==65.3.1
@@ -14,15 +16,18 @@ environ==1.0
 et_xmlfile==2.0.0
 idna==3.10
 numpy==2.2.1
+oauthlib==3.3.1
 openpyxl==3.1.5
 pandas==2.2.3
 pillow==11.0.0
 psycopg2==2.9.10
+pycparser==2.22
 PyJWT==2.10.1
 python-dateutil==2.9.0.post0
 python-decouple==3.8
 pytz==2024.2
 requests==2.32.3
+requests-oauthlib==2.0.0
 rest-framework-simplejwt==0.0.2
 six==1.17.0
 sqlparse==0.5.3
