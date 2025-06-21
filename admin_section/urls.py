@@ -13,6 +13,12 @@ urlpatterns = [
     path('admin_login/', views.admin_login,name='admin_login'),
     path('get_user_info/<int:id>/<str:user_type>/', views.get_user_info, name='get_user_info'),
     path('update_user_info/<int:id>/<str:user_type>/', views.update_user_info, name='update_user_info'),
+    path('auth/', include('dj_rest_auth.urls')),
+    path('auth/registration/', include('dj_rest_auth.registration.urls')),
+    path('auth/social/', include('allauth.socialaccount.urls')),
+    path('auth/social_callback_register/', views.social_callback_register, name='social_callback_register'),
+    path('auth/complete_social_signup/', views.complete_social_signup, name='complete_social_signup'),
+
     # path('update_profile/<str:user_type>/<int:user_id>/', views.update_profile, name='update_profile'),
      
     path('get_cateenstaff/', views.get_cateenstaff, name='get_cateenstaff'),
