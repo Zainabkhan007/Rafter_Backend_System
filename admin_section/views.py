@@ -3311,23 +3311,64 @@ def generate_login_response(user, user_type):
 
 @api_view(["POST"])
 def social_callback_register(request):
-    id_token = request.data.get("access_token")
+    token = request.data.get("access_token")  # could be ID token or access token
     provider = request.data.get("provider")
     email = None
 
     if provider == "google":
         try:
-            decoded = jwt.decode(id_token, options={"verify_signature": False})
+            # Try to decode token as an ID token (JWT)
+            decoded = jwt.decode(token, options={"verify_signature": False})
             email = decoded.get("email")
 
-            if not email:
-                return Response({"error": "No email in ID token"}, status=400)
-
         except jwt.DecodeError:
-            return Response({"error": "Invalid ID token"}, status=400)
-        except Exception as e:
-            return Response({"error": f"Error decoding token: {str(e)}"}, status=400)
+            # Not an ID token — try using access token to fetch user info
+            try:
+                user_info_response = requests.get(
+                    "https://www.googleapis.com/oauth2/v3/userinfo",
+                    headers={"Authorization": f"Bearer {token}"}
+                )
+                if user_info_response.status_code != 200:
+                    return Response({"error": "Failed to fetch user info from Google"}, status=400)
 
+                user_info = user_info_response.json()
+                email = user_info.get("email")
+
+            except Exception as e:
+                return Response({"error": f"Error fetching user info: {str(e)}"}, status=400)
+
+    if provider == "facebook":
+        try:
+            user_info_response = requests.get(
+                "https://graph.facebook.com/me?fields=id,name,email",
+                headers={"Authorization": f"Bearer {token}"}
+            )
+            if user_info_response.status_code != 200:
+                return Response({"error": "Failed to fetch user info from Facebook"}, status=400)
+
+            user_info = user_info_response.json()
+            email = user_info.get("email")
+
+        except Exception as e:
+            return Response({"error": f"Error fetching user info: {str(e)}"}, status=400)
+
+    if provider == "microsoft":
+        try:
+            resp = requests.get(
+                "https://graph.microsoft.com/v1.0/me?$select=mail,userPrincipalName",
+                headers={"Authorization": f"Bearer {token}"}
+            )
+            print("MS Graph response:", resp.status_code, resp.text)
+            if resp.status_code != 200:
+                return Response({"error": "Failed to fetch user info from Microsoft"}, status=400)
+            user_info = resp.json()
+            email = user_info.get("mail") or user_info.get("userPrincipalName")
+
+        except Exception as e:
+            return Response({"error": f"Error fetching Microsoft user info: {str(e)}"}, status=400)
+
+
+    # If email couldn't be extracted
     if not email:
         return Response({"error": "Unable to fetch email from token."}, status=400)
 
@@ -3345,13 +3386,21 @@ def social_callback_register(request):
         return generate_login_response(student, "student")
 
     # If not registered, proceed with social signup flow
-    unverified = UnverifiedUser.objects.filter(email=email).first()
-    if not unverified:
+    existing_unverified = UnverifiedUser.objects.filter(email=email).first()
+
+    if existing_unverified:
+       
+        existing_unverified.token = uuid.uuid4()
+        existing_unverified.login_method = provider
+        existing_unverified.save()
+        unverified = existing_unverified
+    else:
         unverified = UnverifiedUser.objects.create(
             email=email,
             data={},
             login_method=provider,
         )
+
 
     return Response({
         "message": "OAuth login successful. Additional info required.",
@@ -3359,12 +3408,15 @@ def social_callback_register(request):
         "provider": provider,
     }, status=200)
 
+
 @api_view(["POST"])
 def complete_social_signup(request):
     token = request.data.get("token")
     role = request.data.get("role")  # 'parent', 'student', 'staff'
     data = request.data.get("data")
-
+    print("🟡 Received Token:", token)
+    print("🟡 Received Role:", role)
+    print("🟡 Data Keys:", list(data.keys()))
     unverified = UnverifiedUser.objects.filter(
         token=token, login_method__in=["google", "facebook", "microsoft"]
     ).first()
