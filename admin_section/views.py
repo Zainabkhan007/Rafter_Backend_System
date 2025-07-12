@@ -3009,42 +3009,46 @@ def download_menu(request):
 @api_view(['POST'])
 def download_all_schools_menu(request):
     try:
-        role = request.data.get('role', 'admin')
+        role = request.data.get('role')
         day_filter = request.data.get('day')
 
-        if role != 'admin':
-            return Response({'error': 'This endpoint is only available for admin role.'}, 
-                          status=status.HTTP_403_FORBIDDEN)
+        if role not in ['admin', 'chef', 'staff']:
+            return Response(
+                {'error': 'Invalid role. Must be one of: admin, chef, staff.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         # Create a zip file in memory
         zip_buffer = BytesIO()
         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+
             # Process primary schools
-            primary_schools = PrimarySchool.objects.all()
-            for school in primary_schools:
+            for school in PrimarySchool.objects.all():
                 student_orders, staff_orders = fetch_orders(school.id, 'primary')
-                workbook = generate_workbook(school, student_orders, staff_orders, 'primary', role, day_filter)
-                
-                # Save workbook to a temporary file
+                workbook = generate_workbook(
+                    school, student_orders, staff_orders, 'primary', role=role, day_filter=day_filter
+                )
+
                 school_name = school.school_name.replace(' ', '_')
-                day_part = f"{day_filter}" if day_filter else "weekly"
-                filename = f"primary_{school_name}_{day_part}_orders.xlsx"
-                
+                day_part = day_filter if day_filter else 'weekly'
+                filename = f"primary_{school_name}_{day_part}_orders_{role}.xlsx"
+
                 with BytesIO() as excel_buffer:
                     workbook.save(excel_buffer)
                     excel_buffer.seek(0)
                     zip_file.writestr(filename, excel_buffer.getvalue())
 
             # Process secondary schools
-            secondary_schools = SecondarySchool.objects.all()
-            for school in secondary_schools:
+            for school in SecondarySchool.objects.all():
                 student_orders, staff_orders = fetch_orders(school.id, 'secondary')
-                workbook = generate_workbook(school, student_orders, staff_orders, 'secondary', role, day_filter)
-                
+                workbook = generate_workbook(
+                    school, student_orders, staff_orders, 'secondary', role=role, day_filter=day_filter
+                )
+
                 school_name = school.secondary_school_name.replace(' ', '_')
-                day_part = f"{day_filter}" if day_filter else "weekly"
-                filename = f"secondary_{school_name}_{day_part}_orders.xlsx"
-                
+                day_part = day_filter if day_filter else 'weekly'
+                filename = f"secondary_{school_name}_{day_part}_orders_{role}.xlsx"
+
                 with BytesIO() as excel_buffer:
                     workbook.save(excel_buffer)
                     excel_buffer.seek(0)
@@ -3052,10 +3056,9 @@ def download_all_schools_menu(request):
 
         zip_buffer.seek(0)
 
-        # Create response with zip file
-        day_part = f"{day_filter}" if day_filter else "weekly"
         response = HttpResponse(zip_buffer.getvalue(), content_type='application/zip')
-        response['Content-Disposition'] = f'attachment; filename="all_schools_{day_part}_orders.zip"'
+        day_part = day_filter if day_filter else 'weekly'
+        response['Content-Disposition'] = f'attachment; filename="all_schools_{day_part}_orders_{role}.zip"'
         return response
 
     except Exception as e:
