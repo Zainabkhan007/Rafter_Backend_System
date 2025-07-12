@@ -29,6 +29,7 @@ from django.shortcuts import get_object_or_404
 from rest_framework.filters import SearchFilter
 from io import BytesIO
 import openpyxl
+from openpyxl.utils import get_column_letter
 from django.core.files.storage import FileSystemStorage
 from datetime import datetime,timedelta
 from django.http import HttpResponse,JsonResponse
@@ -36,6 +37,8 @@ from django.db.models import Count
 from rest_framework.exceptions import NotFound
 import calendar
 import stripe
+import zipfile
+from io import BytesIO
 import datetime
 from django.contrib.auth import authenticate
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -2769,20 +2772,6 @@ def fetch_orders(school_id, school_type):
             current_year += 1
     else:
         target_week = current_week_number
-
-    print("====================================")
-    print(f"🕒 Current Local Time: {current_time}")
-    print(f"📆 Fetching orders for:")
-    print(f"   ▸ School ID       : {school_id}")
-    print(f"   ▸ School Type     : {school_type}")
-    print(f"   ▸ Current Week    : {current_week_number}")
-    print(f"   ▸ Past Cutoff?    : {is_past_cutoff} (Friday 2PM+)")
-    print(f"   ▸ Target Week     : {target_week}")
-    print(f"   ▸ Year            : {current_year}")
-    print("------------------------------------")
-
-
-    # Filter orders based on school type
     filter_kwargs = {
         'week_number': target_week,
         'year': current_year
@@ -2803,23 +2792,53 @@ def fetch_orders(school_id, school_type):
 
     return student_orders, staff_orders
 def generate_workbook(school, student_orders, staff_orders, school_type, role='admin', day_filter=None):
+    # Create a new workbook and remove the default sheet
     workbook = Workbook()
     workbook.remove(workbook.active)
 
+    # Initialize data structures
     day_totals = defaultdict(lambda: defaultdict(int))
     grouped_orders = defaultdict(lambda: defaultdict(list))
     staff_orders_by_day = defaultdict(list)
 
+    # Style definitions
     header_font = Font(bold=True, size=12, color="FFFFFF")
     header_fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
-    border = Border(left=Side(style="thin"), right=Side(style="thin"), top=Side(style="thin"), bottom=Side(style="thin"))
+    title_font = Font(bold=True, size=14, color="000000")
+    title_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
+    border = Border(
+        left=Side(style="thin"),
+        right=Side(style="thin"),
+        top=Side(style="thin"),
+        bottom=Side(style="thin")
+    )
     center_align = Alignment(horizontal="center", vertical="center")
+    left_align = Alignment(horizontal="left", vertical="center")
 
-    def apply_styling(sheet):
-        for row in sheet.iter_rows():
+    def apply_header_styling(sheet, title_text, columns):
+        """Apply styling to header rows with a title and column headers"""
+        # Add and style title row
+        sheet.merge_cells(start_row=1, end_row=1, start_column=1, end_column=len(columns))
+        title_cell = sheet.cell(row=1, column=1, value=title_text)
+        title_cell.font = title_font
+        title_cell.fill = title_fill
+        title_cell.alignment = center_align
+        
+        # Add and style column headers
+        for col_num, column_title in enumerate(columns, 1):
+            cell = sheet.cell(row=2, column=col_num, value=column_title)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.border = border
+            cell.alignment = center_align
+            sheet.column_dimensions[get_column_letter(col_num)].width = 25
+
+    def apply_data_styling(sheet, start_row):
+        """Apply consistent styling to all data rows"""
+        for row in sheet.iter_rows(min_row=start_row):
             for cell in row:
                 cell.border = border
-                cell.alignment = center_align
+                cell.alignment = left_align if cell.column == 1 else center_align
 
     # Process student orders
     for order in student_orders:
@@ -2838,15 +2857,12 @@ def generate_workbook(school, student_orders, staff_orders, school_type, role='a
             if student:
                 order_data['student_name'] = student.username
                 order_data['teacher_name'] = student.teacher.teacher_name if student.teacher else "Unknown"
-
             grouped_orders[selected_day][order_data['teacher_name']].append(order_data)
-
         else:
             student = SecondaryStudent.objects.filter(id=order.user_id).first()
             if student:
                 order_data['student_name'] = student.username
                 order_data['class_year'] = student.class_year if student.class_year else "Unknown"
-
             grouped_orders[selected_day][order_data['class_year']].append(order_data)
 
         for menu_name, quantity in order_data['order_items'].items():
@@ -2874,63 +2890,78 @@ def generate_workbook(school, student_orders, staff_orders, school_type, role='a
     all_days = list(DAY_COLORS.keys())
     days_to_generate = [day_filter] if day_filter in all_days else all_days
 
+    # Generate sheets for each day
     for day in days_to_generate:
+        # Generate class/teacher sheets for student orders
         if role in ['admin', 'staff']:
             entity_list = Teacher.objects.filter(school=school) if school_type == 'primary' else CLASS_YEARS
             for entity in entity_list:
                 entity_name = entity.teacher_name if school_type == 'primary' else entity
-                sheet = workbook.create_sheet(title=f"{entity_name} - {day}"[:31])
+                sheet_title = f"{entity_name} - {day}"[:31]
+                sheet = workbook.create_sheet(title=sheet_title)
                 sheet.sheet_properties.tabColor = DAY_COLORS.get(day, "FFFFFF")
-                sheet.append(["Student Name", "Menu Items", "Quantity"])
-                for col_num, cell in enumerate(sheet[1], start=1):
-                    cell.font = header_font
-                    cell.fill = header_fill
-                    cell.border = border
-                    cell.alignment = center_align
-                    sheet.column_dimensions[chr(64 + col_num)].width = 20
+                
+                # Set appropriate title based on school type
+                if school_type == 'primary':
+                    title = f"{entity_name} Order Sheet for {day}"
+                else:
+                    title = f"Class {entity_name} Order Sheet for {day}"
+                
+                apply_header_styling(sheet, title, ["Student Name", "Menu Items", "Quantity"])
+                
+                row_num = 3  # Start data after title and headers
                 for order_data in grouped_orders.get(day, {}).get(entity_name, []):
                     for menu_name, quantity in order_data['order_items'].items():
-                        sheet.append([order_data['student_name'], menu_name, quantity])
-                apply_styling(sheet)
+                        sheet.cell(row=row_num, column=1, value=order_data['student_name'])
+                        sheet.cell(row=row_num, column=2, value=menu_name)
+                        sheet.cell(row=row_num, column=3, value=quantity)
+                        row_num += 1
+                
+                if row_num == 3:  # No orders added
+                    sheet.cell(row=3, column=1, value="No orders")
+                    sheet.merge_cells(start_row=3, end_row=3, start_column=1, end_column=3)
+                
+                apply_data_styling(sheet, 3)
 
+        # Generate staff sheet for admin
         if role == 'admin':
             sheet = workbook.create_sheet(title=f"Staff {day}")
             sheet.sheet_properties.tabColor = "CCCCCC"
-            sheet.append(["Staff Name", "Menu Items", "Quantity"])
-            for col_num, cell in enumerate(sheet[1], start=1):
-                cell.font = header_font
-                cell.fill = header_fill
-                cell.border = border
-                cell.alignment = center_align
-                sheet.column_dimensions[chr(64 + col_num)].width = 20
+            apply_header_styling(sheet, f"Staff Order Sheet for {day}", ["Staff Name", "Menu Items", "Quantity"])
+            
+            row_num = 3
             if not staff_orders_by_day.get(day):
-                sheet.append(["No orders", "", ""])
+                sheet.cell(row=3, column=1, value="No orders")
+                sheet.merge_cells(start_row=3, end_row=3, start_column=1, end_column=3)
             else:
                 for order_data in staff_orders_by_day[day]:
                     for menu_name, quantity in order_data['order_items'].items():
-                        sheet.append([order_data['staff_name'], menu_name, quantity])
-            apply_styling(sheet)
+                        sheet.cell(row=row_num, column=1, value=order_data['staff_name'])
+                        sheet.cell(row=row_num, column=2, value=menu_name)
+                        sheet.cell(row=row_num, column=3, value=quantity)
+                        row_num += 1
+            
+            apply_data_styling(sheet, 3)
 
+        # Generate totals sheet for admin/chef
         if role in ['admin', 'chef']:
             sheet = workbook.create_sheet(title=f"{day} Total")
             sheet.sheet_properties.tabColor = "FFD700"
-            sheet.append(["Menu Item", "Total Quantity"])
-            for col_num, cell in enumerate(sheet[1], start=1):
-                cell.font = header_font
-                cell.fill = header_fill
-                cell.border = border
-                cell.alignment = center_align
-                sheet.column_dimensions[chr(64 + col_num)].width = 20
+            apply_header_styling(sheet, f"Chef Order Sheet for {day}", ["Menu Item", "Total Quantity"])
+            
+            row_num = 3
             if day in day_totals:
-                for menu_name, quantity in day_totals[day].items():
-                    sheet.append([menu_name, quantity])
+                for menu_name, quantity in sorted(day_totals[day].items()):
+                    sheet.cell(row=row_num, column=1, value=menu_name)
+                    sheet.cell(row=row_num, column=2, value=quantity)
+                    row_num += 1
             else:
-                sheet.append(["No orders", ""])
-            apply_styling(sheet)
+                sheet.cell(row=3, column=1, value="No orders")
+                sheet.merge_cells(start_row=3, end_row=3, start_column=1, end_column=2)
+            
+            apply_data_styling(sheet, 3)
 
     return workbook
-
-
 @api_view(['POST'])
 def download_menu(request):
     try:
@@ -2971,6 +3002,61 @@ def download_menu(request):
             'message': 'File generated successfully!',
             'download_link': f"{settings.MENU_FILES_URL}{filename}"
         }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['POST'])
+def download_all_schools_menu(request):
+    try:
+        role = request.data.get('role', 'admin')
+        day_filter = request.data.get('day')
+
+        if role != 'admin':
+            return Response({'error': 'This endpoint is only available for admin role.'}, 
+                          status=status.HTTP_403_FORBIDDEN)
+
+        # Create a zip file in memory
+        zip_buffer = BytesIO()
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            # Process primary schools
+            primary_schools = PrimarySchool.objects.all()
+            for school in primary_schools:
+                student_orders, staff_orders = fetch_orders(school.id, 'primary')
+                workbook = generate_workbook(school, student_orders, staff_orders, 'primary', role, day_filter)
+                
+                # Save workbook to a temporary file
+                school_name = school.school_name.replace(' ', '_')
+                day_part = f"{day_filter}" if day_filter else "weekly"
+                filename = f"primary_{school_name}_{day_part}_orders.xlsx"
+                
+                with BytesIO() as excel_buffer:
+                    workbook.save(excel_buffer)
+                    excel_buffer.seek(0)
+                    zip_file.writestr(filename, excel_buffer.getvalue())
+
+            # Process secondary schools
+            secondary_schools = SecondarySchool.objects.all()
+            for school in secondary_schools:
+                student_orders, staff_orders = fetch_orders(school.id, 'secondary')
+                workbook = generate_workbook(school, student_orders, staff_orders, 'secondary', role, day_filter)
+                
+                school_name = school.secondary_school_name.replace(' ', '_')
+                day_part = f"{day_filter}" if day_filter else "weekly"
+                filename = f"secondary_{school_name}_{day_part}_orders.xlsx"
+                
+                with BytesIO() as excel_buffer:
+                    workbook.save(excel_buffer)
+                    excel_buffer.seek(0)
+                    zip_file.writestr(filename, excel_buffer.getvalue())
+
+        zip_buffer.seek(0)
+
+        # Create response with zip file
+        day_part = f"{day_filter}" if day_filter else "weekly"
+        response = HttpResponse(zip_buffer.getvalue(), content_type='application/zip')
+        response['Content-Disposition'] = f'attachment; filename="all_schools_{day_part}_orders.zip"'
+        return response
 
     except Exception as e:
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
