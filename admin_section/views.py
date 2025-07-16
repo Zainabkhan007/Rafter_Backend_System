@@ -941,7 +941,39 @@ def get_teachers(request):
         'message': 'Teachers retrieved successfully!',
         'teachers': teacher_details
     }, status=status.HTTP_200_OK)
+
+@api_view(['GET'])
+def list_all_teachers(request):
+    teachers = Teacher.objects.all()
+    serializer = TeacherSerializer(teachers, many=True)
+    return Response({'teachers': serializer.data}, status=status.HTTP_200_OK)
+
+
+@api_view(['GET', 'PUT', 'DELETE'])
+def teacher_detail(request, teacher_id):
+    try:
+        teacher = Teacher.objects.get(id=teacher_id)
+    except Teacher.DoesNotExist:
+        return Response({'error': 'Teacher not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == 'GET':
+        serializer = TeacherSerializer(teacher)
+        return Response(serializer.data)
+
+    elif request.method == 'PUT':
+        serializer = TeacherSerializer(teacher, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response({'message': 'Teacher updated successfully.', 'data': serializer.data})
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    elif request.method == 'DELETE':
+        teacher.delete()
+        return Response({'message': 'Teacher deleted successfully.'}, status=status.HTTP_204_NO_CONTENT)
+
 # For Primary School Student
+
+
 @api_view(['GET', 'POST'])
 def get_student_detail(request, school_id):
   
@@ -2816,15 +2848,12 @@ def generate_workbook(school, student_orders, staff_orders, school_type, role='a
     left_align = Alignment(horizontal="left", vertical="center")
 
     def apply_header_styling(sheet, title_text, columns):
-        """Apply styling to header rows with a title and column headers"""
-        # Add and style title row
         sheet.merge_cells(start_row=1, end_row=1, start_column=1, end_column=len(columns))
         title_cell = sheet.cell(row=1, column=1, value=title_text)
         title_cell.font = title_font
         title_cell.fill = title_fill
         title_cell.alignment = center_align
-        
-        # Add and style column headers
+
         for col_num, column_title in enumerate(columns, 1):
             cell = sheet.cell(row=2, column=col_num, value=column_title)
             cell.font = header_font
@@ -2834,7 +2863,6 @@ def generate_workbook(school, student_orders, staff_orders, school_type, role='a
             sheet.column_dimensions[get_column_letter(col_num)].width = 25
 
     def apply_data_styling(sheet, start_row):
-        """Apply consistent styling to all data rows"""
         for row in sheet.iter_rows(min_row=start_row):
             for cell in row:
                 cell.border = border
@@ -2890,9 +2918,8 @@ def generate_workbook(school, student_orders, staff_orders, school_type, role='a
     all_days = list(DAY_COLORS.keys())
     days_to_generate = [day_filter] if day_filter in all_days else all_days
 
-    # Generate sheets for each day
     for day in days_to_generate:
-        # Generate class/teacher sheets for student orders
+        # Generate class/teacher sheets
         if role in ['admin', 'staff']:
             entity_list = Teacher.objects.filter(school=school) if school_type == 'primary' else CLASS_YEARS
             for entity in entity_list:
@@ -2900,35 +2927,30 @@ def generate_workbook(school, student_orders, staff_orders, school_type, role='a
                 sheet_title = f"{entity_name} - {day}"[:31]
                 sheet = workbook.create_sheet(title=sheet_title)
                 sheet.sheet_properties.tabColor = DAY_COLORS.get(day, "FFFFFF")
-                
-                # Set appropriate title based on school type
-                if school_type == 'primary':
-                    title = f"{entity_name} Order Sheet for {day}"
-                else:
-                    title = f"Class {entity_name} Order Sheet for {day}"
-                
+
+                title = f"{entity_name} Order Sheet for {day} of {school}" if school_type == 'primary' else f"Class {entity_name} Order Sheet for {day} of {school}"
                 apply_header_styling(sheet, title, ["Student Name", "Menu Items", "Quantity"])
-                
-                row_num = 3  # Start data after title and headers
+
+                row_num = 3
                 for order_data in grouped_orders.get(day, {}).get(entity_name, []):
                     for menu_name, quantity in order_data['order_items'].items():
                         sheet.cell(row=row_num, column=1, value=order_data['student_name'])
                         sheet.cell(row=row_num, column=2, value=menu_name)
                         sheet.cell(row=row_num, column=3, value=quantity)
                         row_num += 1
-                
-                if row_num == 3:  # No orders added
+
+                if row_num == 3:
                     sheet.cell(row=3, column=1, value="No orders")
                     sheet.merge_cells(start_row=3, end_row=3, start_column=1, end_column=3)
-                
+
                 apply_data_styling(sheet, 3)
 
-        # Generate staff sheet for admin
+        # Staff Sheet
         if role == 'admin':
             sheet = workbook.create_sheet(title=f"Staff {day}")
             sheet.sheet_properties.tabColor = "CCCCCC"
-            apply_header_styling(sheet, f"Staff Order Sheet for {day}", ["Staff Name", "Menu Items", "Quantity"])
-            
+            apply_header_styling(sheet, f"Staff Order Sheet for {day} of {school}", ["Staff Name", "Menu Items", "Quantity"])
+
             row_num = 3
             if not staff_orders_by_day.get(day):
                 sheet.cell(row=3, column=1, value="No orders")
@@ -2940,15 +2962,15 @@ def generate_workbook(school, student_orders, staff_orders, school_type, role='a
                         sheet.cell(row=row_num, column=2, value=menu_name)
                         sheet.cell(row=row_num, column=3, value=quantity)
                         row_num += 1
-            
+
             apply_data_styling(sheet, 3)
 
-        # Generate totals sheet for admin/chef
+        # Chef/Total Sheet
         if role in ['admin', 'chef']:
             sheet = workbook.create_sheet(title=f"{day} Total")
             sheet.sheet_properties.tabColor = "FFD700"
-            apply_header_styling(sheet, f"Chef Order Sheet for {day}", ["Menu Item", "Total Quantity"])
-            
+            apply_header_styling(sheet, f"Chef Order Sheet for {day} of {school}", ["Menu Item", "Total Quantity"])
+
             row_num = 3
             if day in day_totals:
                 for menu_name, quantity in sorted(day_totals[day].items()):
@@ -2958,10 +2980,45 @@ def generate_workbook(school, student_orders, staff_orders, school_type, role='a
             else:
                 sheet.cell(row=3, column=1, value="No orders")
                 sheet.merge_cells(start_row=3, end_row=3, start_column=1, end_column=2)
-            
+
             apply_data_styling(sheet, 3)
 
+        # Canteen Staff Day Total
+        if role in ['admin', 'staff']:
+            sheet = workbook.create_sheet(title=f"Canteen Total {day}")
+            sheet.sheet_properties.tabColor = "92D050"
+            apply_header_styling(
+                sheet,
+                f"Canteen Staff Sheet for {day} of {school}",
+                ["Teacher/Class Year", "Student Name", "Menu Item", "Quantity"]
+            )
+
+            row_num = 3
+            orders_by_group = grouped_orders.get(day, {})
+            
+            valid_keys = [key if key is not None else "Unknown" for key in orders_by_group.keys()]
+            for group_key in sorted(valid_keys):
+                student_orders = orders_by_group.get(group_key, []) or orders_by_group.get(None, [])
+                sorted_student_orders = sorted(student_orders, key=lambda x: x['student_name'] or "")
+
+                for order_data in sorted_student_orders:
+                    student_name = order_data['student_name']
+                    for menu_name, quantity in order_data['order_items'].items():
+                        sheet.cell(row=row_num, column=1, value=group_key)
+                        sheet.cell(row=row_num, column=2, value=student_name)
+                        sheet.cell(row=row_num, column=3, value=menu_name)
+                        sheet.cell(row=row_num, column=4, value=quantity)
+                        row_num += 1
+
+            if row_num == 3:
+                sheet.cell(row=3, column=1, value="No orders")
+                sheet.merge_cells(start_row=3, end_row=3, start_column=1, end_column=4)
+
+            apply_data_styling(sheet, 3)
+
+
     return workbook
+
 @api_view(['POST'])
 def download_menu(request):
     try:
@@ -3005,6 +3062,8 @@ def download_menu(request):
 
     except Exception as e:
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 
 @api_view(['POST'])
 def download_all_schools_menu(request):

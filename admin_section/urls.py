@@ -38,6 +38,8 @@ urlpatterns = [
     path('primary_school/<int:school_id>/teacher/', views.add_and_get_teacher, name='add_and_get_teacher'), 
     path('primary_school/<int:school_id>/teacher/<int:teacher_id>/', views.update_delete_teacher, name='update_delete_teacher'),
     path('get_teachers/', views.get_teachers, name='get_teachers'), 
+     path('teachers/', views.list_all_teachers, name='list_all_teachers'),  # list all teachers
+    path('teachers/<int:teacher_id>/', views.teacher_detail, name='teacher_detail'),
   
     path('primary_school/<int:school_id>/student/', views.get_student_detail, name='get_student_detail'), 
     path('primary_school/<int:school_id>/student/<int:student_id>/', views.update_delete_student, name='update_delete_student'), 

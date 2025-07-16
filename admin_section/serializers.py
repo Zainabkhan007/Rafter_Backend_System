@@ -118,9 +118,11 @@ class PrimarySchoolSerializer(serializers.ModelSerializer):
 
 
 class TeacherSerializer(serializers.ModelSerializer):
+    school_name = serializers.CharField(source='school.school_name', read_only=True)
+
     class Meta:
         model = Teacher
-        fields = ['id','teacher_name', 'class_year']
+        fields = ['id', 'teacher_name', 'class_year', 'school_name']
 
 
 
