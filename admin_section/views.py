@@ -253,15 +253,16 @@ def password_reset(request):
 
     signer = TimestampSigner()
     signed_token = signer.sign(user.email)
-   
-
     encoded_token = quote(signed_token)
-    reset_link = f'https://www.raftersfoodservices.ie/password-reset?token={encoded_token}'
+
+    frontend_url = os.getenv('FRONTEND_URL', 'https://www.raftersfoodservices.ie/')
+    reset_link = f'{frontend_url}/password-reset?token={encoded_token}'
+
     from_email = os.getenv('DEFAULT_FROM_EMAIL', 'support@raftersfoodservices.ie')
 
     send_mail(
         subject='Password Reset Request',
-        message=f'Click the following link to reset your password of the Rafters Food Services user Account: {reset_link}',
+        message=f'Click the following link to reset your Rafters Food Services account password: {reset_link}',
         from_email=from_email,
         recipient_list=[user.email],
         fail_silently=False,
@@ -283,11 +284,13 @@ def password_reset_confirm(request):
     except (BadSignature, SignatureExpired):
         return Response({"error": "Invalid or expired token."}, status=400)
 
-    # Search for user in all custom models
+    # Find user in all models
     user = None
+    user_model = None
     for model in [ParentRegisteration, StaffRegisteration, SecondaryStudent, CanteenStaff]:
         try:
             user = model.objects.get(email=email)
+            user_model = model
             break
         except model.DoesNotExist:
             continue
@@ -295,12 +298,13 @@ def password_reset_confirm(request):
     if not user:
         return Response({"error": "User not found."}, status=400)
 
-    # Set and hash new password
-    user.password = make_password(password)
-    user.save()
+    user_model.objects.filter(email=email).update(password=make_password(password))
+    updated_user = user_model.objects.get(email=email)
+
+    if not check_password(password, updated_user.password):
+        return Response({"error": "Password was not set correctly."}, status=500)
 
     return Response({"message": "Password reset successful."}, status=200)
-
 @api_view(["POST"])
 def login(request):
 
