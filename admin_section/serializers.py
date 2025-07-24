@@ -70,45 +70,49 @@ class LoginSerializer(serializers.Serializer):
     password = serializers.CharField(write_only=True, min_length=8, max_length=128)
     
     def validate(self, attrs):
-        email = attrs.get('email')
+        email = attrs.get('email').strip().lower()  
         password = attrs.get('password')
         
         user = None
         user_type = None
-       
+        
+        # Case-insensitive lookups
         try:
-            user = StaffRegisteration.objects.get(email=email)
+            user = StaffRegisteration.objects.get(email__iexact=email)
             user_type = 'staff'
         except StaffRegisteration.DoesNotExist:
             pass
 
         if not user:
             try:
-                user = ParentRegisteration.objects.get(email=email)
+                user = ParentRegisteration.objects.get(email__iexact=email)
                 user_type = 'parent'
             except ParentRegisteration.DoesNotExist:
                 pass
 
         if not user:
             try:
-                user = SecondaryStudent.objects.get(email=email)
+                user = SecondaryStudent.objects.get(email__iexact=email)
                 user_type = 'student'
             except SecondaryStudent.DoesNotExist:
                 pass
+
         if not user:
             try:
-                user = CanteenStaff.objects.get(email=email)
+                user = CanteenStaff.objects.get(email__iexact=email)
                 user_type = 'canteenstaff'
             except CanteenStaff.DoesNotExist:
                 pass
-       
-        if user and check_password(password, user.password):  
+
+        # Check password
+        if user and check_password(password, user.password):
             attrs['user'] = user
             attrs['user_type'] = user_type
         else:
             raise serializers.ValidationError("Invalid email or password.")
         
         return attrs
+
 
 class PrimarySchoolSerializer(serializers.ModelSerializer):
     student_count = serializers.IntegerField(read_only=True)

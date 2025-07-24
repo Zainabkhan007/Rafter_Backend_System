@@ -3586,7 +3586,7 @@ def social_callback_register(request):
 @api_view(["POST"])
 def complete_social_signup(request):
     token = request.data.get("token")
-    role = request.data.get("role")  # 'parent', 'student', 'staff'
+    role = request.data.get("role")  
     data = request.data.get("data")
     print("🟡 Received Token:", token)
     print("🟡 Received Role:", role)
