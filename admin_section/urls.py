@@ -38,6 +38,8 @@ urlpatterns = [
     path('primary_school/<int:school_id>/teacher/', views.add_and_get_teacher, name='add_and_get_teacher'), 
     path('primary_school/<int:school_id>/teacher/<int:teacher_id>/', views.update_delete_teacher, name='update_delete_teacher'),
     path('get_teachers/', views.get_teachers, name='get_teachers'), 
+     path('teachers/', views.list_all_teachers, name='list_all_teachers'),  # list all teachers
+    path('teachers/<int:teacher_id>/', views.teacher_detail, name='teacher_detail'),
   
     path('primary_school/<int:school_id>/student/', views.get_student_detail, name='get_student_detail'), 
     path('primary_school/<int:school_id>/student/<int:student_id>/', views.update_delete_student, name='update_delete_student'), 
@@ -95,6 +97,7 @@ urlpatterns = [
    path('top_up_payment/', views.top_up_payment, name='top_up_payment'),
 
    path('download_menu_all/',  views.download_menu, name='download_menu_all'),
+   path('download-all-schools-menu/', views.download_all_schools_menu, name='download_all_schools_menu'),
    path("get_menu/",views.get_active_status_menu,name='get_active_status_menu'),
    path("get_user_count/",views.get_user_count,name='get_user_count'),
    path("deactivate_menus/",views.deactivate_menus,name='deactivate_menus'),

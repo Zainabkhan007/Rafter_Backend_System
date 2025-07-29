@@ -50,65 +50,76 @@ class StaffRegisterationSerializer(serializers.ModelSerializer):
 
 class CanteenStaffSerializer(serializers.ModelSerializer):
     school_type = serializers.ChoiceField(choices=[('primary', 'Primary'), ('secondary', 'Secondary')])
-   
     primary_school = serializers.PrimaryKeyRelatedField(queryset=PrimarySchool.objects.all(), required=False)
     secondary_school = serializers.PrimaryKeyRelatedField(queryset=SecondarySchool.objects.all(), required=False)
-    
+    school_name = serializers.SerializerMethodField()  
+
     class Meta:
         model = CanteenStaff
-        fields = ['id', 'username', 'email', 'password', 'school_type','primary_school', 'secondary_school']
-    def update(self, instance, validated_data):
-       
-         if 'password' not in validated_data:
-            validated_data['password'] = instance.password 
+        fields = ['id', 'username', 'email', 'password', 'school_type', 'primary_school', 'secondary_school', 'school_name']
 
-         return super().update(instance, validated_data)
-   
+    def get_school_name(self, obj):
+        if obj.school_type == 'primary' and obj.primary_school:
+            return obj.primary_school.school_name
+        elif obj.school_type == 'secondary' and obj.secondary_school:
+            return obj.secondary_school.secondary_school_name
+        return 'Unknown School'
+
+    def update(self, instance, validated_data):
+        # Prevent password from being overwritten unless explicitly provided
+        if 'password' not in validated_data:
+            validated_data['password'] = instance.password
+        return super().update(instance, validated_data)
+ 
  
 class LoginSerializer(serializers.Serializer):
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True, min_length=8, max_length=128)
     
     def validate(self, attrs):
-        email = attrs.get('email')
+        email = attrs.get('email').strip().lower()  
         password = attrs.get('password')
         
         user = None
         user_type = None
-       
+        
+        # Case-insensitive lookups
         try:
-            user = StaffRegisteration.objects.get(email=email)
+            user = StaffRegisteration.objects.get(email__iexact=email)
             user_type = 'staff'
         except StaffRegisteration.DoesNotExist:
             pass
 
         if not user:
             try:
-                user = ParentRegisteration.objects.get(email=email)
+                user = ParentRegisteration.objects.get(email__iexact=email)
                 user_type = 'parent'
             except ParentRegisteration.DoesNotExist:
                 pass
 
         if not user:
             try:
-                user = SecondaryStudent.objects.get(email=email)
+                user = SecondaryStudent.objects.get(email__iexact=email)
                 user_type = 'student'
             except SecondaryStudent.DoesNotExist:
                 pass
+
         if not user:
             try:
-                user = CanteenStaff.objects.get(email=email)
+                user = CanteenStaff.objects.get(email__iexact=email)
                 user_type = 'canteenstaff'
             except CanteenStaff.DoesNotExist:
                 pass
-       
-        if user and check_password(password, user.password):  
+
+        # Check password
+        if user and check_password(password, user.password):
             attrs['user'] = user
             attrs['user_type'] = user_type
         else:
             raise serializers.ValidationError("Invalid email or password.")
         
         return attrs
+
 
 class PrimarySchoolSerializer(serializers.ModelSerializer):
     student_count = serializers.IntegerField(read_only=True)
@@ -118,9 +129,11 @@ class PrimarySchoolSerializer(serializers.ModelSerializer):
 
 
 class TeacherSerializer(serializers.ModelSerializer):
+    school_name = serializers.CharField(source='school.school_name', read_only=True)
+
     class Meta:
         model = Teacher
-        fields = ['id','teacher_name', 'class_year']
+        fields = ['id', 'teacher_name', 'class_year', 'school_name']
 
 
 
