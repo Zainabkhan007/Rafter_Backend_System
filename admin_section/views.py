@@ -627,30 +627,38 @@ def get_cateenstaff(request):
 @api_view(['GET', 'PUT', 'DELETE'])
 def cateenstaff_by_id(request, pk):
     try:
-        staff = CanteenStaff.objects.get(pk=pk)  
+        staff = CanteenStaff.objects.get(pk=pk)
     except CanteenStaff.DoesNotExist:
-        raise NotFound({'error': 'Staff not found'}) 
+        raise NotFound({'error': 'Staff not found'})
 
     if request.method == 'GET':
-    
         serializer = CanteenStaffSerializer(staff)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        data = serializer.data  # Serialized data
+
+        # Add school_name field dynamically
+        if staff.school_type == 'primary' and staff.primary_school:
+            data['school_name'] = staff.primary_school.school_name
+        elif staff.school_type == 'secondary' and staff.secondary_school:
+            data['school_name'] = staff.secondary_school.secondary_school_name
+        else:
+            data['school_name'] = 'Unknown School'
+
+        return Response(data, status=status.HTTP_200_OK)
 
     elif request.method == 'PUT':
-      
         serializer = CanteenStaffSerializer(staff, data=request.data, partial=True)
-
         if serializer.is_valid():
-            serializer.save()  
+            serializer.save()
             return Response(serializer.data, status=status.HTTP_200_OK)
         else:
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     elif request.method == 'DELETE':
-       
         staff.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
-    
+
+
+
 def generate_unique_username(first_name, last_name):
     from admin_section.models import PrimaryStudentsRegister
     base_username = f"{first_name.lower()}_{last_name.lower()}"
@@ -1993,7 +2001,7 @@ def complete_order(request):
         order = Order.objects.get(id=order_id)
 
         order.is_delivered = True
-        order.status = 'done'
+        order.status = 'collected'
         order.save()
 
         return Response({

@@ -50,20 +50,27 @@ class StaffRegisterationSerializer(serializers.ModelSerializer):
 
 class CanteenStaffSerializer(serializers.ModelSerializer):
     school_type = serializers.ChoiceField(choices=[('primary', 'Primary'), ('secondary', 'Secondary')])
-   
     primary_school = serializers.PrimaryKeyRelatedField(queryset=PrimarySchool.objects.all(), required=False)
     secondary_school = serializers.PrimaryKeyRelatedField(queryset=SecondarySchool.objects.all(), required=False)
-    
+    school_name = serializers.SerializerMethodField()  
+
     class Meta:
         model = CanteenStaff
-        fields = ['id', 'username', 'email', 'password', 'school_type','primary_school', 'secondary_school']
-    def update(self, instance, validated_data):
-       
-         if 'password' not in validated_data:
-            validated_data['password'] = instance.password 
+        fields = ['id', 'username', 'email', 'password', 'school_type', 'primary_school', 'secondary_school', 'school_name']
 
-         return super().update(instance, validated_data)
-   
+    def get_school_name(self, obj):
+        if obj.school_type == 'primary' and obj.primary_school:
+            return obj.primary_school.school_name
+        elif obj.school_type == 'secondary' and obj.secondary_school:
+            return obj.secondary_school.secondary_school_name
+        return 'Unknown School'
+
+    def update(self, instance, validated_data):
+        # Prevent password from being overwritten unless explicitly provided
+        if 'password' not in validated_data:
+            validated_data['password'] = instance.password
+        return super().update(instance, validated_data)
+ 
  
 class LoginSerializer(serializers.Serializer):
     email = serializers.EmailField()
