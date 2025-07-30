@@ -64,6 +64,34 @@ from .models import Allergens
 
 from django.utils import timezone
 from datetime import timedelta
+import jwt
+import requests
+from jwt.algorithms import RSAAlgorithm
+from rest_framework.response import Response
+
+APPLE_KEYS_URL = "https://appleid.apple.com/auth/keys"
+APPLE_AUDIENCE = "app.raftersfoodservices.ie"
+
+def verify_apple_token(identity_token: str):
+    res = requests.get(APPLE_KEYS_URL)
+    keys = res.json().get("keys", [])
+
+    header = jwt.get_unverified_header(identity_token)
+    key = next((k for k in keys if k["kid"] == header["kid"]), None)
+    if not key:
+        raise Exception("Apple public key not found")
+
+    public_key = RSAAlgorithm.from_jwk(key)
+
+    decoded = jwt.decode(
+        identity_token,
+        public_key,
+        algorithms=["RS256"],
+        audience=APPLE_AUDIENCE,
+        issuer="https://appleid.apple.com",
+    )
+    return decoded
+
 
 @api_view(["POST"])
 def register(request):
@@ -3453,20 +3481,27 @@ def get_all_cycles_with_menus(request):
         status=status.HTTP_200_OK
     )
 
-@api_view(['GET'])
+@api_view(['GET', 'DELETE'])
 def all_users_report(request):
-    data = []
+    if request.method == 'GET':
+        data = []
 
-    for parent in ParentRegisteration.objects.all():
-        data.append({"id": parent.id, "email": parent.email, "type": "parent"})
+        for parent in ParentRegisteration.objects.all():
+            data.append({"id": parent.id, "email": parent.email, "type": "parent"})
 
-    for student in SecondaryStudent.objects.all():
-        data.append({"id": student.id, "email": student.email, "type": "student"})
+        for student in SecondaryStudent.objects.all():
+            data.append({"id": student.id, "email": student.email, "type": "student"})
 
-    for staff in StaffRegisteration.objects.all():
-        data.append({"id": staff.id, "email": staff.email, "type": "staff"})
+        for staff in StaffRegisteration.objects.all():
+            data.append({"id": staff.id, "email": staff.email, "type": "staff"})
 
-    return Response(data)
+        return Response(data)
+
+    elif request.method == 'DELETE':
+        ParentRegisteration.objects.all().delete()
+        SecondaryStudent.objects.all().delete()
+        StaffRegisteration.objects.all().delete()
+        return Response({"message": "All users deleted successfully"})
 
 
 from rest_framework.decorators import api_view
@@ -3497,14 +3532,13 @@ def social_callback_register(request):
     provider = request.data.get("provider")
     email = None
 
+    # ---------------- GOOGLE ---------------- #
     if provider == "google":
         try:
-            # Try to decode token as an ID token (JWT)
             decoded = jwt.decode(token, options={"verify_signature": False})
             email = decoded.get("email")
 
         except jwt.DecodeError:
-            # Not an ID token — try using access token to fetch user info
             try:
                 user_info_response = requests.get(
                     "https://www.googleapis.com/oauth2/v3/userinfo",
@@ -3515,42 +3549,35 @@ def social_callback_register(request):
 
                 user_info = user_info_response.json()
                 email = user_info.get("email")
-
             except Exception as e:
                 return Response({"error": f"Error fetching user info: {str(e)}"}, status=400)
 
-    if provider == "facebook":
-        try:
-            user_info_response = requests.get(
-                "https://graph.facebook.com/me?fields=id,name,email",
-                headers={"Authorization": f"Bearer {token}"}
-            )
-            if user_info_response.status_code != 200:
-                return Response({"error": "Failed to fetch user info from Facebook"}, status=400)
-
-            user_info = user_info_response.json()
-            email = user_info.get("email")
-
-        except Exception as e:
-            return Response({"error": f"Error fetching user info: {str(e)}"}, status=400)
-
-    if provider == "microsoft":
+    # ---------------- MICROSOFT ---------------- #
+    elif provider == "microsoft":
         try:
             resp = requests.get(
                 "https://graph.microsoft.com/v1.0/me?$select=mail,userPrincipalName",
                 headers={"Authorization": f"Bearer {token}"}
             )
-            print("MS Graph response:", resp.status_code, resp.text)
             if resp.status_code != 200:
                 return Response({"error": "Failed to fetch user info from Microsoft"}, status=400)
             user_info = resp.json()
             email = user_info.get("mail") or user_info.get("userPrincipalName")
-
         except Exception as e:
             return Response({"error": f"Error fetching Microsoft user info: {str(e)}"}, status=400)
 
+    # ---------------- APPLE ---------------- #
+    elif provider == "apple":
+        try:
+            decoded = verify_apple_token(token)
+            email = decoded.get("email")
+            if not email:
+                # Apple may hide email -> use sub as relay identifier
+                email = f"{decoded['sub']}@privaterelay.appleid.com"
+        except Exception as e:
+            return Response({"error": f"Apple login failed: {str(e)}"}, status=400)
 
-    # If email couldn't be extracted
+    # ---------------- FALLBACK ---------------- #
     if not email:
         return Response({"error": "Unable to fetch email from token."}, status=400)
 
@@ -3569,9 +3596,7 @@ def social_callback_register(request):
 
     # If not registered, proceed with social signup flow
     existing_unverified = UnverifiedUser.objects.filter(email=email).first()
-
     if existing_unverified:
-       
         existing_unverified.token = uuid.uuid4()
         existing_unverified.login_method = provider
         existing_unverified.save()
@@ -3582,7 +3607,6 @@ def social_callback_register(request):
             data={},
             login_method=provider,
         )
-
 
     return Response({
         "message": "OAuth login successful. Additional info required.",
@@ -3596,11 +3620,10 @@ def complete_social_signup(request):
     token = request.data.get("token")
     role = request.data.get("role")  
     data = request.data.get("data")
-    print("🟡 Received Token:", token)
-    print("🟡 Received Role:", role)
-    print("🟡 Data Keys:", list(data.keys()))
+
+    # include "apple" instead of facebook
     unverified = UnverifiedUser.objects.filter(
-        token=token, login_method__in=["google", "facebook", "microsoft"]
+        token=token, login_method__in=["google", "microsoft", "apple"]
     ).first()
 
     if not unverified:
@@ -3612,7 +3635,7 @@ def complete_social_signup(request):
         Allergens.objects.filter(allergy__in=allergy_names).values_list("id", flat=True)
     )
 
-    # Clean up
+    # Clean up unnecessary fields
     data.pop("user_type", None)
     data.pop("schoolName", None)
     data.pop("password", None)
