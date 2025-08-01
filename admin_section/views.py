@@ -21,6 +21,7 @@ from io import BytesIO
 from openpyxl import Workbook
 from datetime import date
 import datetime
+from django.db import transaction
 import json
 from django_rest_passwordreset.signals import reset_password_token_created
 from django.views.decorators.csrf import csrf_exempt
@@ -3528,60 +3529,68 @@ def generate_login_response(user, user_type):
 
 @api_view(["POST"])
 def social_callback_register(request):
-    token = request.data.get("access_token")  # could be ID token or access token
+    token = request.data.get("access_token")
     provider = request.data.get("provider")
     email = None
+    first_name = ""
+    last_name = ""
 
-    # ---------------- GOOGLE ---------------- #
+    # ----------------- GOOGLE AUTHENTICATION ----------------- #
     if provider == "google":
         try:
+            # Try to decode ID token first
             decoded = jwt.decode(token, options={"verify_signature": False})
             email = decoded.get("email")
-
-        except jwt.DecodeError:
-            try:
-                user_info_response = requests.get(
+            first_name = decoded.get("given_name", "")
+            last_name = decoded.get("family_name", "")
+            
+            # Fallback to userinfo endpoint if names not in ID token
+            if not first_name or not last_name:
+                user_info = requests.get(
                     "https://www.googleapis.com/oauth2/v3/userinfo",
                     headers={"Authorization": f"Bearer {token}"}
-                )
-                if user_info_response.status_code != 200:
-                    return Response({"error": "Failed to fetch user info from Google"}, status=400)
+                ).json()
+                first_name = user_info.get("given_name", first_name)
+                last_name = user_info.get("family_name", last_name)
+                
+        except Exception as e:
+            return Response({"error": f"Google authentication failed: {str(e)}"}, status=400)
 
-                user_info = user_info_response.json()
-                email = user_info.get("email")
-            except Exception as e:
-                return Response({"error": f"Error fetching user info: {str(e)}"}, status=400)
-
-    # ---------------- MICROSOFT ---------------- #
+    # ----------------- MICROSOFT AUTHENTICATION ----------------- #
     elif provider == "microsoft":
         try:
             resp = requests.get(
-                "https://graph.microsoft.com/v1.0/me?$select=mail,userPrincipalName",
+                "https://graph.microsoft.com/v1.0/me?" + 
+                "$select=mail,userPrincipalName,givenName,surname",
                 headers={"Authorization": f"Bearer {token}"}
             )
             if resp.status_code != 200:
-                return Response({"error": "Failed to fetch user info from Microsoft"}, status=400)
+                return Response({"error": "Microsoft authentication failed"}, status=400)
+                
             user_info = resp.json()
             email = user_info.get("mail") or user_info.get("userPrincipalName")
+            first_name = user_info.get("givenName", "")
+            last_name = user_info.get("surname", "")
         except Exception as e:
-            return Response({"error": f"Error fetching Microsoft user info: {str(e)}"}, status=400)
+            return Response({"error": f"Microsoft authentication failed: {str(e)}"}, status=400)
 
-    # ---------------- APPLE ---------------- #
+    # ----------------- APPLE AUTHENTICATION ----------------- #
     elif provider == "apple":
         try:
             decoded = verify_apple_token(token)
             email = decoded.get("email")
             if not email:
-                # Apple may hide email -> use sub as relay identifier
                 email = f"{decoded['sub']}@privaterelay.appleid.com"
+            first_name = decoded.get("first_name", "")
+            last_name = decoded.get("last_name", "")
         except Exception as e:
-            return Response({"error": f"Apple login failed: {str(e)}"}, status=400)
+            return Response({"error": f"Apple authentication failed: {str(e)}"}, status=400)
 
-    # ---------------- FALLBACK ---------------- #
+    # ----------------- COMMON VALIDATION ----------------- #
     if not email:
-        return Response({"error": "Unable to fetch email from token."}, status=400)
+        return Response({"error": "Could not retrieve email from provider"}, status=400)
 
-    # If already registered, login and return JWTs
+    # Check if user already exists
     parent = ParentRegisteration.objects.filter(email=email).first()
     if parent:
         return generate_login_response(parent, "parent")
@@ -3594,40 +3603,53 @@ def social_callback_register(request):
     if student:
         return generate_login_response(student, "student")
 
-    # If not registered, proceed with social signup flow
-    existing_unverified = UnverifiedUser.objects.filter(email=email).first()
-    if existing_unverified:
-        existing_unverified.token = uuid.uuid4()
-        existing_unverified.login_method = provider
-        existing_unverified.save()
-        unverified = existing_unverified
-    else:
-        unverified = UnverifiedUser.objects.create(
-            email=email,
-            data={},
-            login_method=provider,
-        )
+    # Create or update unverified user
+    user_data = {
+        "first_name": first_name or "User",  # Fallback if empty
+        "last_name": last_name or "Unknown",
+        "provider": provider
+    }
+
+    unverified, created = UnverifiedUser.objects.update_or_create(
+        email=email,
+        defaults={
+            "token": uuid.uuid4(),
+            "login_method": provider,
+            "data": user_data
+        }
+    )
 
     return Response({
-        "message": "OAuth login successful. Additional info required.",
+        "message": "Additional information required to complete registration",
         "token": str(unverified.token),
         "provider": provider,
+        "email": email,
+        "first_name": first_name,
+        "last_name": last_name
     }, status=200)
 
 
 @api_view(["POST"])
 def complete_social_signup(request):
     token = request.data.get("token")
-    role = request.data.get("role")  
+    role = request.data.get("role")  # Expects 'parent', 'student', or 'staff'
     data = request.data.get("data")
 
-    # include "apple" instead of facebook
+    if not token or not role or not data:
+        return Response({"error": "Missing token, role, or data."}, status=400)
+
+    # Acceptable login methods
     unverified = UnverifiedUser.objects.filter(
         token=token, login_method__in=["google", "microsoft", "apple"]
     ).first()
 
     if not unverified:
         return Response({"error": "Invalid or expired token"}, status=400)
+
+    # Extract names from unverified data
+    first_name = unverified.data.get("first_name", "User")
+    last_name = unverified.data.get("last_name", "Unknown")
+    email = unverified.email
 
     # Convert allergy names to IDs
     allergy_names = data.pop("allergies", [])
@@ -3645,10 +3667,10 @@ def complete_social_signup(request):
 
     if role == "parent":
         created_user = ParentRegisteration.objects.create(
-            first_name=data.get("first_name", ""),
-            last_name=data.get("last_name", ""),
+            first_name=first_name,
+            last_name=last_name,
             username=data.get("username", ""),
-            email=unverified.email,
+            email=email,
             phone_no=data.get("phone_no"),
             password="social_dummy_password"
         )
@@ -3657,12 +3679,12 @@ def complete_social_signup(request):
         school_id = data.get("school_id")
         school = SecondarySchool.objects.filter(id=school_id).first()
         created_user = SecondaryStudent.objects.create(
-            first_name=data.get("first_name", ""),
-            last_name=data.get("last_name", ""),
+            first_name=first_name,
+            last_name=last_name,
             username=data.get("username", ""),
-            email=unverified.email,
+            email=email,
             phone_no=data.get("phone_no"),
-            class_year=data.get("student_class", ""),
+            class_year=data.get("class_year", ""),
             school=school,
             password="social_dummy_password"
         )
@@ -3680,10 +3702,10 @@ def complete_social_signup(request):
             secondary_school = SecondarySchool.objects.filter(id=school_id).first()
 
         created_user = StaffRegisteration.objects.create(
-            first_name=data.get("first_name", ""),
-            last_name=data.get("last_name", ""),
+            first_name=first_name,
+            last_name=last_name,
             username=data.get("username", ""),
-            email=unverified.email,
+            email=email,
             phone_no=data.get("phone_no"),
             password="social_dummy_password",
             primary_school=primary_school,
@@ -3694,18 +3716,18 @@ def complete_social_signup(request):
     if created_user and allergy_ids:
         created_user.allergies.set(allergy_ids)
 
-    # Remove the unverified entry
+    # Delete unverified user now that account is created
     unverified.delete()
 
-    # JWT tokens (same as login)
+    # Generate JWT tokens
     refresh = RefreshToken.for_user(created_user)
     access_token = str(refresh.access_token)
     refresh_token = str(refresh)
 
     return Response({
-        'access': access_token,
-        'refresh': refresh_token,
-        'user_type': role,
-        'user_id': created_user.id,
-        'message': 'Signup and login successful'
+        "access": access_token,
+        "refresh": refresh_token,
+        "user_type": role,  # Directly use role as user_type
+        "user_id": created_user.id,
+        "message": "Signup and login successful"
     }, status=status.HTTP_200_OK)
