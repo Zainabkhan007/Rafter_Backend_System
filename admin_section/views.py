@@ -3629,393 +3629,105 @@ def social_callback_register(request):
     }, status=200)
 
 
-
-
 @api_view(["POST"])
-@transaction.atomic
 def complete_social_signup(request):
-    print("\n=== STARTING COMPLETE SOCIAL SIGNUP ===")
-    print("Incoming request data:", request.data)
-
     token = request.data.get("token")
-    provider = request.data.get("provider")
-    request_data = request.data.get("data", {})
+    role = request.data.get("role")  # Expects 'parent', 'student', or 'staff'
+    data = request.data.get("data")
 
-    # Get user_type from nested data (not root)
-    role = request_data.get("user_type", "").lower()
+    if not token or not role or not data:
+        return Response({"error": "Missing token, role, or data."}, status=400)
 
-    # Validate top-level fields
-    missing_fields = []
-    if not token:
-        missing_fields.append("token")
-    if not provider:
-        missing_fields.append("provider")
-    if not role:
-        missing_fields.append("user_type")
-    if not request_data:
-        missing_fields.append("data")
+    # Acceptable login methods
+    unverified = UnverifiedUser.objects.filter(
+        token=token, login_method__in=["google", "microsoft", "apple"]
+    ).first()
 
-    if missing_fields:
-        error_msg = f"Missing required fields: {', '.join(missing_fields)}"
-        print("VALIDATION ERROR:", error_msg)
-        return Response({"error": error_msg}, status=400)
+    if not unverified:
+        return Response({"error": "Invalid or expired token"}, status=400)
 
-    # Validate provider
-    valid_providers = ['google', 'microsoft', 'apple']
-    if provider.lower() not in valid_providers:
-        return Response(
-            {"error": f"Invalid provider. Must be one of: {', '.join(valid_providers)}"},
-            status=400
-        )
-
-    # Validate role
-    valid_roles = ['parent', 'student', 'staff']
-    if role not in valid_roles:
-        return Response(
-            {"error": f"Invalid user type. Must be one of: {', '.join(valid_roles)}"},
-            status=400
-        )
-
-    try:
-        unverified = UnverifiedUser.objects.get(token=token)
-        print("Found unverified user:", unverified.email)
-    except UnverifiedUser.DoesNotExist:
-        return Response({"error": "Invalid or expired registration token"}, status=400)
-
-    # Extract social info
-    user_data = unverified.data or {}
-    first_name = user_data.get("first_name", "User")
-    last_name = user_data.get("last_name", "Unknown")
+    # Extract names from unverified data
+    first_name = unverified.data.get("first_name", "User")
+    last_name = unverified.data.get("last_name", "Unknown")
     email = unverified.email
 
-    try:
-        if role == "parent":
-            if "phone_no" not in request_data:
-                return Response({"error": "Phone number is required for parent registration"}, status=400)
+    # Convert allergy names to IDs
+    allergy_names = data.pop("allergies", [])
+    allergy_ids = list(
+        Allergens.objects.filter(allergy__in=allergy_names).values_list("id", flat=True)
+    )
 
-            parent = ParentRegisteration.objects.create(
-                email=email,
-                first_name=first_name,
-                last_name=last_name,
-                phone_no=request_data.get("phone_no"),
-                # Add any additional parent-specific fields here
-            )
-            unverified.delete()
-            return generate_login_response(parent, "parent")
+    # Clean up unnecessary fields
+    data.pop("user_type", None)
+    data.pop("schoolName", None)
+    data.pop("password", None)
+    data.pop("retypePassword", None)
 
-        elif role == "student":
-            required_fields = ['phone_no', 'class', 'school_id', 'school_type']
-            missing = [f for f in required_fields if f not in request_data]
-            if missing:
-                return Response({"error": f"Missing required fields for student: {', '.join(missing)}"}, status=400)
+    created_user = None
 
-            student = SecondaryStudent.objects.create(
-                email=email,
-                first_name=first_name,
-                last_name=last_name,
-                phone_no=request_data.get("phone_no"),
-                class_year=request_data.get("class"),
-                school_id=request_data.get("school_id"),
-                school_type=request_data.get("school_type"),
-                allergies=request_data.get("allergies", []),
-            )
-            unverified.delete()
-            return generate_login_response(student, "student")
-
-        elif role == "staff":
-            required_fields = ['phone_no', 'school_id', 'school_type']
-            missing = [f for f in required_fields if f not in request_data]
-            if missing:
-                return Response({"error": f"Missing required fields for staff: {', '.join(missing)}"}, status=400)
-
-            staff = StaffRegisteration.objects.create(
-                email=email,
-                first_name=first_name,
-                last_name=last_name,
-                phone_no=request_data.get("phone_no"),
-                school_id=request_data.get("school_id"),
-                school_type=request_data.get("school_type"),
-                allergies=request_data.get("allergies", []),
-            )
-            unverified.delete()
-            return generate_login_response(staff, "staff")
-
-    except Exception as e:
-        logger.error(f"Registration failed for {email}: {str(e)}", exc_info=True)
-        return Response(
-            {"error": "Registration failed. Please try again."},
-            status=400
+    if role == "parent":
+        created_user = ParentRegisteration.objects.create(
+            first_name=first_name,
+            last_name=last_name,
+            username=data.get("username", ""),
+            email=email,
+            phone_no=data.get("phone_no"),
+            password="social_dummy_password"
         )
 
-    print("\n=== STARTING COMPLETE SOCIAL SIGNUP ===")
-    print("Incoming request data:", request.data)
-    
-    # Validate required fields
-    required_fields = ['token', 'provider', 'user_type', 'data']
-    missing_fields = [field for field in required_fields if field not in request.data]
-    
-    if missing_fields:
-        error_msg = f"Missing required fields: {', '.join(missing_fields)}"
-        print("VALIDATION ERROR:", error_msg)
-        return Response({"error": error_msg}, status=400)
-
-    token = request.data.get("token")
-    provider = request.data.get("provider")
-    role = request.data.get("user_type").lower()
-    request_data = request.data.get("data", {})
-    
-    print(f"Token: {token}")
-    print(f"Provider: {provider}")
-    print(f"Role: {role}")
-    print("Request data:", request_data)
-
-    # Validate provider
-    valid_providers = ['google', 'microsoft', 'apple']
-    if provider.lower() not in valid_providers:
-        error_msg = f"Invalid provider. Must be one of: {', '.join(valid_providers)}"
-        print("PROVIDER VALIDATION ERROR:", error_msg)
-        return Response({"error": error_msg}, status=400)
-
-    # Validate role
-    valid_roles = ['parent', 'student', 'staff']
-    if role not in valid_roles:
-        error_msg = f"Invalid user type. Must be one of: {', '.join(valid_roles)}"
-        print("ROLE VALIDATION ERROR:", error_msg)
-        return Response({"error": error_msg}, status=400)
-
-    try:
-        print("Looking for unverified user with token:", token)
-        unverified = UnverifiedUser.objects.get(token=token)
-        print("Found unverified user:", unverified.email)
-    except UnverifiedUser.DoesNotExist:
-        error_msg = "Invalid or expired registration token"
-        print("TOKEN ERROR:", error_msg)
-        return Response({"error": error_msg}, status=400)
-
-    # Get user data from initial social auth
-    user_data = unverified.data
-    first_name = user_data.get("first_name", "User")
-    last_name = user_data.get("last_name", "Unknown")
-    email = unverified.email
-    
-    print("User details from social auth:")
-    print(f"Email: {email}")
-    print(f"First Name: {first_name}")
-    print(f"Last Name: {last_name}")
-
-    try:
-        if role == "parent":
-            print("Processing PARENT registration")
-            if 'phone_no' not in request_data:
-                error_msg = "Phone number is required for parent registration"
-                print("VALIDATION ERROR:", error_msg)
-                return Response({"error": error_msg}, status=400)
-
-            print("Creating parent with data:", {
-                'email': email,
-                'first_name': first_name,
-                'last_name': last_name,
-                'phone_no': request_data.get("phone_no")
-            })
-            
-            parent = ParentRegisteration.objects.create(
-                email=email,
-                first_name=first_name,
-                last_name=last_name,
-                phone_no=request_data.get("phone_no"),
-            )
-            unverified.delete()
-            print("Successfully created parent:", parent.id)
-            return generate_login_response(parent, "parent")
-
-        elif role == "student":
-            print("Processing STUDENT registration")
-            required_student_fields = ['phone_no', 'class', 'school_id', 'school_type']
-            missing_student_fields = [field for field in required_student_fields if field not in request_data]
-            
-            if missing_student_fields:
-                error_msg = f"Missing required fields for student: {', '.join(missing_student_fields)}"
-                print("VALIDATION ERROR:", error_msg)
-                return Response({"error": error_msg}, status=400)
-
-            print("Creating student with data:", {
-                'email': email,
-                'first_name': first_name,
-                'last_name': last_name,
-                'phone_no': request_data.get("phone_no"),
-                'class_year': request_data.get("class"),
-                'school_id': request_data.get("school_id"),
-                'school_type': request_data.get("school_type"),
-                'allergies': request_data.get("allergies", [])
-            })
-            
-            student = SecondaryStudent.objects.create(
-                email=email,
-                first_name=first_name,
-                last_name=last_name,
-                phone_no=request_data.get("phone_no"),
-                class_year=request_data.get("class"),
-                school_id=request_data.get("school_id"),
-                school_type=request_data.get("school_type"),
-                allergies=request_data.get("allergies", []),
-            )
-            unverified.delete()
-            print("Successfully created student:", student.id)
-            return generate_login_response(student, "student")
-
-        elif role == "staff":
-            print("Processing STAFF registration")
-            required_staff_fields = ['phone_no', 'school_id', 'school_type']
-            missing_staff_fields = [field for field in required_staff_fields if field not in request_data]
-            
-            if missing_staff_fields:
-                error_msg = f"Missing required fields for staff: {', '.join(missing_staff_fields)}"
-                print("VALIDATION ERROR:", error_msg)
-                return Response({"error": error_msg}, status=400)
-
-            print("Creating staff with data:", {
-                'email': email,
-                'first_name': first_name,
-                'last_name': last_name,
-                'phone_no': request_data.get("phone_no"),
-                'school_id': request_data.get("school_id"),
-                'school_type': request_data.get("school_type"),
-                'allergies': request_data.get("allergies", [])
-            })
-            
-            staff = StaffRegisteration.objects.create(
-                email=email,
-                first_name=first_name,
-                last_name=last_name,
-                phone_no=request_data.get("phone_no"),
-                school_id=request_data.get("school_id"),
-                school_type=request_data.get("school_type"),
-                allergies=request_data.get("allergies", []),
-            )
-            unverified.delete()
-            print("Successfully created staff:", staff.id)
-            return generate_login_response(staff, "staff")
-
-    except Exception as e:
-        error_msg = f"Registration failed: {str(e)}"
-        print("REGISTRATION ERROR:", error_msg)
-        print("Exception details:", str(e))
-        return Response({"error": "Registration failed. Please try again."}, status=400)
-    # Validate required fields
-    required_fields = ['token', 'provider', 'user_type', 'data']
-    missing_fields = [field for field in required_fields if field not in request.data]
-    
-    if missing_fields:
-        logger.error(f"Missing required fields: {missing_fields}")
-        return Response(
-            {"error": f"Missing required fields: {', '.join(missing_fields)}"}, 
-            status=400
+    elif role == "student":
+        school_id = data.get("school_id")
+        school = SecondarySchool.objects.filter(id=school_id).first()
+        created_user = SecondaryStudent.objects.create(
+            first_name=first_name,
+            last_name=last_name,
+            username=data.get("username", ""),
+            email=email,
+            phone_no=data.get("phone_no"),
+            class_year=data.get("class_year", ""),
+            school=school,
+            password="social_dummy_password"
         )
 
-    token = request.data.get("token")
-    provider = request.data.get("provider")
-    role = request.data.get("user_type").lower()  # Normalize to lowercase
-    request_data = request.data.get("data", {})
+    elif role == "staff":
+        school_type = data.get("school_type", "").lower()
+        school_id = data.get("school_id")
 
-    # Validate provider
-    valid_providers = ['google', 'microsoft', 'apple']
-    if provider.lower() not in valid_providers:
-        logger.error(f"Invalid provider: {provider}")
-        return Response(
-            {"error": f"Invalid provider. Must be one of: {', '.join(valid_providers)}"}, 
-            status=400
+        primary_school = None
+        secondary_school = None
+
+        if school_type == "primary":
+            primary_school = PrimarySchool.objects.filter(id=school_id).first()
+        elif school_type == "secondary":
+            secondary_school = SecondarySchool.objects.filter(id=school_id).first()
+
+        created_user = StaffRegisteration.objects.create(
+            first_name=first_name,
+            last_name=last_name,
+            username=data.get("username", ""),
+            email=email,
+            phone_no=data.get("phone_no"),
+            password="social_dummy_password",
+            primary_school=primary_school,
+            secondary_school=secondary_school,
         )
 
-    # Validate role
-    valid_roles = ['parent', 'student', 'staff']
-    if role not in valid_roles:
-        logger.error(f"Invalid user type: {role}")
-        return Response(
-            {"error": f"Invalid user type. Must be one of: {', '.join(valid_roles)}"}, 
-            status=400
-        )
+    # Set allergies if applicable
+    if created_user and allergy_ids:
+        created_user.allergies.set(allergy_ids)
 
-    try:
-        unverified = UnverifiedUser.objects.get(token=token)
-    except UnverifiedUser.DoesNotExist:
-        logger.error(f"Invalid token: {token}")
-        return Response({"error": "Invalid or expired registration token"}, status=400)
+    # Delete unverified user now that account is created
+    unverified.delete()
 
-    # Get user data from initial social auth
-    user_data = unverified.data
-    first_name = user_data.get("first_name", "User")
-    last_name = user_data.get("last_name", "Unknown")
-    email = unverified.email
+    # Generate JWT tokens
+    refresh = RefreshToken.for_user(created_user)
+    access_token = str(refresh.access_token)
+    refresh_token = str(refresh)
 
-    try:
-        if role == "parent":
-            # Validate required parent fields
-            if 'phone_no' not in request_data:
-                return Response({"error": "Phone number is required for parent registration"}, status=400)
-
-            parent = ParentRegisteration.objects.create(
-                email=email,
-                first_name=first_name,
-                last_name=last_name,
-                phone_no=request_data.get("phone_no"),
-                # Add any other parent-specific fields
-            )
-            unverified.delete()
-            logger.info(f"Successfully registered parent: {email}")
-            return generate_login_response(parent, "parent")
-
-        elif role == "student":
-            # Validate required student fields
-            required_student_fields = ['phone_no', 'class', 'school_id', 'school_type']
-            missing_student_fields = [field for field in required_student_fields if field not in request_data]
-            
-            if missing_student_fields:
-                return Response(
-                    {"error": f"Missing required fields for student: {', '.join(missing_student_fields)}"}, 
-                    status=400
-                )
-
-            student = SecondaryStudent.objects.create(
-                email=email,
-                first_name=first_name,
-                last_name=last_name,
-                phone_no=request_data.get("phone_no"),
-                class_year=request_data.get("class"),
-                school_id=request_data.get("school_id"),
-                school_type=request_data.get("school_type"),
-                allergies=request_data.get("allergies", []),
-            )
-            unverified.delete()
-            logger.info(f"Successfully registered student: {email}")
-            return generate_login_response(student, "student")
-
-        elif role == "staff":
-            # Validate required staff fields
-            required_staff_fields = ['phone_no', 'school_id', 'school_type']
-            missing_staff_fields = [field for field in required_staff_fields if field not in request_data]
-            
-            if missing_staff_fields:
-                return Response(
-                    {"error": f"Missing required fields for staff: {', '.join(missing_staff_fields)}"}, 
-                    status=400
-                )
-
-            staff = StaffRegisteration.objects.create(
-                email=email,
-                first_name=first_name,
-                last_name=last_name,
-                phone_no=request_data.get("phone_no"),
-                school_id=request_data.get("school_id"),
-                school_type=request_data.get("school_type"),
-                allergies=request_data.get("allergies", []),
-            )
-            unverified.delete()
-            logger.info(f"Successfully registered staff: {email}")
-            return generate_login_response(staff, "staff")
-
-    except Exception as e:
-        logger.error(f"Registration failed for {email}: {str(e)}", exc_info=True)
-        return Response(
-            {"error": "Registration failed. Please try again."}, 
-            status=400
-        )
+    return Response({
+        "access": access_token,
+        "refresh": refresh_token,
+        "user_type": role,  # Directly use role as user_type
+        "user_id": created_user.id,
+        "message": "Signup and login successful"
+    }, status=status.HTTP_200_OK)
