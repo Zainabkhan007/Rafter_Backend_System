@@ -3632,7 +3632,7 @@ def social_callback_register(request):
 @api_view(["POST"])
 def complete_social_signup(request):
     token = request.data.get("token")
-    role = request.data.get("role")  # Expects 'parent', 'student', or 'staff'
+    role = request.data.get("role")  
     data = request.data.get("data")
 
     if not token or not role or not data:
@@ -3650,6 +3650,11 @@ def complete_social_signup(request):
     first_name = unverified.data.get("first_name", "User")
     last_name = unverified.data.get("last_name", "Unknown")
     email = unverified.email
+    phone_no = data.get("phone_no")
+    if phone_no:
+        # Remove all spaces
+        phone_no = phone_no.replace(" ", "").strip()
+
 
     # Convert allergy names to IDs
     allergy_names = data.pop("allergies", [])
@@ -3671,7 +3676,7 @@ def complete_social_signup(request):
             last_name=last_name,
             username=data.get("username", ""),
             email=email,
-            phone_no=data.get("phone_no"),
+            phone_no=phone_no,   
             password="social_dummy_password"
         )
 
@@ -3683,7 +3688,7 @@ def complete_social_signup(request):
             last_name=last_name,
             username=data.get("username", ""),
             email=email,
-            phone_no=data.get("phone_no"),
+            phone_no=phone_no,
             class_year=data.get("class_year", ""),
             school=school,
             password="social_dummy_password"
@@ -3706,7 +3711,7 @@ def complete_social_signup(request):
             last_name=last_name,
             username=data.get("username", ""),
             email=email,
-            phone_no=data.get("phone_no"),
+            phone_no=phone_no,
             password="social_dummy_password",
             primary_school=primary_school,
             secondary_school=secondary_school,
