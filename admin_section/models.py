@@ -31,7 +31,7 @@ class ParentRegisteration(models.Model):
     last_name=models.CharField(max_length=30)
     username=models.CharField(max_length=30)
     email=models.EmailField(max_length=254,unique=True)
-    phone_no = models.IntegerField( blank=True, null=True)
+    phone_no = models.BigIntegerField( blank=True, null=True)
     password=models.CharField(max_length=128)
     allergies=models.ManyToManyField(Allergens, blank=True,null=True) 
     credits = models.FloatField(default=0.0)
@@ -51,7 +51,7 @@ class StaffRegisteration(models.Model):
     last_name=models.CharField(max_length=30)
     username=models.CharField(max_length=30)
     email=models.EmailField(max_length=254,unique=True)
-    phone_no = models.IntegerField( blank=True, null=True)
+    phone_no = models.BigIntegerField( blank=True, null=True)
     allergies=models.ManyToManyField(Allergens,null=True, blank=True)  
     password=models.CharField(max_length=128)
     primary_school=models.ForeignKey(PrimarySchool, on_delete=models.CASCADE, null=True, blank=True)
@@ -100,7 +100,7 @@ class SecondaryStudent(models.Model):
     last_name=models.CharField(max_length=30,default="")
     username=models.CharField(max_length=30,default="")
     email=models.EmailField(max_length=254,default="")
-    phone_no = models.IntegerField( blank=True, null=True)
+    phone_no = models.BigIntegerField( blank=True, null=True)
     password=models.CharField(max_length=128,default="")
     class_year = models.CharField(max_length=30,default="")
     allergies=models.ManyToManyField(Allergens,null=True, blank=True)  
@@ -145,20 +145,20 @@ class Categories(models.Model):
         return f"{self.id} - {self.name_category}"
     
 class Menu(models.Model):
- 
     price = models.DecimalField(max_digits=5, decimal_places=2)
-    name = models.CharField(max_length=255,null=False)
-    menu_day = models.CharField(max_length=100, null=True, blank=True) 
-    menu_date = models.DateField(default=datetime.today)  
+    name = models.CharField(max_length=255, null=False)
+    menu_day = models.CharField(max_length=100, null=True, blank=True)
+    menu_date = models.DateField(default=datetime.today)
     cycle_name = models.CharField(max_length=100)
-    is_active=models.BooleanField(default=False)
-
-    primary_school = models.ForeignKey(PrimarySchool, null=True, blank=True, on_delete=models.CASCADE, related_name="menus")
-    secondary_school = models.ForeignKey(SecondarySchool, null=True, blank=True, on_delete=models.CASCADE, related_name="menus")
+    is_active = models.BooleanField(default=False)
     category = models.ForeignKey(Categories, null=False, blank=False, on_delete=models.CASCADE, related_name="menus")
 
+    primary_schools = models.ManyToManyField(PrimarySchool, blank=True, related_name="menus")
+    secondary_schools = models.ManyToManyField(SecondarySchool, blank=True, related_name="menus")
+
     def __str__(self):
-        return f"{self.id} Menu:   {self.menu_day} {self.name} - {self.cycle_name}"
+        return f"{self.id} Menu: {self.menu_day} {self.name} - {self.cycle_name}"
+
     
 
 
@@ -178,18 +178,18 @@ class MenuItems(models.Model):
 class OrderItem(models.Model):
     menu  = models.ForeignKey('Menu', on_delete=models.CASCADE,related_name='menuitem')  
     order = models.ForeignKey('Order', on_delete=models.CASCADE,related_name='orderitem')  
-    quantity = models.IntegerField() 
+    quantity = models.BigIntegerField() 
 
     def __str__(self):
         return f'OrderItem {self.id}: {self.quantity}x {self.menu }'
 class Order(models.Model):
-    user_id = models.IntegerField(null=True, blank=True)  
+    user_id = models.BigIntegerField(null=True, blank=True)  
    
     user_type = models.CharField(max_length=50)  
-    child_id = models.IntegerField(null=True, blank=True) 
+    child_id = models.BigIntegerField(null=True, blank=True) 
     total_price = models.FloatField()
-    week_number = models.IntegerField(null=True) 
-    year = models.IntegerField(null=True) 
+    week_number = models.BigIntegerField(null=True) 
+    year = models.BigIntegerField(null=True) 
     order_date = models.DateTimeField(default=datetime.utcnow) 
     selected_day = models.CharField(max_length=10) 
     is_delivered = models.BooleanField(default=False)
@@ -255,11 +255,10 @@ class CanteenStaff(models.Model):
         return f'{self.username} - {self.school_type}'
 
 class ContactMessage(models.Model):
-    full_name=models.CharField(max_length=30)
-    email=models.EmailField(max_length=254)
-    phone= models.IntegerField( blank=True, null=True)
-    subject=models.CharField(max_length=30)
-    message=models.CharField(max_length=30)
-    photo_filename=models.CharField(max_length=30)
-    def __str__(self):
-        return f'{self.full_name} - {self.subject}'
+    full_name = models.CharField(max_length=100)
+    email = models.EmailField(max_length=254)
+    phone = models.BigIntegerField(blank=True, null=True)
+    subject = models.CharField(max_length=255)   
+    message = models.TextField()                 
+    photo_filename = models.CharField(max_length=255, blank=True, null=True)  # safer size
+
