@@ -145,20 +145,20 @@ class Categories(models.Model):
         return f"{self.id} - {self.name_category}"
     
 class Menu(models.Model):
- 
     price = models.DecimalField(max_digits=5, decimal_places=2)
-    name = models.CharField(max_length=255,null=False)
-    menu_day = models.CharField(max_length=100, null=True, blank=True) 
-    menu_date = models.DateField(default=datetime.today)  
+    name = models.CharField(max_length=255, null=False)
+    menu_day = models.CharField(max_length=100, null=True, blank=True)
+    menu_date = models.DateField(default=datetime.today)
     cycle_name = models.CharField(max_length=100)
-    is_active=models.BooleanField(default=False)
-
-    primary_school = models.ForeignKey(PrimarySchool, null=True, blank=True, on_delete=models.CASCADE, related_name="menus")
-    secondary_school = models.ForeignKey(SecondarySchool, null=True, blank=True, on_delete=models.CASCADE, related_name="menus")
+    is_active = models.BooleanField(default=False)
     category = models.ForeignKey(Categories, null=False, blank=False, on_delete=models.CASCADE, related_name="menus")
 
+    primary_schools = models.ManyToManyField(PrimarySchool, blank=True, related_name="menus")
+    secondary_schools = models.ManyToManyField(SecondarySchool, blank=True, related_name="menus")
+
     def __str__(self):
-        return f"{self.id} Menu:   {self.menu_day} {self.name} - {self.cycle_name}"
+        return f"{self.id} Menu: {self.menu_day} {self.name} - {self.cycle_name}"
+
     
 
 
