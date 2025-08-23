@@ -1957,6 +1957,7 @@ def complete_order(request):
         return Response({'error': 'Order not found.'}, status=status.HTTP_404_NOT_FOUND)
 
 
+
 @api_view(['POST'])
 def cancel_order(request):
     order_id = request.data.get('order_id')
@@ -3138,6 +3139,8 @@ def get_active_status_menu(request):
         })
 
     return Response({"schools": schools_data})
+
+
 
 @api_view(['POST'])
 def deactivate_menus(request):
