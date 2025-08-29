@@ -167,6 +167,8 @@ The Rafters Team
     )
 
 
+
+
 # Using your custom token generator
 custom_token_generator = CustomPasswordResetTokenGenerator()
 
@@ -2032,12 +2034,10 @@ def add_order_item(request):
             return Response({ "error" : serializer.errors},status = status.HTTP_400_BAD_REQUEST)
 @api_view(['POST'])
 def get_all_orders(request):
- 
     user_type = request.data.get('user_type')
     user_id = request.data.get('user_id')
     child_id = request.data.get('child_id')
 
-    
     if user_type == 'staff' and user_id:
         try:
             staff = StaffRegisteration.objects.get(id=user_id)
@@ -2072,7 +2072,10 @@ def get_all_orders(request):
             for item in order_items
         ]
 
-        formatted_order_date = order.order_date.strftime('%d %b')
+        # Convert UTC datetime to local timezone
+        local_order_date = timezone.localtime(order.order_date)
+        formatted_order_date = local_order_date.strftime('%d %b')
+
         order_data = {
             'order_id': order.id,
             'selected_day': order.selected_day,
@@ -2102,9 +2105,9 @@ def get_all_orders(request):
         'orders': order_details
     }, status=status.HTTP_200_OK)
 
+
 @api_view(['GET'])
 def get_all_orders(request):
-   
     orders = Order.objects.all().order_by('-order_date')
 
     if not orders.exists():
@@ -2113,7 +2116,6 @@ def get_all_orders(request):
     order_details = []
 
     for order in orders:
-      
         order_items = OrderItem.objects.filter(order=order)
         
         items_details = [
@@ -2125,7 +2127,10 @@ def get_all_orders(request):
             for item in order_items
         ]
 
-        formatted_order_date = order.order_date.strftime('%d %b')
+        # ✅ Convert UTC → Local time before formatting
+        local_order_date = timezone.localtime(order.order_date)
+        formatted_order_date = local_order_date.strftime('%d %b')
+
         order_data = {
             'order_id': order.id,
             'selected_day': order.selected_day,
@@ -2136,33 +2141,27 @@ def get_all_orders(request):
             'year': order.year,
             'items': items_details,  
             'user_name': order.user_name,
-            'payment_id':order.payment_id,
+            'payment_id': order.payment_id,
         }
 
-     
         if order.user_type in ['parent', 'staff']:
             order_data['child_id'] = order.child_id
 
-    
         if order.primary_school:
             order_data['school_id'] = order.primary_school.id
-            order_data['school_name']=order.primary_school.school_name
+            order_data['school_name'] = order.primary_school.school_name
             order_data['school_type'] = 'primary'
         elif order.secondary_school:
             order_data['school_id'] = order.secondary_school.id
-            order_data['school_name']=order.secondary_school.secondary_school_name
+            order_data['school_name'] = order.secondary_school.secondary_school_name
             order_data['school_type'] = 'secondary'
 
-        
         order_details.append(order_data)
-
 
     return Response({
         'message': 'Orders retrieved successfully!',
         'orders': order_details
     }, status=status.HTTP_200_OK)
-
-
 
 @api_view(['GET'])
 def get_order_by_id(request, order_id):
@@ -2482,7 +2481,12 @@ def get_current_week_and_year():
     return current_week, current_year
 
 
-
+def get_or_create_customer(email, name):
+    """Find or create a Stripe customer"""
+    customers = stripe.Customer.list(email=email).data
+    if customers:
+        return customers[0]  # return existing
+    return stripe.Customer.create(email=email, name=name)
 
 class CreateOrderAndPaymentAPIView(APIView):
     def post(self, request, *args, **kwargs):
@@ -2495,7 +2499,7 @@ class CreateOrderAndPaymentAPIView(APIView):
             school_id = data.get('school_id', None)
             school_type = data.get('school_type', None)
             child_id = data.get('child_id', None)
-            payment_id = data.get("payment_id", None)
+            payment_id = data.get("payment_id", None)  # Stripe pm_xxx
             front_end_total_price = float(data.get("total_price", 0))
 
             if not user_type or not user_id or not selected_days:
@@ -2508,13 +2512,15 @@ class CreateOrderAndPaymentAPIView(APIView):
                 if 'item_name' not in item or 'quantity' not in item:
                     return Response({'error': 'Each order item must have item_name and quantity.'}, status=status.HTTP_400_BAD_REQUEST)
 
-            user = None
+            # ✅ Get user instance
             if user_type == 'student':
                 user = SecondaryStudent.objects.filter(id=user_id).first()
             elif user_type == 'parent':
                 user = ParentRegisteration.objects.filter(id=user_id).first()
             elif user_type == 'staff':
                 user = StaffRegisteration.objects.filter(id=user_id).first()
+            else:
+                user = None
 
             if not user:
                 return Response({'error': f'{user_type.capitalize()} not found.'}, status=status.HTTP_404_NOT_FOUND)
@@ -2529,9 +2535,9 @@ class CreateOrderAndPaymentAPIView(APIView):
                 if idx < len(order_items_data):
                     days_dict[day].append(order_items_data[idx])
 
+            # ✅ Create orders for each selected day
             for day, items_for_day in days_dict.items():
                 menus_for_day = Menu.objects.filter(menu_day__iexact=day)
-
                 if not menus_for_day:
                     return Response({'error': f'No menus available for {day}.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -2540,10 +2546,9 @@ class CreateOrderAndPaymentAPIView(APIView):
 
                 today = datetime.today()
                 target_day = day.capitalize()
-
                 target_day_num = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].index(target_day)
                 days_ahead = target_day_num - today.weekday()
-                if days_ahead <= 0: 
+                if days_ahead <= 0:
                     days_ahead += 7
 
                 order_date = today + timedelta(days=days_ahead)
@@ -2576,9 +2581,9 @@ class CreateOrderAndPaymentAPIView(APIView):
 
                 order_instance = order_serializer.save()
 
+                # ✅ Attach order items
                 for item in items_for_day:
                     menu_item = menus_for_day.filter(name__iexact=item['item_name']).first()
-
                     if not menu_item:
                         return Response({'error': f'Menu item with name {item["item_name"]} not found for {day}.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -2592,7 +2597,7 @@ class CreateOrderAndPaymentAPIView(APIView):
                     order_total_price += item_price * item['quantity']
 
                 order_instance.total_price = order_total_price
-                order_instance.payment_id = payment_id  
+                order_instance.payment_id = payment_id
                 order_instance.save()
 
                 order_details = {
@@ -2612,9 +2617,9 @@ class CreateOrderAndPaymentAPIView(APIView):
                     ],
                     'user_name': order_instance.user_name,
                 }
-
                 created_orders.append(order_details)
 
+            # ✅ Free child meal
             if user_type in ['parent', 'staff'] and child_id:
                 for order in created_orders:
                     order['status'] = 'paid'
@@ -2622,31 +2627,59 @@ class CreateOrderAndPaymentAPIView(APIView):
                     'message': 'Orders created successfully with free meal for child.',
                     'orders': created_orders
                 }, status=status.HTTP_201_CREATED)
+
+            # ✅ Pay with credits if no Stripe payment
             if not payment_id:
-                
                 if user.credits < front_end_total_price:
                     return Response({"error": "Insufficient credits to complete the order."}, status=status.HTTP_400_BAD_REQUEST)
 
-                user.credits -= front_end_total_price  
+                user.credits -= front_end_total_price
                 user.save()
 
-              
                 for order in created_orders:
-                    order['status'] = 'paid'  
+                    order['status'] = 'paid'
 
                 return Response({
                     'message': 'Orders created and credits deducted successfully!',
                     'orders': created_orders
                 }, status=status.HTTP_201_CREATED)
 
-           
+            # ✅ Stripe payment flow
             total_price_in_cents = int(front_end_total_price * 100)
+
+            # 1. Get or create customer in Stripe
+            customers = stripe.Customer.list(email=user.email).data
+            if customers:
+                customer = customers[0]
+            else:
+                customer = stripe.Customer.create(
+                    email=user.email,
+                    name=f"{getattr(user, 'first_name', '')} {getattr(user, 'last_name', '')}".strip()
+                )
+
+            # 2. Attach PaymentMethod to Customer
+            stripe.PaymentMethod.attach(
+                payment_id,
+                customer=customer.id
+            )
+
+            # 3. Set default payment method
+            stripe.Customer.modify(
+                customer.id,
+                invoice_settings={
+                    "default_payment_method": payment_id
+                }
+            )
+
+            # 4. Create PaymentIntent
             payment_intent = stripe.PaymentIntent.create(
                 amount=total_price_in_cents,
                 currency="eur",
+                customer=customer.id,
                 payment_method=payment_id,
                 confirmation_method="manual",
                 confirm=True,
+                receipt_email=user.email,
                 return_url=f"{request.scheme}://{request.get_host()}/payment-success/",
             )
 
@@ -2664,23 +2697,21 @@ class CreateOrderAndPaymentAPIView(APIView):
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-
 @api_view(['POST'])
 def top_up_payment(request):
     """
-    API to process payment for top-up credits for a parent, staff, or student.
+    API to process top-up credits for a parent, staff, or student.
     """
     try:
-      
         user_id = request.data.get('user_id')
         amount = request.data.get('amount')
         user_type = request.data.get('user_type')
-        payment_method_id = request.data.get('payment_method_id')  
+        payment_method_id = request.data.get('payment_method_id')
 
         if not all([user_id, amount, user_type, payment_method_id]):
             return Response({"error": "Missing required parameters."}, status=status.HTTP_400_BAD_REQUEST)
 
-     
+        # ✅ Get user
         if user_type == "parent":
             user = ParentRegisteration.objects.filter(id=user_id).first()
         elif user_type == "staff":
@@ -2693,27 +2724,53 @@ def top_up_payment(request):
         if not user:
             return Response({"error": "User not found."}, status=status.HTTP_404_NOT_FOUND)
 
-       
+        # ✅ Amount in cents
         try:
-            amount_in_cents = int(float(amount) * 100)  
+            amount_in_cents = int(float(amount) * 100)
         except ValueError:
             return Response({"error": "Invalid amount."}, status=status.HTTP_400_BAD_REQUEST)
 
-      
-        payment_intent = stripe.PaymentIntent.create(
-            amount=amount_in_cents, 
-            currency="eur",
-            payment_method=payment_method_id,
-            confirmation_method="manual",
-            confirm=True,
-            return_url=f"{request.scheme}://{request.get_host()}/payment-success/", 
+        # ✅ Ensure customer exists
+        if not getattr(user, "stripe_customer_id", None):
+            customer = stripe.Customer.create(
+                name=f"{user.first_name} {user.last_name}",
+                email=user.email,
+            )
+            user.stripe_customer_id = customer.id
+            user.save()
+
+        # ✅ Attach payment method
+        stripe.PaymentMethod.attach(
+            payment_method_id,
+            customer=user.stripe_customer_id,
         )
 
-       
+        # ✅ Update default payment method
+        stripe.Customer.modify(
+            user.stripe_customer_id,
+            invoice_settings={"default_payment_method": payment_method_id}
+        )
+
+        # ✅ Create PaymentIntent (card only, no redirects)
+        payment_intent = stripe.PaymentIntent.create(
+            amount=amount_in_cents,
+            currency="eur",
+            customer=user.stripe_customer_id,
+            payment_method=payment_method_id,
+            payment_method_types=["card"],   # 👈 restrict to card only
+            confirmation_method="manual",
+            confirm=True,
+            receipt_email=user.email,        # 📩 receipt will have name + email
+        )
+
+        # ✅ On success → top up credits
         if payment_intent.status == 'succeeded':
-           
-            user.top_up_credits(float(amount))  
-            return Response({"message": f"{user_type.capitalize()} credits successfully updated."}, status=status.HTTP_200_OK)
+            user.top_up_credits(float(amount))
+            return Response({
+                "message": f"{user_type.capitalize()} credits successfully updated.",
+                "credits": user.credits,
+                "payment_id": payment_intent.id
+            }, status=status.HTTP_200_OK)
         else:
             return Response({"error": "Payment failed."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -2723,7 +2780,6 @@ def top_up_payment(request):
         return Response({"error": f"Stripe error: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     except Exception as e:
         return Response({"error": f"Error processing payment: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 def get_custom_week_and_year():
   
@@ -2753,17 +2809,13 @@ def fetch_orders(school_id, school_type):
     # Determine target week
     if is_past_cutoff:
         target_week = current_week_number + 1
-        # Handle year transition
-        if target_week > 52:
+        if target_week > 52:  # year rollover
             target_week = 1
             current_year += 1
     else:
         target_week = current_week_number
-    filter_kwargs = {
-        'week_number': target_week,
-        'year': current_year
-    }
-    
+
+    filter_kwargs = {'week_number': target_week, 'year': current_year}
     if school_type == 'primary':
         filter_kwargs['primary_school_id'] = school_id
     else:
@@ -2771,34 +2823,29 @@ def fetch_orders(school_id, school_type):
 
     orders = Order.objects.filter(**filter_kwargs).order_by('-order_date')
 
-    student_orders = orders.exclude(user_type="staff") 
-    staff_orders = orders.filter(user_type="staff")  
+    student_orders = orders.exclude(user_type="staff")
+    staff_orders = orders.filter(user_type="staff")
 
     print(f"🔍 Total {school_type} student orders: {student_orders.count()}")
     print(f"👨‍🏫 Total {school_type} staff orders: {staff_orders.count()}")
 
     return student_orders, staff_orders
+
+
 def generate_workbook(school, student_orders, staff_orders, school_type, role='admin', day_filter=None):
-    # Create a new workbook and remove the default sheet
     workbook = Workbook()
     workbook.remove(workbook.active)
 
-    # Initialize data structures
     day_totals = defaultdict(lambda: defaultdict(int))
     grouped_orders = defaultdict(lambda: defaultdict(list))
     staff_orders_by_day = defaultdict(list)
 
-    # Style definitions
+    # Styles
     header_font = Font(bold=True, size=12, color="FFFFFF")
     header_fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
     title_font = Font(bold=True, size=14, color="000000")
     title_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
-    border = Border(
-        left=Side(style="thin"),
-        right=Side(style="thin"),
-        top=Side(style="thin"),
-        bottom=Side(style="thin")
-    )
+    border = Border(left=Side(style="thin"), right=Side(style="thin"), top=Side(style="thin"), bottom=Side(style="thin"))
     center_align = Alignment(horizontal="center", vertical="center")
     left_align = Alignment(horizontal="left", vertical="center")
 
@@ -2829,6 +2876,7 @@ def generate_workbook(school, student_orders, staff_orders, school_type, role='a
         selected_day = order.selected_day
 
         order_data = {
+            'order_id': order.id,   # ✅ Add order ID
             'student_name': "Unknown",
             'class_year': None,
             'teacher_name': None,
@@ -2838,13 +2886,27 @@ def generate_workbook(school, student_orders, staff_orders, school_type, role='a
         if school_type == 'primary':
             student = PrimaryStudentsRegister.objects.filter(id=order.child_id).first()
             if student:
-                order_data['student_name'] = student.username
+                full_name = f"{(student.first_name or '').strip()} {(student.last_name or '').strip()}".strip()
+                if full_name:
+                    order_data['student_name'] = full_name
+                elif student.email:
+                    order_data['student_name'] = student.email.split('@')[0]
+                else:
+                    order_data['student_name'] = "Unknown"
+
                 order_data['teacher_name'] = student.teacher.teacher_name if student.teacher else "Unknown"
             grouped_orders[selected_day][order_data['teacher_name']].append(order_data)
         else:
             student = SecondaryStudent.objects.filter(id=order.user_id).first()
             if student:
-                order_data['student_name'] = student.username
+                full_name = f"{(student.first_name or '').strip()} {(student.last_name or '').strip()}".strip()
+                if full_name:
+                    order_data['student_name'] = full_name
+                elif student.email:
+                    order_data['student_name'] = student.email.split('@')[0]
+                else:
+                    order_data['student_name'] = "Unknown"
+
                 order_data['class_year'] = student.class_year if student.class_year else "Unknown"
             grouped_orders[selected_day][order_data['class_year']].append(order_data)
 
@@ -2857,6 +2919,7 @@ def generate_workbook(school, student_orders, staff_orders, school_type, role='a
         selected_day = order.selected_day
 
         staff_order_data = {
+            'order_id': order.id,   # ✅ Add order ID
             'staff_name': "Unknown",
             'order_items': {item.menu.name: item.quantity for item in order_items}
         }
@@ -2874,7 +2937,7 @@ def generate_workbook(school, student_orders, staff_orders, school_type, role='a
     days_to_generate = [day_filter] if day_filter in all_days else all_days
 
     for day in days_to_generate:
-        # Generate class/teacher sheets
+        # Class/Teacher sheets
         if role in ['admin', 'staff']:
             entity_list = Teacher.objects.filter(school=school) if school_type == 'primary' else CLASS_YEARS
             for entity in entity_list:
@@ -2884,19 +2947,20 @@ def generate_workbook(school, student_orders, staff_orders, school_type, role='a
                 sheet.sheet_properties.tabColor = DAY_COLORS.get(day, "FFFFFF")
 
                 title = f"{entity_name} Order Sheet for {day} of {school}" if school_type == 'primary' else f"Class {entity_name} Order Sheet for {day} of {school}"
-                apply_header_styling(sheet, title, ["Student Name", "Menu Items", "Quantity"])
+                apply_header_styling(sheet, title, ["Order ID", "Student Name", "Menu Items", "Quantity"])  # ✅ Added Order ID
 
                 row_num = 3
                 for order_data in grouped_orders.get(day, {}).get(entity_name, []):
                     for menu_name, quantity in order_data['order_items'].items():
-                        sheet.cell(row=row_num, column=1, value=order_data['student_name'])
-                        sheet.cell(row=row_num, column=2, value=menu_name)
-                        sheet.cell(row=row_num, column=3, value=quantity)
+                        sheet.cell(row=row_num, column=1, value=order_data['order_id'])   # ✅ Order ID
+                        sheet.cell(row=row_num, column=2, value=order_data['student_name'])
+                        sheet.cell(row=row_num, column=3, value=menu_name)
+                        sheet.cell(row=row_num, column=4, value=quantity)
                         row_num += 1
 
                 if row_num == 3:
                     sheet.cell(row=3, column=1, value="No orders")
-                    sheet.merge_cells(start_row=3, end_row=3, start_column=1, end_column=3)
+                    sheet.merge_cells(start_row=3, end_row=3, start_column=1, end_column=4)
 
                 apply_data_styling(sheet, 3)
 
@@ -2904,23 +2968,24 @@ def generate_workbook(school, student_orders, staff_orders, school_type, role='a
         if role == 'admin':
             sheet = workbook.create_sheet(title=f"Staff {day}")
             sheet.sheet_properties.tabColor = "CCCCCC"
-            apply_header_styling(sheet, f"Staff Order Sheet for {day} of {school}", ["Staff Name", "Menu Items", "Quantity"])
+            apply_header_styling(sheet, f"Staff Order Sheet for {day} of {school}", ["Order ID", "Staff Name", "Menu Items", "Quantity"])  # ✅ Added Order ID
 
             row_num = 3
             if not staff_orders_by_day.get(day):
                 sheet.cell(row=3, column=1, value="No orders")
-                sheet.merge_cells(start_row=3, end_row=3, start_column=1, end_column=3)
+                sheet.merge_cells(start_row=3, end_row=3, start_column=1, end_column=4)
             else:
                 for order_data in staff_orders_by_day[day]:
                     for menu_name, quantity in order_data['order_items'].items():
-                        sheet.cell(row=row_num, column=1, value=order_data['staff_name'])
-                        sheet.cell(row=row_num, column=2, value=menu_name)
-                        sheet.cell(row=row_num, column=3, value=quantity)
+                        sheet.cell(row=row_num, column=1, value=order_data['order_id'])   # ✅ Order ID
+                        sheet.cell(row=row_num, column=2, value=order_data['staff_name'])
+                        sheet.cell(row=row_num, column=3, value=menu_name)
+                        sheet.cell(row=row_num, column=4, value=quantity)
                         row_num += 1
 
             apply_data_styling(sheet, 3)
 
-        # Chef/Total Sheet
+        # Chef/Total Sheet (no Order ID – still aggregated)
         if role in ['admin', 'chef']:
             sheet = workbook.create_sheet(title=f"{day} Total")
             sheet.sheet_properties.tabColor = "FFD700"
@@ -2938,41 +3003,48 @@ def generate_workbook(school, student_orders, staff_orders, school_type, role='a
 
             apply_data_styling(sheet, 3)
 
-        # Canteen Staff Day Total
+        # Canteen Staff Sheet
         if role in ['admin', 'staff']:
             sheet = workbook.create_sheet(title=f"Canteen Total {day}")
             sheet.sheet_properties.tabColor = "92D050"
             apply_header_styling(
                 sheet,
                 f"Canteen Staff Sheet for {day} of {school}",
-                ["Teacher/Class Year", "Student Name", "Menu Item", "Quantity"]
+                ["Order ID", "Teacher/Class Year", "Student Name", "Menu Item", "Quantity"]  # ✅ Added Order ID
             )
 
             row_num = 3
             orders_by_group = grouped_orders.get(day, {})
             
+            def class_year_sort_key(year):
+                if year in CLASS_YEARS:
+                    return CLASS_YEARS.index(year)
+                return len(CLASS_YEARS)
+
             valid_keys = [key if key is not None else "Unknown" for key in orders_by_group.keys()]
-            for group_key in sorted(valid_keys):
+            
+            for group_key in sorted(valid_keys, key=class_year_sort_key):
                 student_orders = orders_by_group.get(group_key, []) or orders_by_group.get(None, [])
                 sorted_student_orders = sorted(student_orders, key=lambda x: x['student_name'] or "")
 
                 for order_data in sorted_student_orders:
                     student_name = order_data['student_name']
                     for menu_name, quantity in order_data['order_items'].items():
-                        sheet.cell(row=row_num, column=1, value=group_key)
-                        sheet.cell(row=row_num, column=2, value=student_name)
-                        sheet.cell(row=row_num, column=3, value=menu_name)
-                        sheet.cell(row=row_num, column=4, value=quantity)
+                        sheet.cell(row=row_num, column=1, value=order_data['order_id'])   # ✅ Order ID
+                        sheet.cell(row=row_num, column=2, value=group_key)
+                        sheet.cell(row=row_num, column=3, value=student_name)
+                        sheet.cell(row=row_num, column=4, value=menu_name)
+                        sheet.cell(row=row_num, column=5, value=quantity)
                         row_num += 1
 
             if row_num == 3:
                 sheet.cell(row=3, column=1, value="No orders")
-                sheet.merge_cells(start_row=3, end_row=3, start_column=1, end_column=4)
+                sheet.merge_cells(start_row=3, end_row=3, start_column=1, end_column=5)
 
             apply_data_styling(sheet, 3)
 
-
     return workbook
+
 
 @api_view(['POST'])
 def download_menu(request):
@@ -3688,3 +3760,12 @@ def complete_social_signup(request):
         "user_id": created_user.id,
         "message": "Signup and login successful"
     }, status=status.HTTP_200_OK)
+
+@api_view(["GET"])
+def get_app_version(request, platform):
+    try:
+        version = AppVersion.objects.get(platform=platform)
+        serializer = AppVersionSerializer(version)
+        return Response(serializer.data)
+    except AppVersion.DoesNotExist:
+        return Response({"error": "Platform not found"}, status=404)

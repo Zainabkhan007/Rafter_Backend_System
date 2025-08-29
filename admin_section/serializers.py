@@ -289,4 +289,7 @@ class ContactMessageSerializer(serializers.ModelSerializer):
         model = ContactMessage
         fields = ['full_name', 'email', 'phone', 'subject', 'message', 'photo_filename']
 
-    
+class AppVersionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AppVersion
+        fields = ["platform", "latest_version", "min_supported_version", "force_update"]

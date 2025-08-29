@@ -33,6 +33,7 @@ class ParentRegisteration(models.Model):
     email=models.EmailField(max_length=254,unique=True)
     phone_no = models.BigIntegerField( blank=True, null=True)
     password=models.CharField(max_length=128)
+    stripe_customer_id = models.CharField(max_length=255, null=True, blank=True)
     allergies=models.ManyToManyField(Allergens, blank=True,null=True) 
     credits = models.FloatField(default=0.0)
     def save(self, *args, **kwargs):
@@ -54,6 +55,7 @@ class StaffRegisteration(models.Model):
     phone_no = models.BigIntegerField( blank=True, null=True)
     allergies=models.ManyToManyField(Allergens,null=True, blank=True)  
     password=models.CharField(max_length=128)
+    stripe_customer_id = models.CharField(max_length=255, null=True, blank=True)
     primary_school=models.ForeignKey(PrimarySchool, on_delete=models.CASCADE, null=True, blank=True)
     secondary_school=models.ForeignKey(SecondarySchool, on_delete=models.CASCADE, null=True, blank=True)
     credits = models.FloatField(default=0.0)
@@ -103,6 +105,7 @@ class SecondaryStudent(models.Model):
     phone_no = models.BigIntegerField( blank=True, null=True)
     password=models.CharField(max_length=128,default="")
     class_year = models.CharField(max_length=30,default="")
+    stripe_customer_id = models.CharField(max_length=255, null=True, blank=True)
     allergies=models.ManyToManyField(Allergens,null=True, blank=True)  
     school = models.ForeignKey(SecondarySchool, on_delete=models.CASCADE, related_name='student',null=True, blank=True)
     credits = models.FloatField(default=0.0)
@@ -262,3 +265,16 @@ class ContactMessage(models.Model):
     message = models.TextField()                 
     photo_filename = models.CharField(max_length=255, blank=True, null=True)  # safer size
 
+class AppVersion(models.Model):
+    platform_choices = (
+        ("android", "Android"),
+        ("ios", "iOS"),
+    )
+
+    platform = models.CharField(max_length=10, choices=platform_choices)
+    latest_version = models.CharField(max_length=20)  
+    min_supported_version = models.CharField(max_length=20, default="1.0.0")  
+    force_update = models.BooleanField(default=False)  
+
+    def __str__(self):
+        return f"{self.platform} - {self.latest_version}"

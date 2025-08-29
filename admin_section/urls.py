@@ -101,6 +101,8 @@ urlpatterns = [
    path("get_menu/",views.get_active_status_menu,name='get_active_status_menu'),
    path("get_user_count/",views.get_user_count,name='get_user_count'),
    path("deactivate_menus/",views.deactivate_menus,name='deactivate_menus'),
+   path("app-version/<str:platform>/", views.get_app_version, name="app-version"),
+   
 
    
 
