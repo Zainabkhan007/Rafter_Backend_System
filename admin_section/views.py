@@ -167,6 +167,8 @@ The Rafters Team
     )
 
 
+
+
 # Using your custom token generator
 custom_token_generator = CustomPasswordResetTokenGenerator()
 
@@ -2032,12 +2034,10 @@ def add_order_item(request):
             return Response({ "error" : serializer.errors},status = status.HTTP_400_BAD_REQUEST)
 @api_view(['POST'])
 def get_all_orders(request):
- 
     user_type = request.data.get('user_type')
     user_id = request.data.get('user_id')
     child_id = request.data.get('child_id')
 
-    
     if user_type == 'staff' and user_id:
         try:
             staff = StaffRegisteration.objects.get(id=user_id)
@@ -2072,7 +2072,10 @@ def get_all_orders(request):
             for item in order_items
         ]
 
-        formatted_order_date = order.order_date.strftime('%d %b')
+        # Convert UTC datetime to local timezone
+        local_order_date = timezone.localtime(order.order_date)
+        formatted_order_date = local_order_date.strftime('%d %b')
+
         order_data = {
             'order_id': order.id,
             'selected_day': order.selected_day,
@@ -2102,9 +2105,9 @@ def get_all_orders(request):
         'orders': order_details
     }, status=status.HTTP_200_OK)
 
+
 @api_view(['GET'])
 def get_all_orders(request):
-   
     orders = Order.objects.all().order_by('-order_date')
 
     if not orders.exists():
@@ -2113,7 +2116,6 @@ def get_all_orders(request):
     order_details = []
 
     for order in orders:
-      
         order_items = OrderItem.objects.filter(order=order)
         
         items_details = [
@@ -2125,7 +2127,10 @@ def get_all_orders(request):
             for item in order_items
         ]
 
-        formatted_order_date = order.order_date.strftime('%d %b')
+        # ✅ Convert UTC → Local time before formatting
+        local_order_date = timezone.localtime(order.order_date)
+        formatted_order_date = local_order_date.strftime('%d %b')
+
         order_data = {
             'order_id': order.id,
             'selected_day': order.selected_day,
@@ -2136,33 +2141,27 @@ def get_all_orders(request):
             'year': order.year,
             'items': items_details,  
             'user_name': order.user_name,
-            'payment_id':order.payment_id,
+            'payment_id': order.payment_id,
         }
 
-     
         if order.user_type in ['parent', 'staff']:
             order_data['child_id'] = order.child_id
 
-    
         if order.primary_school:
             order_data['school_id'] = order.primary_school.id
-            order_data['school_name']=order.primary_school.school_name
+            order_data['school_name'] = order.primary_school.school_name
             order_data['school_type'] = 'primary'
         elif order.secondary_school:
             order_data['school_id'] = order.secondary_school.id
-            order_data['school_name']=order.secondary_school.secondary_school_name
+            order_data['school_name'] = order.secondary_school.secondary_school_name
             order_data['school_type'] = 'secondary'
 
-        
         order_details.append(order_data)
-
 
     return Response({
         'message': 'Orders retrieved successfully!',
         'orders': order_details
     }, status=status.HTTP_200_OK)
-
-
 
 @api_view(['GET'])
 def get_order_by_id(request, order_id):
@@ -2482,7 +2481,12 @@ def get_current_week_and_year():
     return current_week, current_year
 
 
-
+def get_or_create_customer(email, name):
+    """Find or create a Stripe customer"""
+    customers = stripe.Customer.list(email=email).data
+    if customers:
+        return customers[0]  # return existing
+    return stripe.Customer.create(email=email, name=name)
 
 class CreateOrderAndPaymentAPIView(APIView):
     def post(self, request, *args, **kwargs):
@@ -2495,7 +2499,7 @@ class CreateOrderAndPaymentAPIView(APIView):
             school_id = data.get('school_id', None)
             school_type = data.get('school_type', None)
             child_id = data.get('child_id', None)
-            payment_id = data.get("payment_id", None)
+            payment_id = data.get("payment_id", None)  # Stripe pm_xxx
             front_end_total_price = float(data.get("total_price", 0))
 
             if not user_type or not user_id or not selected_days:
@@ -2508,13 +2512,15 @@ class CreateOrderAndPaymentAPIView(APIView):
                 if 'item_name' not in item or 'quantity' not in item:
                     return Response({'error': 'Each order item must have item_name and quantity.'}, status=status.HTTP_400_BAD_REQUEST)
 
-            user = None
+            # ✅ Get user instance
             if user_type == 'student':
                 user = SecondaryStudent.objects.filter(id=user_id).first()
             elif user_type == 'parent':
                 user = ParentRegisteration.objects.filter(id=user_id).first()
             elif user_type == 'staff':
                 user = StaffRegisteration.objects.filter(id=user_id).first()
+            else:
+                user = None
 
             if not user:
                 return Response({'error': f'{user_type.capitalize()} not found.'}, status=status.HTTP_404_NOT_FOUND)
@@ -2529,9 +2535,9 @@ class CreateOrderAndPaymentAPIView(APIView):
                 if idx < len(order_items_data):
                     days_dict[day].append(order_items_data[idx])
 
+            # ✅ Create orders for each selected day
             for day, items_for_day in days_dict.items():
                 menus_for_day = Menu.objects.filter(menu_day__iexact=day)
-
                 if not menus_for_day:
                     return Response({'error': f'No menus available for {day}.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -2540,10 +2546,9 @@ class CreateOrderAndPaymentAPIView(APIView):
 
                 today = datetime.today()
                 target_day = day.capitalize()
-
                 target_day_num = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].index(target_day)
                 days_ahead = target_day_num - today.weekday()
-                if days_ahead <= 0: 
+                if days_ahead <= 0:
                     days_ahead += 7
 
                 order_date = today + timedelta(days=days_ahead)
@@ -2576,9 +2581,9 @@ class CreateOrderAndPaymentAPIView(APIView):
 
                 order_instance = order_serializer.save()
 
+                # ✅ Attach order items
                 for item in items_for_day:
                     menu_item = menus_for_day.filter(name__iexact=item['item_name']).first()
-
                     if not menu_item:
                         return Response({'error': f'Menu item with name {item["item_name"]} not found for {day}.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -2592,7 +2597,7 @@ class CreateOrderAndPaymentAPIView(APIView):
                     order_total_price += item_price * item['quantity']
 
                 order_instance.total_price = order_total_price
-                order_instance.payment_id = payment_id  
+                order_instance.payment_id = payment_id
                 order_instance.save()
 
                 order_details = {
@@ -2612,9 +2617,9 @@ class CreateOrderAndPaymentAPIView(APIView):
                     ],
                     'user_name': order_instance.user_name,
                 }
-
                 created_orders.append(order_details)
 
+            # ✅ Free child meal
             if user_type in ['parent', 'staff'] and child_id:
                 for order in created_orders:
                     order['status'] = 'paid'
@@ -2622,31 +2627,59 @@ class CreateOrderAndPaymentAPIView(APIView):
                     'message': 'Orders created successfully with free meal for child.',
                     'orders': created_orders
                 }, status=status.HTTP_201_CREATED)
+
+            # ✅ Pay with credits if no Stripe payment
             if not payment_id:
-                
                 if user.credits < front_end_total_price:
                     return Response({"error": "Insufficient credits to complete the order."}, status=status.HTTP_400_BAD_REQUEST)
 
-                user.credits -= front_end_total_price  
+                user.credits -= front_end_total_price
                 user.save()
 
-              
                 for order in created_orders:
-                    order['status'] = 'paid'  
+                    order['status'] = 'paid'
 
                 return Response({
                     'message': 'Orders created and credits deducted successfully!',
                     'orders': created_orders
                 }, status=status.HTTP_201_CREATED)
 
-           
+            # ✅ Stripe payment flow
             total_price_in_cents = int(front_end_total_price * 100)
+
+            # 1. Get or create customer in Stripe
+            customers = stripe.Customer.list(email=user.email).data
+            if customers:
+                customer = customers[0]
+            else:
+                customer = stripe.Customer.create(
+                    email=user.email,
+                    name=f"{getattr(user, 'first_name', '')} {getattr(user, 'last_name', '')}".strip()
+                )
+
+            # 2. Attach PaymentMethod to Customer
+            stripe.PaymentMethod.attach(
+                payment_id,
+                customer=customer.id
+            )
+
+            # 3. Set default payment method
+            stripe.Customer.modify(
+                customer.id,
+                invoice_settings={
+                    "default_payment_method": payment_id
+                }
+            )
+
+            # 4. Create PaymentIntent
             payment_intent = stripe.PaymentIntent.create(
                 amount=total_price_in_cents,
                 currency="eur",
+                customer=customer.id,
                 payment_method=payment_id,
                 confirmation_method="manual",
                 confirm=True,
+                receipt_email=user.email,
                 return_url=f"{request.scheme}://{request.get_host()}/payment-success/",
             )
 
@@ -2664,23 +2697,21 @@ class CreateOrderAndPaymentAPIView(APIView):
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-
 @api_view(['POST'])
 def top_up_payment(request):
     """
-    API to process payment for top-up credits for a parent, staff, or student.
+    API to process top-up credits for a parent, staff, or student.
     """
     try:
-      
         user_id = request.data.get('user_id')
         amount = request.data.get('amount')
         user_type = request.data.get('user_type')
-        payment_method_id = request.data.get('payment_method_id')  
+        payment_method_id = request.data.get('payment_method_id')
 
         if not all([user_id, amount, user_type, payment_method_id]):
             return Response({"error": "Missing required parameters."}, status=status.HTTP_400_BAD_REQUEST)
 
-     
+        # ✅ Get user
         if user_type == "parent":
             user = ParentRegisteration.objects.filter(id=user_id).first()
         elif user_type == "staff":
@@ -2693,27 +2724,53 @@ def top_up_payment(request):
         if not user:
             return Response({"error": "User not found."}, status=status.HTTP_404_NOT_FOUND)
 
-       
+        # ✅ Amount in cents
         try:
-            amount_in_cents = int(float(amount) * 100)  
+            amount_in_cents = int(float(amount) * 100)
         except ValueError:
             return Response({"error": "Invalid amount."}, status=status.HTTP_400_BAD_REQUEST)
 
-      
-        payment_intent = stripe.PaymentIntent.create(
-            amount=amount_in_cents, 
-            currency="eur",
-            payment_method=payment_method_id,
-            confirmation_method="manual",
-            confirm=True,
-            return_url=f"{request.scheme}://{request.get_host()}/payment-success/", 
+        # ✅ Ensure customer exists
+        if not getattr(user, "stripe_customer_id", None):
+            customer = stripe.Customer.create(
+                name=f"{user.first_name} {user.last_name}",
+                email=user.email,
+            )
+            user.stripe_customer_id = customer.id
+            user.save()
+
+        # ✅ Attach payment method
+        stripe.PaymentMethod.attach(
+            payment_method_id,
+            customer=user.stripe_customer_id,
         )
 
-       
+        # ✅ Update default payment method
+        stripe.Customer.modify(
+            user.stripe_customer_id,
+            invoice_settings={"default_payment_method": payment_method_id}
+        )
+
+        # ✅ Create PaymentIntent (card only, no redirects)
+        payment_intent = stripe.PaymentIntent.create(
+            amount=amount_in_cents,
+            currency="eur",
+            customer=user.stripe_customer_id,
+            payment_method=payment_method_id,
+            payment_method_types=["card"],   # 👈 restrict to card only
+            confirmation_method="manual",
+            confirm=True,
+            receipt_email=user.email,        # 📩 receipt will have name + email
+        )
+
+        # ✅ On success → top up credits
         if payment_intent.status == 'succeeded':
-           
-            user.top_up_credits(float(amount))  
-            return Response({"message": f"{user_type.capitalize()} credits successfully updated."}, status=status.HTTP_200_OK)
+            user.top_up_credits(float(amount))
+            return Response({
+                "message": f"{user_type.capitalize()} credits successfully updated.",
+                "credits": user.credits,
+                "payment_id": payment_intent.id
+            }, status=status.HTTP_200_OK)
         else:
             return Response({"error": "Payment failed."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -2723,7 +2780,6 @@ def top_up_payment(request):
         return Response({"error": f"Stripe error: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     except Exception as e:
         return Response({"error": f"Error processing payment: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 def get_custom_week_and_year():
   
@@ -3688,3 +3744,12 @@ def complete_social_signup(request):
         "user_id": created_user.id,
         "message": "Signup and login successful"
     }, status=status.HTTP_200_OK)
+
+@api_view(["GET"])
+def get_app_version(request, platform):
+    try:
+        version = AppVersion.objects.get(platform=platform)
+        serializer = AppVersionSerializer(version)
+        return Response(serializer.data)
+    except AppVersion.DoesNotExist:
+        return Response({"error": "Platform not found"}, status=404)
