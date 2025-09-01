@@ -1291,6 +1291,24 @@ def activate_cycle(request):
     if not menus.exists():
         return Response({'error': f'No menus found for cycle "{cycle_name}".'}, status=status.HTTP_404_NOT_FOUND)
 
+    # 🔴 First deactivate all existing menus linked with this school
+    if school_type == 'primary':
+        previous_menus = Menu.objects.filter(primary_schools=school, is_active=True)
+        for menu in previous_menus:
+            menu.primary_schools.remove(school)
+            # If menu is not linked to any school, deactivate it globally
+            if not menu.primary_schools.exists() and not menu.secondary_schools.exists():
+                menu.is_active = False
+            menu.save()
+    else:
+        previous_menus = Menu.objects.filter(secondary_schools=school, is_active=True)
+        for menu in previous_menus:
+            menu.secondary_schools.remove(school)
+            if not menu.primary_schools.exists() and not menu.secondary_schools.exists():
+                menu.is_active = False
+            menu.save()
+
+    # ✅ Now activate the new cycle menus
     updated_menus = []
     for menu in menus:
         menu.is_active = True
