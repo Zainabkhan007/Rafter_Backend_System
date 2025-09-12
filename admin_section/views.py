@@ -2517,7 +2517,7 @@ class CreateOrderAndPaymentAPIView(APIView):
             school_id = data.get('school_id', None)
             school_type = data.get('school_type', None)
             child_id = data.get('child_id', None)
-            payment_id = data.get("payment_id", None)  # Stripe pm_xxx
+            payment_id = data.get("payment_id", None)
             front_end_total_price = float(data.get("total_price", 0))
 
             if not user_type or not user_id or not selected_days:
@@ -2525,10 +2525,6 @@ class CreateOrderAndPaymentAPIView(APIView):
 
             if not order_items_data:
                 return Response({'error': 'Order items are required.'}, status=status.HTTP_400_BAD_REQUEST)
-
-            for item in order_items_data:
-                if 'item_name' not in item or 'quantity' not in item:
-                    return Response({'error': 'Each order item must have item_name and quantity.'}, status=status.HTTP_400_BAD_REQUEST)
 
             # ✅ Get user instance
             if user_type == 'student':
@@ -2538,7 +2534,7 @@ class CreateOrderAndPaymentAPIView(APIView):
             elif user_type == 'staff':
                 user = StaffRegisteration.objects.filter(id=user_id).first()
             else:
-                user = None
+                return Response({'error': 'Invalid user type.'}, status=status.HTTP_400_BAD_REQUEST)
 
             if not user:
                 return Response({'error': f'{user_type.capitalize()} not found.'}, status=status.HTTP_404_NOT_FOUND)
@@ -2546,174 +2542,142 @@ class CreateOrderAndPaymentAPIView(APIView):
             if user_type in ['student', 'parent'] and not school_id:
                 return Response({'error': 'School ID is required for students and parents.'}, status=status.HTTP_400_BAD_REQUEST)
 
-            created_orders = []
-            days_dict = {day: [] for day in selected_days}
+            # Use a transaction to ensure atomicity
+            with transaction.atomic():
+                created_orders = []
+                calculated_total_price = 0
 
-            for idx, day in enumerate(selected_days):
-                if idx < len(order_items_data):
-                    days_dict[day].append(order_items_data[idx])
+                # Create orders for each selected day
+                for idx, day in enumerate(selected_days):
+                    if idx >= len(order_items_data):
+                        continue
 
-            # ✅ Create orders for each selected day
-            for day, items_for_day in days_dict.items():
-                menus_for_day = Menu.objects.filter(menu_day__iexact=day)
-                if not menus_for_day:
-                    return Response({'error': f'No menus available for {day}.'}, status=status.HTTP_404_NOT_FOUND)
+                    item_for_day = order_items_data[idx]
+                    item_name = item_for_day.get('item_name')
+                    quantity = item_for_day.get('quantity')
+                    
+                    if not item_name or not quantity:
+                        return Response({'error': 'Each order item must have item_name and quantity.'}, status=status.HTTP_400_BAD_REQUEST)
 
-                order_total_price = 0
-                order_items = []
-
-                today = datetime.today()
-                target_day = day.capitalize()
-                target_day_num = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].index(target_day)
-                days_ahead = target_day_num - today.weekday()
-                if days_ahead <= 0:
-                    days_ahead += 7
-
-                order_date = today + timedelta(days=days_ahead)
-                week_number = order_date.isocalendar()[1]
-                order_date = order_date.replace(hour=0, minute=0, second=0, microsecond=0)
-
-                order_data = {
-                    'user_id': user.id,
-                    'user_type': user_type,
-                    'total_price': front_end_total_price,
-                    'week_number': week_number,
-                    'year': order_date.year,
-                    'order_date': order_date,
-                    'selected_day': day,
-                    'is_delivered': False,
-                    'status': 'pending',
-                }
-
-                if user_type in ['parent', 'staff'] and child_id:
-                    order_data['child_id'] = child_id
-                if school_type == 'primary':
-                    order_data['primary_school'] = school_id
-                elif school_type == 'secondary':
-                    order_data['secondary_school'] = school_id
-
-                order_data['payment_id'] = payment_id
-                order_serializer = OrderSerializer(data=order_data)
-                if not order_serializer.is_valid():
-                    return Response(order_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-                order_instance = order_serializer.save()
-
-                # ✅ Attach order items
-                for item in items_for_day:
-                    menu_item = menus_for_day.filter(name__iexact=item['item_name']).first()
+                    # Get menu item for the specified day and name
+                    menu_item = Menu.objects.filter(menu_day__iexact=day, name__iexact=item_name).first()
                     if not menu_item:
-                        return Response({'error': f'Menu item with name {item["item_name"]} not found for {day}.'}, status=status.HTTP_404_NOT_FOUND)
+                        return Response({'error': f'Menu item with name "{item_name}" not found for {day}.'}, status=status.HTTP_404_NOT_FOUND)
 
-                    item_price = float(item["price"])
-                    order_item = OrderItem.objects.create(
-                        menu=menu_item,
-                        quantity=item['quantity'],
-                        order=order_instance
+                    # Calculate dates
+                    today = datetime.now()
+                    target_day_num = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'].index(day.lower())
+                    days_ahead = (target_day_num - today.weekday() + 7) % 7
+                    order_date = today + timedelta(days=days_ahead)
+                    week_number = order_date.isocalendar()[1]
+                    order_date = order_date.replace(hour=0, minute=0, second=0, microsecond=0)
+
+                    # Create the main Order object
+                    order_instance = Order.objects.create(
+                        user_id=user.id,
+                        user_type=user_type,
+                        total_price=0,  # Will be updated after creating items
+                        week_number=week_number,
+                        year=order_date.year,
+                        order_date=order_date,
+                        selected_day=day,
+                        is_delivered=False,
+                        status='pending',
+                        payment_id=payment_id,
+                        child_id=child_id if user_type in ['parent', 'staff'] and child_id else None,
+                        primary_school_id=school_id if school_type == 'primary' else None,
+                        secondary_school_id=school_id if school_type == 'secondary' else None
                     )
-                    order_items.append(order_item)
-                    order_total_price += item_price * item['quantity']
 
-                order_instance.total_price = order_total_price
-                order_instance.payment_id = payment_id
-                order_instance.save()
+                    # Create the OrderItem and link it to the Order
+                    order_item_price = float(menu_item.price) * quantity
+                    OrderItem.objects.create(
+                        order=order_instance,
+                        menu=menu_item,
+                        quantity=quantity
+                    )
+                    
+                    order_instance.total_price = order_item_price
+                    order_instance.save()
+                    calculated_total_price += order_item_price
+                    created_orders.append(order_instance)
 
-                order_details = {
-                    'order_id': order_instance.id,
-                    'selected_day': day,
-                    'total_price': str(order_instance.total_price),
-                    'order_date': order_instance.order_date,
-                    'status': 'pending',
-                    'week_number': order_instance.week_number,
-                    'year': order_instance.year,
-                    'items': [
-                        {
-                            'item_name': item.menu.name,
-                            'price': item.menu.price,
-                            'quantity': item.quantity
-                        } for item in order_items
-                    ],
-                    'user_name': order_instance.user_name,
-                }
-                created_orders.append(order_details)
+                # Check if the calculated price matches the front-end price
+                if abs(calculated_total_price - front_end_total_price) > 0.01:
+                    # Raise an exception to roll back the transaction
+                    raise ValueError("Price mismatch detected. Order not created.")
 
-            # ✅ Free child meal
-            if user_type in ['parent', 'staff'] and child_id:
-                for order in created_orders:
-                    order['status'] = 'paid'
-                return Response({
-                    'message': 'Orders created successfully with free meal for child.',
-                    'orders': created_orders
-                }, status=status.HTTP_201_CREATED)
+                # ✅ Payment and status logic
+                if user_type in ['parent', 'staff'] and child_id:
+                    for order in created_orders:
+                        order.status = 'pending'
+                        order.save()
+                    return Response({
+                        'message': 'Orders created successfully with free meal for child.',
+                        'orders': OrderSerializer(created_orders, many=True).data
+                    }, status=status.HTTP_201_CREATED)
 
-            # ✅ Pay with credits if no Stripe payment
-            if not payment_id:
-                if user.credits < front_end_total_price:
-                    return Response({"error": "Insufficient credits to complete the order."}, status=status.HTTP_400_BAD_REQUEST)
+                if not payment_id:
+                    if user.credits < calculated_total_price:
+                        raise ValueError("Insufficient credits to complete the order.")
+                    
+                    user.credits -= calculated_total_price
+                    user.save()
+                    
+                    for order in created_orders:
+                        order.status = 'pending'
+                        order.save()
 
-                user.credits -= front_end_total_price
-                user.save()
+                    return Response({
+                        'message': 'Orders created and credits deducted successfully!',
+                        'orders': OrderSerializer(created_orders, many=True).data
+                    }, status=status.HTTP_201_CREATED)
 
-                for order in created_orders:
-                    order['status'] = 'paid'
+                # ✅ Stripe payment flow (rest of your existing stripe code)
+                total_price_in_cents = int(calculated_total_price * 100)
 
-                return Response({
-                    'message': 'Orders created and credits deducted successfully!',
-                    'orders': created_orders
-                }, status=status.HTTP_201_CREATED)
+                customers = stripe.Customer.list(email=user.email).data
+                if customers:
+                    customer = customers[0]
+                else:
+                    customer = stripe.Customer.create(
+                        email=user.email,
+                        name=f"{getattr(user, 'first_name', '')} {getattr(user, 'last_name', '')}".strip()
+                    )
 
-            # ✅ Stripe payment flow
-            total_price_in_cents = int(front_end_total_price * 100)
+                stripe.PaymentMethod.attach(payment_id, customer=customer.id)
+                stripe.Customer.modify(customer.id, invoice_settings={"default_payment_method": payment_id})
 
-            # 1. Get or create customer in Stripe
-            customers = stripe.Customer.list(email=user.email).data
-            if customers:
-                customer = customers[0]
-            else:
-                customer = stripe.Customer.create(
-                    email=user.email,
-                    name=f"{getattr(user, 'first_name', '')} {getattr(user, 'last_name', '')}".strip()
+                payment_intent = stripe.PaymentIntent.create(
+                    amount=total_price_in_cents,
+                    currency="eur",
+                    customer=customer.id,
+                    payment_method=payment_id,
+                    confirmation_method="manual",
+                    confirm=True,
+                    receipt_email=user.email,
+                    return_url=f"{request.scheme}://{request.get_host()}/payment-success/",
                 )
+                
+                # Update order payment_id and status
+                for order in created_orders:
+                    order.payment_id = payment_intent.id # Store payment intent ID
+                    order.status = 'pending'
+                    order.save()
 
-            # 2. Attach PaymentMethod to Customer
-            stripe.PaymentMethod.attach(
-                payment_id,
-                customer=customer.id
-            )
-
-            # 3. Set default payment method
-            stripe.Customer.modify(
-                customer.id,
-                invoice_settings={
-                    "default_payment_method": payment_id
-                }
-            )
-
-            # 4. Create PaymentIntent
-            payment_intent = stripe.PaymentIntent.create(
-                amount=total_price_in_cents,
-                currency="eur",
-                customer=customer.id,
-                payment_method=payment_id,
-                confirmation_method="manual",
-                confirm=True,
-                receipt_email=user.email,
-                return_url=f"{request.scheme}://{request.get_host()}/payment-success/",
-            )
-
-            for order_instance in created_orders:
-                order_instance['payment_intent'] = payment_intent.client_secret
-
-            return Response({
-                'message': 'Orders and payment intent created successfully!',
-                'orders': created_orders,
-                'payment_intent': payment_intent.client_secret
-            }, status=status.HTTP_201_CREATED)
+                return Response({
+                    'message': 'Orders and payment intent created successfully!',
+                    'orders': OrderSerializer(created_orders, many=True).data,
+                    'payment_intent': payment_intent.client_secret
+                }, status=status.HTTP_201_CREATED)
 
         except stripe.error.CardError as e:
             return Response({"error": f"Card Error: {e.user_message}"}, status=status.HTTP_400_BAD_REQUEST)
+        except ValueError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
 @api_view(['POST'])
 def top_up_payment(request):
@@ -2814,38 +2778,45 @@ DAY_COLORS = {
 
 CLASS_YEARS = ["1st", "2nd", "3rd", "4th", "5th", "6th"]
 
-def fetch_orders(school_id, school_type):
+def fetch_orders(school_id, school_type, target_day=None):
     current_time = datetime.now()
     current_week_number = current_time.isocalendar()[1]
     current_year = current_time.year
     
-    # Check if we're past the Friday 2PM cutoff
-    is_past_cutoff = (
-        current_time.weekday() == 4 and current_time.hour >= 14  # Friday 2PM+
-    ) or current_time.weekday() > 4  # Saturday/Sunday
+    # Define cutoff time (Friday 2PM)
+    cutoff_day = 4  # Friday
+    cutoff_hour = 14  # 2PM
     
-    # Determine target week
-    if is_past_cutoff:
-        target_week = current_week_number + 1
-        if target_week > 52:  # year rollover
-            target_week = 1
-            current_year += 1
+    # Check if we're past the cutoff for this week
+    is_past_cutoff = (
+        current_time.weekday() > cutoff_day or
+        (current_time.weekday() == cutoff_day and current_time.hour >= cutoff_hour)
+    )
+    
+    # If past cutoff, we should look at orders for next week
+    # Otherwise, look at orders for current week
+    target_week = current_week_number + 1 if is_past_cutoff else current_week_number
+    target_year = current_year
+    
+    # Handle year rollover
+    if target_week > 52:
+        target_week = 1
+        target_year += 1
+    
+    filter_kwargs = {"week_number": target_week, "year": target_year}
+    
+    if school_type == "primary":
+        filter_kwargs["primary_school_id"] = school_id
     else:
-        target_week = current_week_number
+        filter_kwargs["secondary_school_id"] = school_id
 
-    filter_kwargs = {'week_number': target_week, 'year': current_year}
-    if school_type == 'primary':
-        filter_kwargs['primary_school_id'] = school_id
-    else:
-        filter_kwargs['secondary_school_id'] = school_id
+    if target_day:
+        filter_kwargs["selected_day__iexact"] = target_day
 
-    orders = Order.objects.filter(**filter_kwargs).order_by('-order_date')
-
+    orders = Order.objects.filter(**filter_kwargs).order_by("selected_day")
+    
     student_orders = orders.exclude(user_type="staff")
     staff_orders = orders.filter(user_type="staff")
-
-    print(f"🔍 Total {school_type} student orders: {student_orders.count()}")
-    print(f"👨‍🏫 Total {school_type} staff orders: {staff_orders.count()}")
 
     return student_orders, staff_orders
 
@@ -2890,11 +2861,11 @@ def generate_workbook(school, student_orders, staff_orders, school_type, role='a
 
     # Process student orders
     for order in student_orders:
-        order_items = OrderItem.objects.filter(order=order)
+        order_items = order.order_items.all() #  ✅ Corrected: Accessing items via reverse relationship
         selected_day = order.selected_day
 
         order_data = {
-            'order_id': order.id,   # ✅ Add order ID
+            'order_id': order.id,
             'student_name': "Unknown",
             'class_year': None,
             'teacher_name': None,
@@ -2933,11 +2904,11 @@ def generate_workbook(school, student_orders, staff_orders, school_type, role='a
 
     # Process staff orders
     for order in staff_orders:
-        order_items = OrderItem.objects.filter(order=order)
+        order_items = order.order_items.all() # ✅ Corrected: Accessing items via reverse relationship
         selected_day = order.selected_day
 
         staff_order_data = {
-            'order_id': order.id,   # ✅ Add order ID
+            'order_id': order.id,
             'staff_name': "Unknown",
             'order_items': {item.menu.name: item.quantity for item in order_items}
         }
@@ -2965,12 +2936,12 @@ def generate_workbook(school, student_orders, staff_orders, school_type, role='a
                 sheet.sheet_properties.tabColor = DAY_COLORS.get(day, "FFFFFF")
 
                 title = f"{entity_name} Order Sheet for {day} of {school}" if school_type == 'primary' else f"Class {entity_name} Order Sheet for {day} of {school}"
-                apply_header_styling(sheet, title, ["Order ID", "Student Name", "Menu Items", "Quantity"])  # ✅ Added Order ID
+                apply_header_styling(sheet, title, ["Order ID", "Student Name", "Menu Items", "Quantity"])
 
                 row_num = 3
                 for order_data in grouped_orders.get(day, {}).get(entity_name, []):
                     for menu_name, quantity in order_data['order_items'].items():
-                        sheet.cell(row=row_num, column=1, value=order_data['order_id'])   # ✅ Order ID
+                        sheet.cell(row=row_num, column=1, value=order_data['order_id'])
                         sheet.cell(row=row_num, column=2, value=order_data['student_name'])
                         sheet.cell(row=row_num, column=3, value=menu_name)
                         sheet.cell(row=row_num, column=4, value=quantity)
@@ -2986,7 +2957,7 @@ def generate_workbook(school, student_orders, staff_orders, school_type, role='a
         if role == 'admin':
             sheet = workbook.create_sheet(title=f"Staff {day}")
             sheet.sheet_properties.tabColor = "CCCCCC"
-            apply_header_styling(sheet, f"Staff Order Sheet for {day} of {school}", ["Order ID", "Staff Name", "Menu Items", "Quantity"])  # ✅ Added Order ID
+            apply_header_styling(sheet, f"Staff Order Sheet for {day} of {school}", ["Order ID", "Staff Name", "Menu Items", "Quantity"])
 
             row_num = 3
             if not staff_orders_by_day.get(day):
@@ -2995,7 +2966,7 @@ def generate_workbook(school, student_orders, staff_orders, school_type, role='a
             else:
                 for order_data in staff_orders_by_day[day]:
                     for menu_name, quantity in order_data['order_items'].items():
-                        sheet.cell(row=row_num, column=1, value=order_data['order_id'])   # ✅ Order ID
+                        sheet.cell(row=row_num, column=1, value=order_data['order_id'])
                         sheet.cell(row=row_num, column=2, value=order_data['staff_name'])
                         sheet.cell(row=row_num, column=3, value=menu_name)
                         sheet.cell(row=row_num, column=4, value=quantity)
@@ -3028,7 +2999,7 @@ def generate_workbook(school, student_orders, staff_orders, school_type, role='a
             apply_header_styling(
                 sheet,
                 f"Canteen Staff Sheet for {day} of {school}",
-                ["Order ID", "Teacher/Class Year", "Student Name", "Menu Item", "Quantity"]  # ✅ Added Order ID
+                ["Order ID", "Teacher/Class Year", "Student Name", "Menu Item", "Quantity"]
             )
 
             row_num = 3
@@ -3048,7 +3019,7 @@ def generate_workbook(school, student_orders, staff_orders, school_type, role='a
                 for order_data in sorted_student_orders:
                     student_name = order_data['student_name']
                     for menu_name, quantity in order_data['order_items'].items():
-                        sheet.cell(row=row_num, column=1, value=order_data['order_id'])   # ✅ Order ID
+                        sheet.cell(row=row_num, column=1, value=order_data['order_id'])
                         sheet.cell(row=row_num, column=2, value=group_key)
                         sheet.cell(row=row_num, column=3, value=student_name)
                         sheet.cell(row=row_num, column=4, value=menu_name)
@@ -3079,14 +3050,30 @@ def download_menu(request):
             return Response({'error': 'Invalid school_type.'}, status=status.HTTP_400_BAD_REQUEST)
 
         school = PrimarySchool.objects.get(id=school_id) if school_type == 'primary' else SecondarySchool.objects.get(id=school_id)
-        student_orders, staff_orders = fetch_orders(school_id, school_type)
+        student_orders, staff_orders = fetch_orders(school_id, school_type, target_day=day_filter)
 
         if not student_orders.exists() and not staff_orders.exists():
             student_orders, staff_orders = [], []
 
-        workbook = generate_workbook(school, student_orders, staff_orders, school_type, role=role, day_filter=day_filter)
+        # 📝 Debug print all orders + items
+        all_orders = list(student_orders) + list(staff_orders)
+        print(f"📝 Total orders fetched: {len(all_orders)}")
+        for order in all_orders:
+            print(f"➡️ Order ID: {order.id}, User: {order.user_name}, Type: {order.user_type}, "
+                  f"Day: {order.selected_day}, Week: {order.week_number}, Year: {order.year}")
+            
+            # ✅ Corrected: Using the reverse relationship to get order items
+            order_items = order.order_items.all()
+            for item in order_items:
+                print(f"   🍔 {item.menu.name} x {item.quantity}")
 
-       # Clean and normalize names
+        # ✅ Generate Excel
+        workbook = generate_workbook(
+            school, student_orders, staff_orders,
+            school_type, role=role, day_filter=day_filter
+        )
+
+        # Clean and normalize names
         school_name = (
             school.secondary_school_name if school_type == 'secondary' else school.school_name
         ).replace(' ', '_')
@@ -3107,7 +3094,6 @@ def download_menu(request):
 
     except Exception as e:
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 
 @api_view(['POST'])
@@ -3167,8 +3153,6 @@ def download_all_schools_menu(request):
 
     except Exception as e:
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
 
 @api_view(["GET"])
 def get_user_count(request):

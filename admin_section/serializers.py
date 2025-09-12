@@ -243,46 +243,49 @@ class MenuItemsSerializer(serializers.ModelSerializer):
             data['image'] = None
         return data
 class OrderItemSerializer(serializers.ModelSerializer):
+    # This correctly gets the menu name from the related Menu object
     item_name = serializers.CharField(source='menu.name', read_only=True)
-    menu = MenuSerializer() 
-    quantity = serializers.IntegerField()  
+    menu = MenuSerializer(read_only=True)  # This will serialize the full menu object
 
     class Meta:
         model = OrderItem
-        fields = ['id','menu','item_name', 'quantity', 'order']
+        fields = ['id', 'menu', 'item_name', 'quantity', 'order']
 
 class OrderSerializer(serializers.ModelSerializer):
-    items = OrderItemSerializer(many=True, read_only=True)
-    user_name = serializers.SerializerMethodField()  
-    child_id = serializers.IntegerField(required=False, allow_null=True)  
-    # payment_method_id = serializers.CharField(source='payment_id', required=False)
 
-
+    items = OrderItemSerializer(many=True, read_only=True, source='order_items')
+    user_name = serializers.SerializerMethodField()
+    child_id = serializers.IntegerField(required=False, allow_null=True)
+    
     week_number = serializers.IntegerField(default=datetime.now().isocalendar()[1], read_only=False)
     year = serializers.IntegerField(default=datetime.now().year, read_only=False)
 
     class Meta:
         model = Order
-        fields = ['items','user_name','child_id', 'week_number', 'year','order_date','selected_day','is_delivered','status','user_name','payment_id','items_name','primary_school','secondary_school','total_price','user_type','user_id']
+        # ✅ Removed 'items_name' from the fields list
+        fields = [
+            'items', 'user_name', 'child_id', 'week_number', 'year',
+            'order_date', 'selected_day', 'is_delivered', 'status',
+            'payment_id', 'primary_school', 'secondary_school',
+            'total_price', 'user_type', 'user_id'
+        ]
   
-
     def get_user_name(self, obj):
         """Return the user name based on the user type."""
-        return obj.get_user_name()  
+        return obj.get_user_name()
 
     def to_representation(self, instance):
         """Customize the serialization."""
         representation = super().to_representation(instance)
         
-       
         if instance.user_type in ['parent', 'staff']:
             representation['child_id'] = instance.child_id
             representation.pop('child_name', None) 
         else:
-
-            representation.pop('child_id', None)  
+            representation.pop('child_id', None)
         
         return representation
+
 
 class ContactMessageSerializer(serializers.ModelSerializer):
     class Meta:
