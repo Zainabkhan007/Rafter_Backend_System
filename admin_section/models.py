@@ -37,7 +37,7 @@ class Allergens(models.Model):
 class ParentRegisteration(models.Model):
     first_name = models.CharField(max_length=30)
     last_name = models.CharField(max_length=30)
-    username = models.CharField(max_length=30)
+    username = models.CharField(max_length=30, blank=True, null=True) 
     email = models.EmailField(max_length=254, unique=True)
     phone_no = models.BigIntegerField(blank=True, null=True)
     password = models.CharField(max_length=128)
@@ -58,7 +58,7 @@ class ParentRegisteration(models.Model):
 class StaffRegisteration(models.Model):
     first_name = models.CharField(max_length=30)
     last_name = models.CharField(max_length=30)
-    username = models.CharField(max_length=30)
+    username = models.CharField(max_length=30, blank=True, null=True)
     email = models.EmailField(max_length=254, unique=True)
     phone_no = models.BigIntegerField(blank=True, null=True)
     allergies = models.ManyToManyField(Allergens, blank=True)
@@ -111,7 +111,7 @@ class Teacher(models.Model):
 class SecondaryStudent(models.Model):
     first_name = models.CharField(max_length=30, default="")
     last_name = models.CharField(max_length=30, default="")
-    username = models.CharField(max_length=30, default="")
+    username = models.CharField(max_length=30, default="")  
     email = models.EmailField(max_length=254, default="")
     phone_no = models.BigIntegerField(blank=True, null=True)
     password = models.CharField(max_length=128, default="")
@@ -137,7 +137,7 @@ class SecondaryStudent(models.Model):
 class PrimaryStudentsRegister(models.Model):
     first_name = models.CharField(max_length=30)
     last_name = models.CharField(max_length=30)
-    username = models.CharField(max_length=60, unique=True, blank=True, null=True)
+    username = models.CharField(max_length=60, blank=True, null=True) 
     class_year = models.CharField(max_length=30)
     school = models.ForeignKey(PrimarySchool, on_delete=models.CASCADE, related_name='student')
     teacher = models.ForeignKey(Teacher, on_delete=models.CASCADE, related_name='student_teacher', null=True, blank=True)
@@ -168,7 +168,7 @@ class Menu(models.Model):
     menu_date = models.DateField(default=datetime.today)
     cycle_name = models.CharField(max_length=100)
     is_active = models.BooleanField(default=False)
-    is_deleted = models.BooleanField(default=False)  # Soft delete
+    is_deleted = models.BooleanField(default=False) 
     category = models.ForeignKey(Categories, on_delete=models.CASCADE, related_name="menus")
     primary_schools = models.ManyToManyField(PrimarySchool, blank=True, related_name="menus")
     secondary_schools = models.ManyToManyField(SecondarySchool, blank=True, related_name="menus")
@@ -283,7 +283,7 @@ class OrderItem(models.Model):
 # Canteen Staff & Contact
 # ------------------------------
 class CanteenStaff(models.Model):
-    username = models.CharField(max_length=30)
+    username = models.CharField(max_length=30, blank=True, null=True) # removed unique
     email = models.EmailField(max_length=254, unique=True)
     password = models.CharField(max_length=128)
     school_type = models.CharField(max_length=20, choices=[('primary', 'Primary'), ('secondary', 'Secondary')])

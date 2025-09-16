@@ -26,7 +26,7 @@ class OrderAdmin(admin.ModelAdmin):
 
 @admin.register(OrderItem)
 class OrderItemAdmin(admin.ModelAdmin):
-    list_display = ("id", "menu", "quantity", "order", "order_id") # <-- Added 'order_id' here
+    list_display = ("id", "menu_name", "quantity", "order", "order_id") # <-- Added 'order_id' here
 
 # Keep your simple ones as is
 admin.site.register(CanteenStaff)
