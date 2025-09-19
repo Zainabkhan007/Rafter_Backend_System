@@ -844,6 +844,9 @@ def edit_child(request, child_id):
         return Response({
             'message': 'Child record deleted successfully.'
         }, status=status.HTTP_204_NO_CONTENT)
+
+
+
 # Primary School Sction
 @csrf_exempt
 @api_view(['POST'])

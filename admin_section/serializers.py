@@ -182,16 +182,41 @@ class SecondarySchoolSerializer(serializers.ModelSerializer):
         model = SecondarySchool
         fields =  ['id', 'secondary_school_name', 'secondary_school_email', 'secondary_school_eircode', 'student_count']
 
-
 class PrimaryStudentSerializer(serializers.ModelSerializer):
-    allergies = serializers.SlugRelatedField(queryset=Allergens.objects.all(), slug_field='allergy', many=True, required=False)
-    parent = serializers.PrimaryKeyRelatedField(queryset=ParentRegisteration.objects.all(), required=False)
-    staff = serializers.PrimaryKeyRelatedField(queryset=StaffRegisteration.objects.all(), required=False)
-    
+    allergies = serializers.SlugRelatedField(
+        queryset=Allergens.objects.all(),
+        slug_field='allergy',
+        many=True,
+        required=False
+    )
+    parent = serializers.PrimaryKeyRelatedField(
+        queryset=ParentRegisteration.objects.all(),
+        required=False
+    )
+    staff = serializers.PrimaryKeyRelatedField(
+        queryset=StaffRegisteration.objects.all(),
+        required=False
+    )
+
+    teacher_id = serializers.IntegerField(source='teacher.id', read_only=True)
+    teacher_name = serializers.CharField(source='teacher.teacher_name', read_only=True)
+
     class Meta:
         model = PrimaryStudentsRegister
-        fields =['id', 'first_name', 'last_name', "username", 'class_year', 'teacher','school' , 'allergies','parent','staff']
-
+        fields = [
+            'id',
+            'first_name',
+            'last_name',
+            'username',
+            'class_year',
+            'teacher',        
+            'teacher_id',
+            'teacher_name',  
+            'school',
+            'allergies',
+            'parent',
+            'staff'
+        ]
 
 class CategoriesSerializer(serializers.ModelSerializer):
     class Meta:
