@@ -2205,7 +2205,9 @@ def get_order_by_id(request, order_id):
                 'quantity': item.quantity
             })
           
-        formatted_order_date = order.order_date.strftime('%d %b')
+       
+        local_order_date = timezone.localtime(order.order_date)
+        formatted_order_date = local_order_date.strftime('%d %b')
         order_data = {
             'order_id': order.id,
             'selected_day': order.selected_day,
@@ -2299,6 +2301,8 @@ def get_orders_by_school(request):
         'message': 'Orders retrieved successfully!',
         'orders': order_details
     }, status=status.HTTP_200_OK)
+
+
 @api_view(['POST'])
 def get_orders_by_user(request):
     user_id = request.data.get('user_id')
@@ -2332,11 +2336,10 @@ def get_orders_by_user(request):
     order_details = []
 
     for order in orders:
-        order_items = order.order_items.all() # Correctly get related OrderItems
+        order_items = order.order_items.all()
 
         items_details = []
         for item in order_items:
-            # Use the snapshot fields for safety
             item_name = item._menu_name if item._menu_name else (item.menu.name if item.menu else "Deleted Menu")
             item_price = item._menu_price if item._menu_price else (item.menu.price if item.menu else 0)
 
@@ -2345,13 +2348,15 @@ def get_orders_by_user(request):
                 'item_price': item_price,
                 'quantity': item.quantity
             })
+        local_date = localtime(order.order_date).date()
+        formatted_order_date = local_date.strftime('%d %B, %Y')   
 
-        formatted_order_date = order.order_date.strftime('%d %b')
         order_data = {
             'order_id': order.id,
             'selected_day': order.selected_day,
             'total_price': order.total_price,
             'order_date': formatted_order_date,
+            'order_date_raw': str(local_date), 
             'status': order.status,
             'week_number': order.week_number,
             'year': order.year,
@@ -2375,7 +2380,6 @@ def get_orders_by_user(request):
         'message': 'Orders retrieved successfully!',
         'orders': order_details
     }, status=status.HTTP_200_OK)
-
 
 @api_view(['POST'])
 def contactmessage(request):
