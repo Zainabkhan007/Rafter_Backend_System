@@ -1989,7 +1989,6 @@ def cancel_order(request):
         return Response({'error': 'Order ID is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
     try:
-       
         order = Order.objects.get(id=order_id)
 
        
@@ -1997,37 +1996,31 @@ def cancel_order(request):
         order.is_delivered = False
         order.save()
 
-      
         credit_message = None
         user = None
 
-        if not order.payment_method_id: 
-         
-            if order.user_type == 'student':
         
-                user = SecondaryStudent.objects.get(id=order.user_id)
-            elif order.user_type == 'parent':
-            
-                user = ParentRegisteration.objects.get(id=order.user_id)
-            elif order.user_type == 'staff':
-            
-                user = StaffRegisteration.objects.get(id=order.user_id)
+        if order.user_type == 'student':
+            user = SecondaryStudent.objects.get(id=order.user_id)
+        elif order.user_type == 'parent':
+            user = ParentRegisteration.objects.get(id=order.user_id)
+        elif order.user_type == 'staff':
+            user = StaffRegisteration.objects.get(id=order.user_id)
 
+        if user:
             user.credits += order.total_price
             user.save()
-
             credit_message = f"Credits of {order.total_price} have been added to your account."
-        
-      
+
         order_info = {
             'order_id': order.id,
             'user_name': order.user_name,
             'total_price': order.total_price,
-            'payment_method_id': order.payment_method_id if hasattr(order, 'payment_method_id') else None,
+            'payment_method_id': getattr(order, 'payment_method_id', None),
             'status': order.status,
             'is_delivered': order.is_delivered,
             'credit_message': credit_message,
-            'user_credits': user.credits if user else None, 
+            'user_credits': user.credits if user else None,
         }
 
         return Response({
@@ -2039,7 +2032,6 @@ def cancel_order(request):
         return Response({'error': 'Order not found.'}, status=status.HTTP_404_NOT_FOUND)
     except (ParentRegisteration.DoesNotExist, StaffRegisteration.DoesNotExist, SecondaryStudent.DoesNotExist):
         return Response({'error': 'User not found for credits update.'}, status=status.HTTP_404_NOT_FOUND)
-
 
 
 
@@ -2623,12 +2615,10 @@ class CreateOrderAndPaymentAPIView(APIView):
                     calculated_total_price += daily_total_price
                     created_orders.append(order_instance)
 
-                # Price check only for secondary schools
-                if not is_primary_free:
-                    if abs(calculated_total_price - front_end_total_price) > 0.01:
-                        raise ValueError("Price mismatch detected. Order not created.")
-                else:
-                    calculated_total_price = 0  # enforce free meals
+   
+                if is_primary_free:
+                    calculated_total_price = 0
+
 
                 # ---------------------------
                 # Handle primary (free meals)
