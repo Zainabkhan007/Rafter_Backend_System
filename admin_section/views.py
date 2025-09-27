@@ -2597,8 +2597,8 @@ class CreateOrderAndPaymentAPIView(APIView):
                             return Response({'error': f'Menu item with name "{item_name}" not found for {day}.'},
                                             status=status.HTTP_404_NOT_FOUND)
 
-                        # Use 0 price if primary
-                        item_price = 0 if is_primary_free else float(menu_item.price)
+                    
+                        item_price = 0 if is_primary_free else float(item.get('price', menu_item.price))
 
                         OrderItem.objects.create(
                             order=order_instance,
