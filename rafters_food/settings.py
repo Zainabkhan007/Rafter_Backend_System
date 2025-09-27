@@ -8,7 +8,7 @@ env = environ.Env(
 )
 
 ROOT_URLCONF = 'rafters_food.urls'
-ADMIN_PASSWORD = config('ADMIN_PASSWORD')
+ADMIN_PASSWORD = 'password123'
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 environ.Env.read_env()

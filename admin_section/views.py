@@ -2835,7 +2835,12 @@ def fetch_orders(school_id, school_type, target_day=None):
     if target_day:
         filter_kwargs["selected_day__iexact"] = target_day
 
-    orders = Order.objects.filter(**filter_kwargs).order_by("selected_day")
+    orders = (
+        Order.objects
+        .filter(**filter_kwargs)
+        .exclude(status__iexact="cancelled") 
+        .order_by("selected_day")
+    )
     
     student_orders = orders.exclude(user_type="staff")
     staff_orders = orders.filter(user_type="staff")
