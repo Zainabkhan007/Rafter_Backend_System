@@ -30,6 +30,8 @@ class OrderItemAdmin(admin.ModelAdmin):
 
 # Keep your simple ones as is
 admin.site.register(CanteenStaff)
+admin.site.register(Manager)
+admin.site.register(Worker)
 admin.site.register(PrimarySchool)
 admin.site.register(Teacher)
 admin.site.register(ContactMessage)
