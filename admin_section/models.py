@@ -183,13 +183,19 @@ class Menu(models.Model):
 
 
 class MenuItems(models.Model):
-    category = models.ForeignKey(Categories, blank=True, null=True, on_delete=models.CASCADE, related_name='menuitems')
+    category = models.ForeignKey(
+        Categories, blank=True, null=True, on_delete=models.CASCADE, related_name='menuitems'
+    )
     item_name = models.CharField(max_length=255)
     item_description = models.CharField(max_length=255)
     nutrients = JSONField(default=list)
     ingredients = models.TextField(blank=True, null=True)
     allergies = models.ManyToManyField(Allergens, blank=True, related_name='menuitems')
     image = models.ImageField(upload_to='menu_items/', blank=True, null=True)
+    
+    # New fields
+    production_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, default=0)
+    is_available = models.BooleanField(default=True)
 
     def __str__(self):
         return f"{self.id} Items: {self.item_name}"
@@ -302,6 +308,41 @@ class CanteenStaff(models.Model):
     def __str__(self):
         return f'{self.username} - {self.school_type}'
 
+class Manager(models.Model):
+    username = models.CharField(max_length=30, unique=True)
+    password = models.CharField(max_length=128)
+    school_type = models.CharField(max_length=20, choices=[('primary', 'Primary'), ('secondary', 'Secondary')])
+    primary_school = models.ForeignKey(PrimarySchool, on_delete=models.SET_NULL, null=True, blank=True)
+    secondary_school = models.ForeignKey(SecondarySchool, on_delete=models.SET_NULL, null=True, blank=True)
+
+    def save(self, *args, **kwargs):
+        # Hash password if not already hashed
+        if self.password and (not self.pk or not Manager.objects.filter(id=self.pk, password=self.password).exists()):
+            self.password = make_password(self.password)
+
+        # Clear irrelevant school
+        if self.school_type == 'primary':
+            self.secondary_school = None
+        elif self.school_type == 'secondary':
+            self.primary_school = None
+
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f'{self.username} - {self.school_type} Manager'
+
+class Worker(models.Model):
+    username = models.CharField(max_length=30, unique=True)
+    password = models.CharField(max_length=128)
+
+    def save(self, *args, **kwargs):
+        # Hash password if it's not already hashed
+       if self.password and (not self.pk or not Manager.objects.filter(id=self.pk, password=self.password).exists()):
+            self.password = make_password(self.password)
+            super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f'{self.username} - Worker'
 
 class ContactMessage(models.Model):
     full_name = models.CharField(max_length=100)

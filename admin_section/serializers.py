@@ -70,8 +70,99 @@ class CanteenStaffSerializer(serializers.ModelSerializer):
         if 'password' not in validated_data:
             validated_data['password'] = instance.password
         return super().update(instance, validated_data)
- 
- 
+class ManagerSerializer(serializers.ModelSerializer):
+    school_type = serializers.ChoiceField(choices=[('primary', 'Primary'), ('secondary', 'Secondary')])
+    primary_school = serializers.PrimaryKeyRelatedField(queryset=PrimarySchool.objects.all(), required=False, allow_null=True)
+    secondary_school = serializers.PrimaryKeyRelatedField(queryset=SecondarySchool.objects.all(), required=False, allow_null=True)
+    school_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Manager
+        fields = [
+            'id',
+            'username',
+            'password',
+            'school_type',
+            'primary_school',
+            'secondary_school',
+            'school_name',
+        ]
+        extra_kwargs = {
+            'password': {'write_only': True},
+        }
+
+    def validate(self, data):
+        """Ensure passwords match."""
+        if data.get('password') != data.get('confirm_password'):
+            raise serializers.ValidationError({"password": "Passwords do not match."})
+        return data
+
+    def create(self, validated_data):
+        validated_data['password'] = make_password(validated_data['password'])
+        validated_data.pop('confirm_password', None)
+
+        # Handle school type logic
+        if validated_data.get('school_type') == 'primary':
+            validated_data['secondary_school'] = None
+        elif validated_data.get('school_type') == 'secondary':
+            validated_data['primary_school'] = None
+
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        # Prevent password rehash if not updated
+        if 'password' in validated_data:
+            if validated_data['password'] != instance.password:
+                validated_data['password'] = make_password(validated_data['password'])
+        else:
+            validated_data['password'] = instance.password
+
+        validated_data.pop('confirm_password', None)
+
+        # School logic
+        if validated_data.get('school_type') == 'primary':
+            validated_data['secondary_school'] = None
+        elif validated_data.get('school_type') == 'secondary':
+            validated_data['primary_school'] = None
+
+        return super().update(instance, validated_data)
+
+    def get_school_name(self, obj):
+        if obj.school_type == 'primary' and obj.primary_school:
+            return obj.primary_school.school_name
+        elif obj.school_type == 'secondary' and obj.secondary_school:
+            return obj.secondary_school.secondary_school_name
+        return 'Unknown School'
+class WorkerSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Worker
+        fields = ['id', 'username', 'password', ]
+        extra_kwargs = {
+            'password': {'write_only': True},
+        }
+
+    def validate(self, data):
+        """Ensure passwords match."""
+        if data.get('password') != data.get('confirm_password'):
+            raise serializers.ValidationError({"password": "Passwords do not match."})
+        return data
+
+    def create(self, validated_data):
+        validated_data['password'] = make_password(validated_data['password'])
+        validated_data.pop('confirm_password', None)
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        # Handle password safely
+        if 'password' in validated_data:
+            if validated_data['password'] != instance.password:
+                validated_data['password'] = make_password(validated_data['password'])
+        else:
+            validated_data['password'] = instance.password
+
+        validated_data.pop('confirm_password', None)
+        return super().update(instance, validated_data)
+
 class LoginSerializer(serializers.Serializer):
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True, min_length=8, max_length=128)
@@ -248,25 +339,42 @@ class MenuSerializer(serializers.ModelSerializer):
 
 
 class MenuItemsSerializer(serializers.ModelSerializer):
-    allergies = serializers.SlugRelatedField(queryset=Allergens.objects.all(), slug_field='allergy', many=True, required=False)
+    allergies = serializers.SlugRelatedField(
+        queryset=Allergens.objects.all(),
+        slug_field='allergy',
+        many=True,
+        required=False
+    )
     image_url = serializers.SerializerMethodField()
 
     class Meta:
         model = MenuItems
-        fields = ['id', 'item_name', 'item_description', 'ingredients', 'nutrients', 'allergies', 'image', 'image_url']
+        fields = [
+            'id',
+            'item_name',
+            'item_description',
+            'ingredients',
+            'nutrients',
+            'allergies',
+            'image',
+            'image_url',
+            'production_price',
+            'is_available', 
+        ]
     
     def get_image_url(self, obj):
         request = self.context.get('request')
         if obj.image and request:
             return request.build_absolute_uri(obj.image.url)
         return None
-    
-    # Optionally validate the image field
+
     def validate(self, data):
         # Ensure image is optional
         if 'image' in data and not data['image']:
             data['image'] = None
         return data
+
+
 class OrderItemSerializer(serializers.ModelSerializer):
     # This correctly gets the menu name from the related Menu object
     item_name = serializers.CharField(source='menu.name', read_only=True)

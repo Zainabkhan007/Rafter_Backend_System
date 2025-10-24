@@ -96,45 +96,123 @@ def verify_apple_token(identity_token: str):
 
 @api_view(["POST"])
 def register(request):
+    login_method = request.data.get("login_method", "email")
     email = request.data.get("email")
-    login_method = request.data.get("login_method", "email")  # default to email if not provided
+    username = request.data.get("username")
+    password = request.data.get("password")
+    confirm_password = request.data.get("confirm_password") or request.data.get("password_confirmation")
+    school_type = request.data.get("school_type")
+    school_id = request.data.get("school_id")  # frontend sends school_id
 
-    if not email:
-        return Response({"error": "Email is required."}, status=status.HTTP_400_BAD_REQUEST)
+    if login_method in ["manager", "worker"]:
+        if not username:
+            return Response({"error": "Username is required."}, status=400)
+        if not password or not confirm_password:
+            return Response({"error": "Password and confirm password are required."}, status=400)
+        if password != confirm_password:
+            return Response({"error": "Passwords do not match."}, status=400)
 
-    # Check if already registered
-    if StaffRegisteration.objects.filter(email=email).exists() or \
-       ParentRegisteration.objects.filter(email=email).exists() or \
-       SecondaryStudent.objects.filter(email=email).exists() or \
-       CanteenStaff.objects.filter(email=email).exists():
-        return Response({"error": "Email already registered."}, status=status.HTTP_400_BAD_REQUEST)
+        # Map school_id to correct field
+        primary_school_id = school_id if school_type == "primary" else None
+        secondary_school_id = school_id if school_type == "secondary" else None
 
-    existing_unverified = UnverifiedUser.objects.filter(email=email).first()
+        # MANAGER ACCOUNT
+        if login_method == "manager":
+            if Manager.objects.filter(username=username).exists():
+                return Response({"error": "Username already exists."}, status=400)
+            if password != confirm_password:
+                return Response({"error": "Passwords do not match."}, status=400)
 
-    # Handle recent attempts (only apply for email flow)
-    if existing_unverified:
-        if login_method == "email":
-            if existing_unverified.created_at > timezone.now() - timedelta(seconds=60):
+
+            primary_school_id = school_id if school_type == "primary" else None
+            secondary_school_id = school_id if school_type == "secondary" else None
+            manager = Manager.objects.create(
+                username=username,
+                password=make_password(password),
+                school_type=school_type,
+                primary_school_id=primary_school_id,
+                secondary_school_id=secondary_school_id,
+            )
+
+            # Optional: return school name in response
+            school_name = None
+            if school_type == "primary" and primary_school_id:
+                school_name = PrimarySchool.objects.filter(id=primary_school_id).first()
+                school_name = school_name.school_name if school_name else "Unknown School"
+            elif school_type == "secondary" and secondary_school_id:
+                school_name = SecondarySchool.objects.filter(id=secondary_school_id).first()
+                school_name = school_name.secondary_school_name if school_name else "Unknown School"
+
+            return Response(
+                {
+                    "message": "Manager account created successfully.",
+                    "user_type": "manager",
+                    "id": manager.id,
+                    "school_name": school_name or "Unknown School",
+                    "school_type": school_type,
+                    "primary_school": primary_school_id,
+                    "secondary_school": secondary_school_id,
+                },
+                status=201,
+            )
+
+        # WORKER ACCOUNT
+
+    if login_method == "worker":
+        if Worker.objects.filter(username=username).exists():
+            return Response({"error": "Username already exists."}, status=400)
+
+        # Passwords already validated
+        worker = Worker.objects.create(
+            username=username,
+            password=make_password(password)
+        )
+
+        return Response(
+            {
+                "message": "Worker account created successfully.",
+                "user_type": "worker",
+                "id": worker.id,
+            },
+            status=201,
+        )
+
+    # -------------------------------------------------
+    # EMAIL-BASED REGISTRATION (Parent, Staff, Student)
+    # -------------------------------------------------
+    if login_method not in ["manager", "worker"]:
+        if not email:
+            return Response({"error": "Email is required for this registration type."}, status=400)
+
+        # Check if email already registered
+        if (
+            StaffRegisteration.objects.filter(email=email).exists()
+            or ParentRegisteration.objects.filter(email=email).exists()
+            or SecondaryStudent.objects.filter(email=email).exists()
+            or CanteenStaff.objects.filter(email=email).exists()
+        ):
+            return Response({"error": "Email already registered."}, status=400)
+
+        existing_unverified = UnverifiedUser.objects.filter(email=email).first()
+        if existing_unverified:
+            if login_method == "email" and existing_unverified.created_at > timezone.now() - timedelta(seconds=60):
                 return Response(
                     {"error": "A verification email has already been sent recently. Please check your inbox."},
-                    status=status.HTTP_400_BAD_REQUEST
+                    status=400,
                 )
-        # Delete any old unverified user regardless of method
-        existing_unverified.delete()
+            existing_unverified.delete()
 
-    # Create new unverified user (for both email and social logins)
-    new_unverified = UnverifiedUser.objects.create(
-        email=email,
-        data=request.data,
-        login_method=login_method
-    )
+        new_unverified = UnverifiedUser.objects.create(
+            email=email,
+            data=request.data,
+            login_method=login_method,
+        )
 
-    # If it's email login, send verification email
-    if login_method == "email":
-        verification_link = f"{settings.FRONTEND_URL}/verify-email/{new_unverified.token}/"
-        send_mail(
-            subject="Action Required: Confirm Your Email Address",
-            message=f"""
+        if login_method == "email":
+            verification_link = f"{settings.FRONTEND_URL}/verify-email/{new_unverified.token}/"
+            send_mail(
+                subject="Action Required: Confirm Your Email Address",
+                message=f"""
 Hi there,
 
 Thank you for registering with us.
@@ -148,23 +226,24 @@ If you did not create an account with us, you can safely ignore this email.
 Best regards,  
 The Rafters Team
 """,
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[email],
-        )
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[email],
+            )
+            return Response(
+                {"message": "Verification email sent. Please check your inbox."},
+                status=200,
+            )
+
         return Response(
-            {"message": "Verification email sent. Please check your inbox."},
-            status=status.HTTP_200_OK
+            {
+                "message": "OAuth login successful. Additional info required.",
+                "token": str(new_unverified.token),
+                "provider": login_method,
+            },
+            status=200,
         )
 
-    # For social login flow
-    return Response(
-        {
-            "message": "OAuth login successful. Additional info required.",
-            "token": str(new_unverified.token),
-            "provider": login_method
-        },
-        status=status.HTTP_200_OK
-    )
+    return Response({"error": "Invalid registration type."}, status=400)
 
 
 
@@ -688,7 +767,70 @@ def cateenstaff_by_id(request, pk):
         staff.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
+@csrf_exempt
+@api_view(['GET'])
+def get_managers(request):
+    managers = Manager.objects.all()
+    serializer = ManagerSerializer(managers, many=True)
+    return Response(serializer.data, status=status.HTTP_200_OK)
 
+
+@api_view(['GET', 'PUT', 'DELETE'])
+def manager_by_id(request, pk):
+    try:
+        manager = Manager.objects.get(pk=pk)
+    except Manager.DoesNotExist:
+        raise NotFound({'error': 'Manager not found'})
+
+    if request.method == 'GET':
+        serializer = ManagerSerializer(manager)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    elif request.method == 'PUT':
+        serializer = ManagerSerializer(manager, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    elif request.method == 'DELETE':
+        manager.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ---------------------------
+# WORKER APIS
+# ---------------------------
+
+@csrf_exempt
+@api_view(['GET'])
+def get_workers(request):
+    workers = Worker.objects.all()
+    serializer = WorkerSerializer(workers, many=True)
+    return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+@api_view(['GET', 'PUT', 'DELETE'])
+def worker_by_id(request, pk):
+    try:
+        worker = Worker.objects.get(pk=pk)
+    except Worker.DoesNotExist:
+        raise NotFound({'error': 'Worker not found'})
+
+    if request.method == 'GET':
+        serializer = WorkerSerializer(worker)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    elif request.method == 'PUT':
+        serializer = WorkerSerializer(worker, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    elif request.method == 'DELETE':
+        worker.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 def generate_unique_username(first_name, last_name):
     from admin_section.models import PrimaryStudentsRegister
@@ -3801,3 +3943,45 @@ def get_app_version(request, platform):
         return Response(serializer.data)
     except AppVersion.DoesNotExist:
         return Response({"error": "Platform not found"}, status=404)
+@api_view(['POST'])
+def make_menu_available(request):
+    menu_id = request.data.get('menu_id')
+
+    if not menu_id:
+        return Response({'error': 'menu_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        menu_item = MenuItems.objects.get(id=menu_id)
+    except MenuItems.DoesNotExist:
+        return Response({'error': 'Menu item not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    menu_item.is_available = True
+    menu_item.save()
+
+    return Response({
+        'message': f'Menu item "{menu_item.item_name}" is now available.',
+        'menu_id': menu_item.id,
+        'is_available': menu_item.is_available,
+    }, status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+def make_menu_unavailable(request):
+    menu_id = request.data.get('menu_id')
+
+    if not menu_id:
+        return Response({'error': 'menu_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        menu_item = MenuItems.objects.get(id=menu_id)
+    except MenuItems.DoesNotExist:
+        return Response({'error': 'Menu item not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    menu_item.is_available = False
+    menu_item.save()
+
+    return Response({
+        'message': f'Menu item "{menu_item.item_name}" is now unavailable.',
+        'menu_id': menu_item.id,
+        'is_available': menu_item.is_available,
+    }, status=status.HTTP_200_OK)

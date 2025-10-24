@@ -23,6 +23,10 @@ urlpatterns = [
      
     path('get_cateenstaff/', views.get_cateenstaff, name='get_cateenstaff'),
     path('cateenstaff_by_id/<int:pk>/', views.cateenstaff_by_id, name='cateenstaff_by_id'),
+    path('managers/', views.get_managers, name='get_managers'),
+    path('managers/<int:pk>/', views.manager_by_id, name='manager_by_id'),
+    path('workers/', views.get_workers, name='get_workers'),
+    path('workers/<int:pk>/', views.worker_by_id, name='worker_by_id'),
 
     path('add_child/', views.add_child, name='add_child'),
     path('edit_child/<int:child_id>/', views.edit_child, name='edit_child'),
@@ -70,6 +74,10 @@ urlpatterns = [
     
     path("add_menu_item/",views.add_menu_item,name='add_menu_item'),
     path("get_menu_items/",views.get_menu_items,name='get_menu_items'),
+    path('make_menu_available/', views.make_menu_available, name='make_menu_available'),
+    path('make_menu_unavailable/', views.make_menu_unavailable, name='make_menu_unavailable'),
+
+
     path('update_menu_items/<int:pk>/', views.update_menu_items, name='update_menu_items'),
     path("get_active_menu/",views.get_active_menu,name='get_active_menu'),
 
