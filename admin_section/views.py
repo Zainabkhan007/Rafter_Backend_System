@@ -259,18 +259,20 @@ def verify_email(request, token):
 
         # If already verified
         if unverified.is_verified:
-            return Response({"message": "This email is already verified."},
-                            status=status.HTTP_200_OK)
+            return Response(
+                {"message": "This email is already verified."},
+                status=status.HTTP_200_OK,
+            )
 
-        # Token has expired
+        # Token expired (after 1 hour)
         if timezone.now() > unverified.created_at + timedelta(hours=1):
             old_data = unverified.data
             email = old_data.get("email")
 
-            # Delete the expired token
+            # Delete old record
             unverified.delete()
 
-            # Generate a new token and send it
+            # Generate a new token and resend
             new_unverified = UnverifiedUser.objects.create(
                 email=email,
                 data=old_data,
@@ -294,54 +296,79 @@ The Rafters Team
                 recipient_list=[email],
             )
 
-            return Response({"error": "Verification link has expired. A new one has been sent to your email."},
-                            status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {
+                    "error": "Verification link has expired. A new one has been sent to your email."
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        # If we reach here, the token is valid — proceed with registration
         user_data = unverified.data
         user_type = user_data.get("user_type")
-        school_field = None
 
+        phone_no = user_data.get("phone_no")
+        if not phone_no or not str(phone_no).isdigit():
+            user_data["phone_no"] = None  
+
+        serializer = None
+
+        # Handle user creation based on type
         if user_data.get("school_type"):
-            school = PrimarySchool.objects.get(id=user_data["school_id"]) if user_data["school_type"] == "primary" else SecondarySchool.objects.get(id=user_data["school_id"])
+            if user_data["school_type"] == "primary":
+                school = PrimarySchool.objects.get(id=user_data["school_id"])
+            else:
+                school = SecondarySchool.objects.get(id=user_data["school_id"])
 
-            if user_data["user_type"] == "student":
+            if user_type == "student":
                 user_data["school"] = school.id
                 serializer = SecondaryStudentSerializer(data=user_data)
 
-            elif user_data["user_type"] == "staff":
+            elif user_type == "staff":
                 key = "primary_school" if user_data["school_type"] == "primary" else "secondary_school"
                 user_data[key] = school.id
                 serializer = StaffRegisterationSerializer(data=user_data)
 
-            elif user_data["user_type"] == "canteenstaff":
+            elif user_type == "canteenstaff":
                 key = "primary_school" if user_data["school_type"] == "primary" else "secondary_school"
                 user_data[key] = school.id
                 serializer = CanteenStaffSerializer(data=user_data)
 
             else:
-                return Response({"error": "Invalid user type."},
-                                status=status.HTTP_400_BAD_REQUEST)
+                return Response(
+                    {"error": "Invalid user type."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
-        elif user_data["user_type"] == "parent":
+        elif user_type == "parent":
             serializer = ParentRegisterationSerializer(data=user_data)
 
         else:
-            return Response({"error": "Invalid user type."},
-                            status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"error": "Invalid user type."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
+        # Save if valid
         if serializer.is_valid():
             serializer.save()
             unverified.is_verified = True
             unverified.save()
-            return Response({"message": "Email verified successfully. User account has been created."},
-                            status=status.HTTP_201_CREATED)
+
+            return Response(
+                {
+                    "message": "Email verified successfully. User account has been created."
+                },
+                status=status.HTTP_201_CREATED,
+            )
         else:
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     except UnverifiedUser.DoesNotExist:
-        return Response({"error": "Invalid or non-existing verification link."},
-                        status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {"error": "Invalid or non-existing verification link."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
 
 
 @api_view(["POST"])
