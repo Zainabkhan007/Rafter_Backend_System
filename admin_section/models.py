@@ -208,6 +208,7 @@ class Order(models.Model):
     user_id = models.BigIntegerField(null=True, blank=True)
     user_type = models.CharField(max_length=50)
     child_id = models.BigIntegerField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
     total_price = models.FloatField()
     week_number = models.BigIntegerField(null=True)
     year = models.BigIntegerField(null=True)
@@ -312,15 +313,19 @@ class Manager(models.Model):
     username = models.CharField(max_length=30, unique=True)
     password = models.CharField(max_length=128)
     school_type = models.CharField(max_length=20, choices=[('primary', 'Primary'), ('secondary', 'Secondary')])
-    primary_school = models.ForeignKey(PrimarySchool, on_delete=models.SET_NULL, null=True, blank=True)
-    secondary_school = models.ForeignKey(SecondarySchool, on_delete=models.SET_NULL, null=True, blank=True)
+    primary_school = models.ForeignKey('PrimarySchool', on_delete=models.SET_NULL, null=True, blank=True)
+    secondary_school = models.ForeignKey('SecondarySchool', on_delete=models.SET_NULL, null=True, blank=True)
 
     def save(self, *args, **kwargs):
-        # Hash password if not already hashed
-        if self.password and (not self.pk or not Manager.objects.filter(id=self.pk, password=self.password).exists()):
+        # ✅ Always lowercase username
+        if self.username:
+            self.username = self.username.lower()
+
+        # ✅ Hash password if not already hashed
+        if self.password and not self.password.startswith('pbkdf2_'):
             self.password = make_password(self.password)
 
-        # Clear irrelevant school
+        # ✅ Keep only relevant school
         if self.school_type == 'primary':
             self.secondary_school = None
         elif self.school_type == 'secondary':
@@ -331,18 +336,65 @@ class Manager(models.Model):
     def __str__(self):
         return f'{self.username} - {self.school_type} Manager'
 
+class ManagerOrder(models.Model):
+    manager = models.ForeignKey('Manager', on_delete=models.CASCADE, related_name='orders')
+    created_at = models.DateTimeField(auto_now_add=True)
+    order_date = models.DateField(null=True, blank=True) 
+    week_number = models.PositiveIntegerField(null=True, blank=True)
+    year = models.PositiveIntegerField(null=True, blank=True)
+    status = models.CharField(max_length=20, default='pending')
+    selected_day = models.CharField(max_length=20, blank=True, null=True)
+    is_delivered = models.BooleanField(default=False)
+
+    def __str__(self):
+        return f"ManagerOrder {self.id} - {self.manager.username}"
+
+    @property
+    def total_production_price(self):
+        total = sum(item.production_price or 0 for item in self.items.all())
+        return total
+
+
+class ManagerOrderItem(models.Model):
+    order = models.ForeignKey('ManagerOrder', on_delete=models.CASCADE, related_name='items')
+    day = models.CharField(max_length=50)
+    item = models.CharField(max_length=255)
+    quantity = models.PositiveIntegerField(default=1)
+    remarks = models.TextField(blank=True, null=True)
+
+    menu_item = models.ForeignKey(
+        'MenuItems',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='manager_order_items'
+    )
+    production_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, default=0)
+
+    def save(self, *args, **kwargs):
+        if self.menu_item and not self.production_price:
+            self.production_price = self.menu_item.production_price or 0
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.item} ({self.day}) x {self.quantity}"
+
+
 class Worker(models.Model):
     username = models.CharField(max_length=30, unique=True)
     password = models.CharField(max_length=128)
 
     def save(self, *args, **kwargs):
-        # Hash password if it's not already hashed
-       if self.password and (not self.pk or not Manager.objects.filter(id=self.pk, password=self.password).exists()):
+        if self.username:
+            self.username = self.username.lower()
+        if self.password and not self.password.startswith('pbkdf2_'):
             self.password = make_password(self.password)
-            super().save(*args, **kwargs)
+
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f'{self.username} - Worker'
+
 
 class ContactMessage(models.Model):
     full_name = models.CharField(max_length=100)

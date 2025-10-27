@@ -40,6 +40,33 @@ admin.site.register(Categories)
 admin.site.register(Allergens)
 admin.site.register(MenuItems)
 admin.site.register(Menu)
+@admin.register(ManagerOrder)
+class ManagerOrderAdmin(admin.ModelAdmin):
+    list_display = (
+        'id',
+        'manager',
+        'selected_day',
+        'status',
+        'is_delivered',
+        'week_number',
+        'year',
+        'order_date',
+        'total_production_price',
+    )
+    list_filter = ('status', 'is_delivered', 'week_number', 'year')
+    search_fields = ('manager__username', 'selected_day')
+    readonly_fields = ('order_date', 'total_production_price')
+
+
+
+# ✅ ManagerOrderItem Admin (standalone view)
+@admin.register(ManagerOrderItem)
+class ManagerOrderItemAdmin(admin.ModelAdmin):
+    list_display = ('id', 'order', 'day', 'item', 'quantity', 'production_price')
+    search_fields = ('item', 'day', 'order__manager__username')
+    list_filter = ('day',)
+    readonly_fields = ('production_price',)
+
 
 @admin.register(AppVersion)
 class AppVersionAdmin(admin.ModelAdmin):

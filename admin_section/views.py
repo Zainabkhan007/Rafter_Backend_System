@@ -13,7 +13,7 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from django.utils.timezone import now
 import logging
 from collections import defaultdict
-from django.utils.timezone import localtime
+from django.utils.timezone import localtime, make_aware
 from urllib.parse import quote
 from django.core.signing import TimestampSigner, BadSignature, SignatureExpired
 from django.utils.crypto import get_random_string
@@ -2214,310 +2214,159 @@ def add_order_item(request):
             return Response(serializer.data,status=status.HTTP_201_CREATED, )
         else:
             return Response({ "error" : serializer.errors},status = status.HTTP_400_BAD_REQUEST)
-@api_view(['POST'])
-def get_all_orders(request):
-    user_type = request.data.get('user_type')
-    user_id = request.data.get('user_id')
-    child_id = request.data.get('child_id')
-
-    if user_type == 'staff' and user_id:
-        try:
-            staff = StaffRegisteration.objects.get(id=user_id)
-            orders = Order.objects.filter(staff=staff).order_by('-order_date')
-        except StaffRegisteration.DoesNotExist:
-            return Response({'error': 'Staff not found.'}, status=status.HTTP_404_NOT_FOUND)
-    
-    elif user_type == 'parent' and child_id:
-        try:
-            child = PrimaryStudentsRegister.objects.get(id=child_id)
-            orders = Order.objects.filter(child_id=child_id).order_by('-order_date')
-        except PrimaryStudentsRegister.DoesNotExist:
-            return Response({'error': 'Child not found.'}, status=status.HTTP_404_NOT_FOUND)
-    
-    else:
-        orders = Order.objects.all().order_by('-order_date')
-
-    if not orders.exists():
-        return Response({'error': 'No orders found.'}, status=status.HTTP_404_NOT_FOUND)
-
-    order_details = []
-
-    for order in orders:
-        order_items = OrderItem.objects.filter(order=order)
-        
-        items_details = [
-            {
-                'item_name': item.menu.name,
-                'item_price': item.menu.price,  
-                'quantity': item.quantity
-            }
-            for item in order_items
-        ]
-
-        # Convert UTC datetime to local timezone
-        local_order_date = timezone.localtime(order.order_date)
-        formatted_order_date = local_order_date.strftime('%d %b')
-
-        order_data = {
-            'order_id': order.id,
-            'selected_day': order.selected_day,
-            'total_price': order.total_price,
-            'order_date': formatted_order_date,
-            'status': order.status,
-            'week_number': order.week_number,
-            'year': order.year,
-            'items': items_details,  
-            'user_name': order.user_name,
-        }
-
-        if order.user_type in ['parent', 'staff']:
-            order_data['child_id'] = order.child_id
-
-        if order.primary_school:
-            order_data['school_id'] = order.primary_school.id
-            order_data['school_type'] = 'primary'
-        elif order.secondary_school:
-            order_data['school_id'] = order.secondary_school.id
-            order_data['school_type'] = 'secondary'
-
-        order_details.append(order_data)
-
-    return Response({
-        'message': 'Orders retrieved successfully!',
-        'orders': order_details
-    }, status=status.HTTP_200_OK)
 
 
 @api_view(['GET'])
 def get_all_orders(request):
+    order_details = []
     orders = Order.objects.all().order_by('-order_date')
 
-    if not orders.exists():
-        return Response({'error': 'No orders found.'}, status=status.HTTP_404_NOT_FOUND)
-
-    order_details = []
-
     for order in orders:
         order_items = OrderItem.objects.filter(order=order)
-        
-        items_details = []
-        for item in order_items:
-            # Use the snapshot fields for safety
-            item_name = item._menu_name if item._menu_name else (item.menu.name if item.menu else "Deleted Menu")
-            item_price = item._menu_price if item._menu_price else (item.menu.price if item.menu else 0)
-
-            items_details.append({
-                'item_name': item_name,
-                'item_price': item_price,  
-                'quantity': item.quantity
-            })
-
-        # ✅ Convert UTC → Local time before formatting
-        local_order_date = timezone.localtime(order.order_date)
-        formatted_order_date = local_order_date.strftime('%d %b')
-
-        order_data = {
-            'order_id': order.id,
-            'selected_day': order.selected_day,
-            'total_price': order.total_price,
-            'order_date': formatted_order_date,
-            'status': order.status,
-            'week_number': order.week_number,
-            'year': order.year,
-            'items': items_details,  
-            'user_name': order.user_name,
-            'payment_id': order.payment_id,
-        }
-
-        if order.user_type in ['parent', 'staff']:
-            order_data['child_id'] = order.child_id
-
-        if order.primary_school:
-            order_data['school_id'] = order.primary_school.id
-            order_data['school_name'] = order.primary_school.school_name
-            order_data['school_type'] = 'primary'
-        elif order.secondary_school:
-            order_data['school_id'] = order.secondary_school.id
-            order_data['school_name'] = order.secondary_school.secondary_school_name
-            order_data['school_type'] = 'secondary'
-
-        order_details.append(order_data)
-
-    return Response({
-        'message': 'Orders retrieved successfully!',
-        'orders': order_details
-    }, status=status.HTTP_200_OK)
-
-@api_view(['GET'])
-def get_order_by_id(request, order_id):
-    try:
-        order = Order.objects.get(id=order_id)
-        order_items = OrderItem.objects.filter(order=order)
-        
-        items_details = []
-        for item in order_items:
-            # Use the snapshot fields for safety
-            item_name = item._menu_name if item._menu_name else (item.menu.name if item.menu else "Deleted Menu")
-            item_price = item._menu_price if item._menu_price else (item.menu.price if item.menu else 0)
-
-            items_details.append({
-                'item_name': item_name,
-                'item_price': item_price, 
-                'quantity': item.quantity
-            })
-          
-       
-        local_order_date = timezone.localtime(order.order_date)
-        formatted_order_date = local_order_date.strftime('%d %b')
-        order_data = {
-            'order_id': order.id,
-            'selected_day': order.selected_day,
-            'total_price': order.total_price,
-            'order_date': formatted_order_date,
-            'status': order.status,
-            'week_number': order.week_number,
-            'year': order.year,
-            'items': items_details,  
-            'user_name': order.user_name,
-        }
-
-        if order.user_type in ['parent', 'staff']:
-            order_data['child_id'] = order.child_id
-      
-        if order.primary_school:
-            order_data['school_id'] = order.primary_school.id
-            order_data['school_type'] = 'primary'
-        elif order.secondary_school:
-            order_data['school_id'] = order.secondary_school.id
-            order_data['school_type'] = 'secondary'
-        return Response({
-            'message': 'Order retrieved successfully!',
-            'order': order_data
-        }, status=status.HTTP_200_OK)
-
-    except Order.DoesNotExist:
-        return Response({'error': 'Order not found.'}, status=status.HTTP_404_NOT_FOUND)
-
-@api_view(['POST'])
-def get_orders_by_school(request):
-    school_id = request.data.get('school_id')
-    school_type = request.data.get('school_type')
-
-    if not school_id or not school_type:
-        return Response({'error': 'Both school_id and school_type are required.'}, status=status.HTTP_400_BAD_REQUEST)
-
-    if school_type not in ['primary', 'secondary']:
-        return Response({'error': 'Invalid school_type. It should be either "primary" or "secondary".'}, status=status.HTTP_400_BAD_REQUEST)
-
-    if school_type == 'primary':
-        orders = Order.objects.filter(primary_school_id=school_id).order_by('-order_date')
-    elif school_type == 'secondary':
-        orders = Order.objects.filter(secondary_school_id=school_id).order_by('-order_date')
-
-    if not orders.exists():
-        return Response({'error': 'No orders found for the given school.'}, status=status.HTTP_404_NOT_FOUND)
-
-    order_details = []
-
-    for order in orders:
-        order_items = OrderItem.objects.filter(order=order)
-        
-        items_details = []
-        for item in order_items:
-            # Use the snapshot fields for safety
-            item_name = item._menu_name if item._menu_name else (item.menu.name if item.menu else "Deleted Menu")
-            item_price = item._menu_price if item._menu_price else (item.menu.price if item.menu else 0)
-            
-            items_details.append({
-                'item_name': item_name,
-                'item_price': item_price,  
-                'quantity': item.quantity
-            })
-
-        order_data = {
-            'order_id': order.id,
-            'selected_day': order.selected_day,
-            'total_price': order.total_price,
-            'order_date': str(order.order_date),
-            'status': order.status,
-            'week_number': order.week_number,
-            'year': order.year,
-            'items': items_details,  
-            'user_name': order.user_name,
-        }
-
-        if order.user_type in ['parent', 'staff']:
-            order_data['child_id'] = order.child_id
-
-        if order.primary_school:
-            order_data['school_id'] = order.primary_school.id
-            order_data['school_type'] = 'primary'
-        elif order.secondary_school:
-            order_data['school_id'] = order.secondary_school.id
-            order_data['school_type'] = 'secondary'
-
-        order_details.append(order_data)
-    
-    return Response({
-        'message': 'Orders retrieved successfully!',
-        'orders': order_details
-    }, status=status.HTTP_200_OK)
-
-
-@api_view(['POST'])
-def get_orders_by_user(request):
-    user_id = request.data.get('user_id')
-    user_type = request.data.get('user_type')
-    child_id = request.data.get('child_id')
-
-    if not user_type:
-        return Response({'error': 'user_type is required.'}, status=status.HTTP_400_BAD_REQUEST)
-
-    if user_type not in ['student', 'parent', 'staff']:
-        return Response({'error': 'Invalid user_type. It should be one of ["student", "parent", "staff"].'},
-                        status=status.HTTP_400_BAD_REQUEST)
-
-    orders = Order.objects.none()
-
-    if user_type == 'staff' and child_id:
-        orders = Order.objects.filter(child_id=child_id).order_by('-order_date')
-
-    elif user_type == 'staff' and user_id:
-        orders = Order.objects.filter(user_id=user_id, user_type='staff').order_by('-order_date')
-
-    elif user_type == 'parent':
-        orders = Order.objects.filter(user_id=user_id, user_type='parent').order_by('-order_date')
-
-    elif user_type == 'student':
-        orders = Order.objects.filter(user_id=user_id, user_type='student').order_by('-order_date')
-
-    if not orders.exists():
-        return Response({'error': 'No orders found for the given user.'}, status=status.HTTP_404_NOT_FOUND)
-
-    order_details = []
-
-    for order in orders:
-        order_items = order.order_items.all()
-
         items_details = []
         for item in order_items:
             item_name = item._menu_name if item._menu_name else (item.menu.name if item.menu else "Deleted Menu")
             item_price = item._menu_price if item._menu_price else (item.menu.price if item.menu else 0)
-
             items_details.append({
                 'item_name': item_name,
                 'item_price': item_price,
                 'quantity': item.quantity
             })
-        local_date = localtime(order.order_date).date()
-        formatted_order_date = local_date.strftime('%d %B, %Y')   
+        if isinstance(order.order_date, date) and not isinstance(order.order_date, datetime):
+            order_datetime = make_aware(datetime.combine(order.order_date, datetime.min.time()))
+        else:
+            order_datetime = order.order_date
+
+        local_order_date = localtime(order_datetime)
+        formatted_order_date = local_order_date.strftime('%d %B, %Y')
 
         order_data = {
             'order_id': order.id,
             'selected_day': order.selected_day,
             'total_price': order.total_price,
             'order_date': formatted_order_date,
-            'order_date_raw': str(local_date), 
+            'status': order.status,
+            'week_number': order.week_number,
+            'year': order.year,
+            'items': items_details,
+            'user_name': order.user_name,
+            'user_type': order.user_type,
+        }
+
+        order_details.append(order_data)
+    manager_orders = ManagerOrder.objects.all().order_by('-order_date')
+
+    for m_order in manager_orders:
+        m_items = ManagerOrderItem.objects.filter(order=m_order)
+        items_details = [
+            {
+                'day': item.day,
+                'item': item.item,
+                'quantity': item.quantity,
+                'production_price': item.production_price or 0
+            }
+            for item in m_items
+        ]
+        if isinstance(m_order.order_date, date) and not isinstance(m_order.order_date, datetime):
+            order_datetime = make_aware(datetime.combine(m_order.order_date, datetime.min.time()))
+        else:
+            order_datetime = m_order.order_date
+
+        local_order_date = localtime(order_datetime)
+        formatted_order_date = local_order_date.strftime('%d %B, %Y')
+
+        order_data = {
+            'order_id': f"m_{m_order.id}",  
+            'selected_day': m_order.selected_day,
+            'total_production_price': m_order.total_production_price,
+            'order_date': formatted_order_date,
+            'status': m_order.status,
+            'week_number': m_order.week_number,
+            'year': m_order.year,
+            'is_delivered': m_order.is_delivered,
+            'user_name': m_order.manager.username if hasattr(m_order.manager, 'username') else str(m_order.manager),
+            'items': items_details,
+            'user_type': 'manager',
+        }
+
+        order_details.append(order_data)
+    return Response({
+        'message': 'Orders retrieved successfully!',
+        'orders': order_details
+    }, status=status.HTTP_200_OK)
+
+def safe_localtime(dt):
+    """Ensure datetime is timezone-aware before converting to localtime."""
+    if isinstance(dt, date) and not isinstance(dt, datetime):
+        dt = make_aware(datetime.combine(dt, datetime.min.time()))
+    return localtime(dt)
+
+@api_view(['GET'])
+def get_order_by_id(request, order_id):
+    if str(order_id).startswith('m_'):
+        manager_order_id = str(order_id).replace('m_', '')
+        try:
+            order = ManagerOrder.objects.get(id=manager_order_id)
+            order_items = ManagerOrderItem.objects.filter(order=order)
+
+            items_details = [
+                {
+                    'day': item.day,
+                    'item': item.item,
+                    'quantity': item.quantity,
+                    'production_price': item.production_price or 0
+                }
+                for item in order_items
+            ]
+
+            local_order_date = safe_localtime(order.order_date)
+            formatted_order_date = local_order_date.strftime('%d %B, %Y')
+
+            order_data = {
+                'order_id': f"m_{order.id}",
+                'selected_day': order.selected_day,
+                'total_production_price': order.total_production_price,
+                'order_date': formatted_order_date,
+                'status': order.status,
+                'week_number': order.week_number,
+                'year': order.year,
+                'is_delivered': order.is_delivered,
+                'manager_name': order.manager.username if hasattr(order.manager, 'username') else str(order.manager),
+                'items': items_details,
+                'user_type': 'manager'
+            }
+
+            return Response(
+                {'message': 'Manager order retrieved successfully!', 'order': order_data},
+                status=status.HTTP_200_OK
+            )
+
+        except ManagerOrder.DoesNotExist:
+            return Response({'error': 'Manager order not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    # ---------------- NORMAL ORDER ----------------
+    try:
+        order = Order.objects.get(id=order_id)
+        order_items = OrderItem.objects.filter(order=order)
+
+        items_details = []
+        for item in order_items:
+            item_name = item._menu_name if item._menu_name else (item.menu.name if item.menu else "Deleted Menu")
+            item_price = item._menu_price if item._menu_price else (item.menu.price if item.menu else 0)
+            items_details.append({
+                'item_name': item_name,
+                'item_price': item_price,
+                'quantity': item.quantity
+            })
+
+        local_order_date = safe_localtime(order.order_date)
+        formatted_order_date = local_order_date.strftime('%d %B, %Y')
+
+        order_data = {
+            'order_id': order.id,
+            'selected_day': order.selected_day,
+            'total_price': order.total_price,
+            'order_date': formatted_order_date,
             'status': order.status,
             'week_number': order.week_number,
             'year': order.year,
@@ -2535,12 +2384,224 @@ def get_orders_by_user(request):
             order_data['school_id'] = order.secondary_school.id
             order_data['school_type'] = 'secondary'
 
+        return Response({'message': 'Order retrieved successfully!', 'order': order_data},
+                        status=status.HTTP_200_OK)
+
+    except Order.DoesNotExist:
+        return Response({'error': 'Order not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+@api_view(['POST'])
+def get_orders_by_school(request):
+    school_id = request.data.get('school_id')
+    school_type = request.data.get('school_type')
+
+    if not school_id or not school_type:
+        return Response({'error': 'Both school_id and school_type are required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if school_type not in ['primary', 'secondary']:
+        return Response({'error': 'Invalid school_type. It should be either "primary" or "secondary".'},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    if school_type == 'primary':
+        orders = Order.objects.filter(primary_school_id=school_id).order_by('-order_date')
+    else:
+        orders = Order.objects.filter(secondary_school_id=school_id).order_by('-order_date')
+
+    manager_orders = ManagerOrder.objects.filter(school_id=school_id, school_type=school_type).order_by('-order_date')
+
+    if not orders.exists() and not manager_orders.exists():
+        return Response({'error': 'No orders found for the given school.'}, status=status.HTTP_404_NOT_FOUND)
+
+    order_details = []
+
+    # Normal Orders
+    for order in orders:
+        order_items = order.order_items.all()
+        items_details = []
+        for item in order_items:
+            item_name = item._menu_name if item._menu_name else (item.menu.name if item.menu else "Deleted Menu")
+            item_price = item._menu_price if item._menu_price else (item.menu.price if item.menu else 0)
+            items_details.append({
+                'item_name': item_name,
+                'item_price': item_price,
+                'quantity': item.quantity
+            })
+
+        local_order_date = safe_localtime(order.order_date)
+        formatted_order_date = local_order_date.strftime('%d %B, %Y')
+
+        order_data = {
+            'order_id': order.id,
+            'selected_day': order.selected_day,
+            'total_price': order.total_price,
+            'order_date': formatted_order_date,
+            'status': order.status,
+            'week_number': order.week_number,
+            'year': order.year,
+            'items': items_details,
+            'user_name': order.user_name,
+            'user_type': order.user_type,
+            'school_id': school_id,
+            'school_type': school_type
+        }
+
+        if order.user_type in ['parent', 'staff']:
+            order_data['child_id'] = order.child_id
+
         order_details.append(order_data)
 
-    return Response({
-        'message': 'Orders retrieved successfully!',
-        'orders': order_details
-    }, status=status.HTTP_200_OK)
+    # Manager Orders
+    for m_order in manager_orders:
+        order_items = ManagerOrderItem.objects.filter(order=m_order)
+        items_details = [
+            {
+                'day': item.day,
+                'item': item.item,
+                'quantity': item.quantity,
+                'production_price': item.production_price or 0
+            }
+            for item in order_items
+        ]
+
+        local_order_date = safe_localtime(m_order.order_date)
+        formatted_order_date = local_order_date.strftime('%d %B, %Y')
+
+        order_data = {
+            'order_id': f"m_{m_order.id}",
+            'selected_day': m_order.selected_day,
+            'total_production_price': m_order.total_production_price,
+            'order_date': formatted_order_date,
+            'status': m_order.status,
+            'week_number': m_order.week_number,
+            'year': m_order.year,
+            'is_delivered': m_order.is_delivered,
+            'manager_name': m_order.manager.username if hasattr(m_order.manager, 'username') else str(m_order.manager),
+            'items': items_details,
+            'user_type': 'manager',
+            'school_id': school_id,
+            'school_type': school_type
+        }
+
+        order_details.append(order_data)
+
+    return Response({'message': 'Orders retrieved successfully!', 'orders': order_details},
+                    status=status.HTTP_200_OK)
+
+@api_view(['POST'])
+def get_orders_by_user(request):
+    user_id = request.data.get('user_id')
+    user_type = request.data.get('user_type')
+    child_id = request.data.get('child_id')
+
+    if not user_type:
+        return Response({'error': 'user_type is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if user_type not in ['student', 'parent', 'staff', 'manager']:
+        return Response({'error': 'Invalid user_type.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    order_details = []
+    orders = Order.objects.none()
+
+    # Normal user logic
+    if user_type == 'staff' and child_id:
+        orders = Order.objects.filter(child_id=child_id).order_by('-order_date')
+    elif user_type == 'staff' and user_id:
+        orders = Order.objects.filter(user_id=user_id, user_type='staff').order_by('-order_date')
+    elif user_type == 'parent':
+        orders = Order.objects.filter(user_id=user_id, user_type='parent').order_by('-order_date')
+    elif user_type == 'student':
+        orders = Order.objects.filter(user_id=user_id, user_type='student').order_by('-order_date')
+
+    for order in orders:
+        order_items = order.order_items.all()
+        items_details = []
+        for item in order_items:
+            item_name = item._menu_name if item._menu_name else (item.menu.name if item.menu else "Deleted Menu")
+            item_price = item._menu_price if item._menu_price else (item.menu.price if item.menu else 0)
+            items_details.append({
+                'item_name': item_name,
+                'item_price': item_price,
+                'quantity': item.quantity
+            })
+
+        local_date = safe_localtime(order.order_date).date()
+        formatted_order_date = local_date.strftime('%d %B, %Y')
+
+        order_data = {
+            'order_id': order.id,
+            'selected_day': order.selected_day,
+            'total_price': order.total_price,
+            'order_date': formatted_order_date,
+            'order_date_raw': str(local_date),
+            'status': order.status,
+            'week_number': order.week_number,
+            'year': order.year,
+            'items': items_details,
+            'user_name': order.user_name,
+            'user_type': order.user_type,
+        }
+
+        if order.user_type in ['parent', 'staff']:
+            order_data['child_id'] = order.child_id
+
+        if order.primary_school:
+            order_data['school_id'] = order.primary_school.id
+            order_data['school_type'] = 'primary'
+        elif order.secondary_school:
+            order_data['school_id'] = order.secondary_school.id
+            order_data['school_type'] = 'secondary'
+
+        order_details.append(order_data)
+
+    # Manager Orders
+    if user_type == 'manager' and user_id:
+        manager_orders = ManagerOrder.objects.filter(manager_id=user_id).order_by('-order_date')
+
+        for m_order in manager_orders:
+            order_items = ManagerOrderItem.objects.filter(order=m_order)
+            items_details = [
+                {
+                    'day': item.day,
+                    'item': item.item,
+                    'quantity': item.quantity,
+                    'production_price': item.production_price or 0
+                }
+                for item in order_items
+            ]
+
+            local_order_date = safe_localtime(m_order.order_date)
+            formatted_order_date = local_order_date.strftime('%d %B, %Y')
+
+            order_data = {
+                'order_id': f"m_{m_order.id}",
+                'selected_day': m_order.selected_day,
+                'total_production_price': m_order.total_production_price,
+                'order_date': formatted_order_date,
+                'order_date_raw': str(local_order_date.date()),
+                'status': m_order.status,
+                'week_number': m_order.week_number,
+                'year': m_order.year,
+                'is_delivered': m_order.is_delivered,
+                'manager_name': m_order.manager.username,
+                'items': items_details,
+                'user_type': 'manager',
+            }
+
+            if m_order.manager.school_type == 'primary' and m_order.manager.primary_school:
+                order_data['school_id'] = m_order.manager.primary_school.id
+                order_data['school_type'] = 'primary'
+            elif m_order.manager.school_type == 'secondary' and m_order.manager.secondary_school:
+                order_data['school_id'] = m_order.manager.secondary_school.id
+                order_data['school_type'] = 'secondary'
+
+            order_details.append(order_data)
+
+    if not order_details:
+        return Response({'error': 'No orders found for the given user.'}, status=status.HTTP_404_NOT_FOUND)
+
+    return Response({'message': 'Orders retrieved successfully!', 'orders': order_details},
+                    status=status.HTTP_200_OK)
+
 
 @api_view(['POST'])
 def contactmessage(request):
@@ -4012,3 +4073,156 @@ def make_menu_unavailable(request):
         'menu_id': menu_item.id,
         'is_available': menu_item.is_available,
     }, status=status.HTTP_200_OK)
+
+@api_view(['POST'])
+def manager_login(request):
+    username = request.data.get("username", "").strip().lower()
+    password = request.data.get("password")
+    print('username',username)
+    print('password',password)
+
+    if not username or not password:
+        return Response({'detail': 'Both username and password are required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        manager = Manager.objects.get(username=username)
+    except Manager.DoesNotExist:
+        return Response({'detail': 'Invalid username or password.'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    if not check_password(password, manager.password):
+        return Response({'detail': 'Invalid username or password.'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    data = {
+        "id": manager.id,
+        "username": manager.username,
+        "school_type": manager.school_type,
+        "primary_school": manager.primary_school.id if manager.primary_school else None,
+        "secondary_school": manager.secondary_school.id if manager.secondary_school else None,
+    }
+
+    return Response({"detail": "Login successful!", "manager": data}, status=status.HTTP_200_OK)
+
+
+
+@api_view(['POST'])
+def worker_login(request):
+    username = request.data.get("username", "").strip().lower()
+    password = request.data.get("password")
+
+    if not username or not password:
+        return Response({'detail': 'Both username and password are required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        worker = Worker.objects.get(username=username)
+    except Worker.DoesNotExist:
+        return Response({'detail': 'Invalid username or password.'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    if not check_password(password, worker.password):
+        return Response({'detail': 'Invalid username or password.'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    data = {
+        "id": worker.id,
+        "username": worker.username,
+    }
+
+    return Response({"detail": "Login successful!", "worker": data}, status=status.HTTP_200_OK)
+
+
+class CreateManagerOrderAPIView(APIView):
+    """
+    Create an order for Managers.
+    This view takes:
+      - manager_id
+      - cart (list of {day, item, quantity, remarks})
+    """
+
+    def post(self, request, *args, **kwargs):
+        try:
+            data = request.data
+            manager_id = data.get("manager_id")
+            cart_items = data.get("cart", [])
+
+            if not manager_id:
+                return Response({"error": "Manager ID is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+            if not cart_items:
+                return Response({"error": "Cart cannot be empty."}, status=status.HTTP_400_BAD_REQUEST)
+
+            manager = Manager.objects.filter(id=manager_id).first()
+            if not manager:
+                return Response({"error": "Manager not found."}, status=status.HTTP_404_NOT_FOUND)
+
+            grouped_items = {}
+            for item in cart_items:
+                day = item.get("day")
+                if not day:
+                    return Response({"error": "Each item must include a day."}, status=status.HTTP_400_BAD_REQUEST)
+                grouped_items.setdefault(day, []).append(item)
+
+            created_orders = []
+            with transaction.atomic():
+                for day, items in grouped_items.items():
+                    today = datetime.now()
+
+                    try:
+                        target_day_index = [
+                            "monday", "tuesday", "wednesday", "thursday",
+                            "friday", "saturday", "sunday"
+                        ].index(day.lower())
+                    except ValueError:
+                        return Response({"error": f"Invalid day '{day}'."}, status=status.HTTP_400_BAD_REQUEST)
+
+                    # ✅ Same calculation as user orders
+                    days_ahead = (target_day_index - today.weekday() + 7) % 7
+                    order_date = today + timedelta(days=days_ahead)
+                    week_number = order_date.isocalendar()[1]
+                    year = order_date.year
+
+                    # ✅ Create ManagerOrder with correct order_date
+                    order = ManagerOrder.objects.create(
+                        manager=manager,
+                        week_number=week_number,
+                        year=year,
+                        selected_day=day,
+                        order_date=order_date.date(),  # <-- Added line
+                        status="pending",
+                        is_delivered=False,
+                    )
+
+                    for cart_item in items:
+                        item_name = cart_item.get("item")
+                        quantity = int(cart_item.get("quantity", 1))
+                        remarks = cart_item.get("remarks", "")
+
+                        menu_item = MenuItems.objects.filter(item_name__iexact=item_name).first()
+                        if not menu_item:
+                            return Response(
+                                {"error": f"Menu item '{item_name}' not found."},
+                                status=status.HTTP_404_NOT_FOUND
+                            )
+
+                        ManagerOrderItem.objects.create(
+                            order=order,
+                            day=day,
+                            item=item_name,
+                            quantity=quantity,
+                            remarks=remarks,
+                            menu_item=menu_item
+                        )
+
+                    created_orders.append(order)
+
+            serializer = ManagerOrderSerializer(created_orders, many=True)
+            orders_data = serializer.data
+
+            for order in orders_data:
+                order["order_id"] = f"m_{order['id']}"
+                del order["id"]
+
+            return Response({
+                "message": "Manager orders created successfully.",
+                "orders": orders_data
+            }, status=status.HTTP_201_CREATED)
+
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

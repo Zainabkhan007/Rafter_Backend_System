@@ -5,12 +5,13 @@ urlpatterns = [
    # For registration
     path('password-reset/', views.password_reset, name='password_reset'), 
     path('password/reset/confirm/', views.password_reset_confirm, name='password_reset_confirm'),
-
     path("register/",views.register,name='register'),
     path('verify-email/<uuid:token>/', views.verify_email, name='verify_email'),
     path('login/', views.login,name='login'),
     path('password_reset/', include('django_rest_passwordreset.urls', namespace='password_reset')),
     path('admin_login/', views.admin_login,name='admin_login'),
+    path('manager/login/', views.manager_login, name='manager_login'),
+    path('worker/login/', views.worker_login, name='worker_login'),
     path('get_user_info/<int:id>/<str:user_type>/', views.get_user_info, name='get_user_info'),
     path('update_user_info/<int:id>/<str:user_type>/', views.update_user_info, name='update_user_info'),
     path('auth/', include('dj_rest_auth.urls')),
@@ -92,7 +93,7 @@ urlpatterns = [
     path('complete_order/', views.complete_order, name='complete_order'),
     path('cancel_order/', views.cancel_order, name='cancel_order'),
     path('get_all_orders/', views.get_all_orders, name='get_all_orders'),
-    path('get_order_by_id/<int:order_id>/', views.get_order_by_id, name='get_order_by_id'),
+    path('get_order_by_id/<str:order_id>/', views.get_order_by_id, name='get_order_by_id'),
     path('get_orders_by_user/', views.get_orders_by_user, name='get_orders_by_user'),
     path('get_orders_by_school/', views.get_orders_by_school, name='get_orders_by_school'),
 
@@ -102,6 +103,7 @@ urlpatterns = [
    path('top_up_credits/', views.top_up_credits, name='top_up_credits'),
 
    path('payment/', views.CreateOrderAndPaymentAPIView.as_view(), name='create-payment-intent'),
+   path('manager/orders/create/', views.CreateManagerOrderAPIView.as_view(), name='manager-order-create'),
    path('top_up_payment/', views.top_up_payment, name='top_up_payment'),
 
    path('download_menu_all/',  views.download_menu, name='download_menu_all'),

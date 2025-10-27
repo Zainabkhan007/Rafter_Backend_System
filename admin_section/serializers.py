@@ -71,9 +71,6 @@ class CanteenStaffSerializer(serializers.ModelSerializer):
             validated_data['password'] = instance.password
         return super().update(instance, validated_data)
 class ManagerSerializer(serializers.ModelSerializer):
-    school_type = serializers.ChoiceField(choices=[('primary', 'Primary'), ('secondary', 'Secondary')])
-    primary_school = serializers.PrimaryKeyRelatedField(queryset=PrimarySchool.objects.all(), required=False, allow_null=True)
-    secondary_school = serializers.PrimaryKeyRelatedField(queryset=SecondarySchool.objects.all(), required=False, allow_null=True)
     school_name = serializers.SerializerMethodField()
 
     class Meta:
@@ -87,45 +84,7 @@ class ManagerSerializer(serializers.ModelSerializer):
             'secondary_school',
             'school_name',
         ]
-        extra_kwargs = {
-            'password': {'write_only': True},
-        }
-
-    def validate(self, data):
-        """Ensure passwords match."""
-        if data.get('password') != data.get('confirm_password'):
-            raise serializers.ValidationError({"password": "Passwords do not match."})
-        return data
-
-    def create(self, validated_data):
-        validated_data['password'] = make_password(validated_data['password'])
-        validated_data.pop('confirm_password', None)
-
-        # Handle school type logic
-        if validated_data.get('school_type') == 'primary':
-            validated_data['secondary_school'] = None
-        elif validated_data.get('school_type') == 'secondary':
-            validated_data['primary_school'] = None
-
-        return super().create(validated_data)
-
-    def update(self, instance, validated_data):
-        # Prevent password rehash if not updated
-        if 'password' in validated_data:
-            if validated_data['password'] != instance.password:
-                validated_data['password'] = make_password(validated_data['password'])
-        else:
-            validated_data['password'] = instance.password
-
-        validated_data.pop('confirm_password', None)
-
-        # School logic
-        if validated_data.get('school_type') == 'primary':
-            validated_data['secondary_school'] = None
-        elif validated_data.get('school_type') == 'secondary':
-            validated_data['primary_school'] = None
-
-        return super().update(instance, validated_data)
+        extra_kwargs = {'password': {'write_only': True}}
 
     def get_school_name(self, obj):
         if obj.school_type == 'primary' and obj.primary_school:
@@ -133,35 +92,66 @@ class ManagerSerializer(serializers.ModelSerializer):
         elif obj.school_type == 'secondary' and obj.secondary_school:
             return obj.secondary_school.secondary_school_name
         return 'Unknown School'
+
+class ManagerOrderItemSerializer(serializers.ModelSerializer):
+    menu_item_id = serializers.PrimaryKeyRelatedField(
+        queryset=MenuItems.objects.all(),
+        source='menu_item',
+        write_only=True,
+        required=False,
+    )
+    menu_item_name = serializers.CharField(source='menu_item.name', read_only=True)
+
+    class Meta:
+        model = ManagerOrderItem
+        fields = [
+            'id',
+            'day',
+            'item',
+            'quantity',
+            'remarks',
+            'menu_item_id',  
+            'menu_item_name',  
+        ]
+
+
+class ManagerOrderSerializer(serializers.ModelSerializer):
+    items = ManagerOrderItemSerializer(many=True)
+    manager = serializers.PrimaryKeyRelatedField(queryset=Manager.objects.all())
+
+    class Meta:
+        model = ManagerOrder
+        fields = [
+            'id',
+            'manager',
+            'order_date',
+            'week_number',
+            'year',
+            'status',
+            'selected_day',
+            'is_delivered',
+            'items',
+            'total_production_price',
+        ]
+        read_only_fields = ['order_date', 'total_production_price']
+
+    def create(self, validated_data):
+        items_data = validated_data.pop('items', [])
+        order = ManagerOrder.objects.create(**validated_data)
+
+        for item_data in items_data:
+            menu_item = item_data.get('menu_item', None)
+            ManagerOrderItem.objects.create(order=order, **item_data)
+
+        return order
+
+
 class WorkerSerializer(serializers.ModelSerializer):
     class Meta:
         model = Worker
-        fields = ['id', 'username', 'password', ]
-        extra_kwargs = {
-            'password': {'write_only': True},
-        }
+        fields = ['id', 'username', 'password']
+        extra_kwargs = {'password': {'write_only': True}}
 
-    def validate(self, data):
-        """Ensure passwords match."""
-        if data.get('password') != data.get('confirm_password'):
-            raise serializers.ValidationError({"password": "Passwords do not match."})
-        return data
-
-    def create(self, validated_data):
-        validated_data['password'] = make_password(validated_data['password'])
-        validated_data.pop('confirm_password', None)
-        return super().create(validated_data)
-
-    def update(self, instance, validated_data):
-        # Handle password safely
-        if 'password' in validated_data:
-            if validated_data['password'] != instance.password:
-                validated_data['password'] = make_password(validated_data['password'])
-        else:
-            validated_data['password'] = instance.password
-
-        validated_data.pop('confirm_password', None)
-        return super().update(instance, validated_data)
 
 class LoginSerializer(serializers.Serializer):
     email = serializers.EmailField()
