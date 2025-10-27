@@ -208,7 +208,6 @@ class Order(models.Model):
     user_id = models.BigIntegerField(null=True, blank=True)
     user_type = models.CharField(max_length=50)
     child_id = models.BigIntegerField(null=True, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
     total_price = models.FloatField()
     week_number = models.BigIntegerField(null=True)
     year = models.BigIntegerField(null=True)
@@ -338,7 +337,6 @@ class Manager(models.Model):
 
 class ManagerOrder(models.Model):
     manager = models.ForeignKey('Manager', on_delete=models.CASCADE, related_name='orders')
-    created_at = models.DateTimeField(auto_now_add=True)
     order_date = models.DateField(null=True, blank=True) 
     week_number = models.PositiveIntegerField(null=True, blank=True)
     year = models.PositiveIntegerField(null=True, blank=True)
