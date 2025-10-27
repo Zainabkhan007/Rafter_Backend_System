@@ -2214,13 +2214,19 @@ def add_order_item(request):
             return Response(serializer.data,status=status.HTTP_201_CREATED, )
         else:
             return Response({ "error" : serializer.errors},status = status.HTTP_400_BAD_REQUEST)
-
+        
+def safe_localtime(dt):
+    """Ensure datetime is timezone-aware before converting to localtime."""
+    if isinstance(dt, date) and not isinstance(dt, datetime):
+        dt = make_aware(datetime.combine(dt, datetime.min.time()))
+    return localtime(dt)
 
 @api_view(['GET'])
 def get_all_orders(request):
     order_details = []
-    orders = Order.objects.all().order_by('-order_date')
 
+    # Regular orders
+    orders = Order.objects.all().order_by('-order_date')
     for order in orders:
         order_items = OrderItem.objects.filter(order=order)
         items_details = []
@@ -2232,12 +2238,8 @@ def get_all_orders(request):
                 'item_price': item_price,
                 'quantity': item.quantity
             })
-        if isinstance(order.order_date, date) and not isinstance(order.order_date, datetime):
-            order_datetime = make_aware(datetime.combine(order.order_date, datetime.min.time()))
-        else:
-            order_datetime = order.order_date
 
-        local_order_date = localtime(order_datetime)
+        local_order_date = safe_localtime(order.order_date)
         formatted_order_date = local_order_date.strftime('%d %B, %Y')
 
         order_data = {
@@ -2251,11 +2253,26 @@ def get_all_orders(request):
             'items': items_details,
             'user_name': order.user_name,
             'user_type': order.user_type,
+            'payment_id': order.payment_id,
         }
 
-        order_details.append(order_data)
-    manager_orders = ManagerOrder.objects.all().order_by('-order_date')
+        # Add school info
+        if order.primary_school:
+            order_data['school_id'] = order.primary_school.id
+            order_data['school_name'] = order.primary_school.school_name
+            order_data['school_type'] = 'primary'
+        elif order.secondary_school:
+            order_data['school_id'] = order.secondary_school.id
+            order_data['school_name'] = order.secondary_school.secondary_school_name
+            order_data['school_type'] = 'secondary'
 
+        if order.user_type in ['parent', 'staff']:
+            order_data['child_id'] = order.child_id
+
+        order_details.append(order_data)
+
+    # Manager orders
+    manager_orders = ManagerOrder.objects.all().order_by('-order_date')
     for m_order in manager_orders:
         m_items = ManagerOrderItem.objects.filter(order=m_order)
         items_details = [
@@ -2267,16 +2284,12 @@ def get_all_orders(request):
             }
             for item in m_items
         ]
-        if isinstance(m_order.order_date, date) and not isinstance(m_order.order_date, datetime):
-            order_datetime = make_aware(datetime.combine(m_order.order_date, datetime.min.time()))
-        else:
-            order_datetime = m_order.order_date
 
-        local_order_date = localtime(order_datetime)
+        local_order_date = safe_localtime(m_order.order_date)
         formatted_order_date = local_order_date.strftime('%d %B, %Y')
 
         order_data = {
-            'order_id': f"m_{m_order.id}",  
+            'order_id': f"m_{m_order.id}",
             'selected_day': m_order.selected_day,
             'total_production_price': m_order.total_production_price,
             'order_date': formatted_order_date,
@@ -2285,21 +2298,29 @@ def get_all_orders(request):
             'year': m_order.year,
             'is_delivered': m_order.is_delivered,
             'user_name': m_order.manager.username if hasattr(m_order.manager, 'username') else str(m_order.manager),
-            'items': items_details,
             'user_type': 'manager',
+            'items': items_details,
         }
 
+        # Add school info for manager orders if they have a school
+        if hasattr(m_order.manager, 'primary_school') and m_order.manager.primary_school:
+            order_data['school_id'] = m_order.manager.primary_school.id
+            order_data['school_name'] = m_order.manager.primary_school.school_name
+            order_data['school_type'] = 'primary'
+        elif hasattr(m_order.manager, 'secondary_school') and m_order.manager.secondary_school:
+            order_data['school_id'] = m_order.manager.secondary_school.id
+            order_data['school_name'] = m_order.manager.secondary_school.secondary_school_name
+            order_data['school_type'] = 'secondary'
+
         order_details.append(order_data)
+
     return Response({
         'message': 'Orders retrieved successfully!',
         'orders': order_details
     }, status=status.HTTP_200_OK)
 
-def safe_localtime(dt):
-    """Ensure datetime is timezone-aware before converting to localtime."""
-    if isinstance(dt, date) and not isinstance(dt, datetime):
-        dt = make_aware(datetime.combine(dt, datetime.min.time()))
-    return localtime(dt)
+
+
 
 @api_view(['GET'])
 def get_order_by_id(request, order_id):
