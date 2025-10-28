@@ -8,6 +8,7 @@ import logging
 from rest_framework.generics import ListAPIView
 from .serializers import *
 import re
+import io
 from django.contrib.auth.models import User
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from django.utils.timezone import now
@@ -3433,6 +3434,172 @@ def download_all_schools_menu(request):
     except Exception as e:
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+
+WEEK_DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+
+def fetch_manager_orders(target_day=None):
+    current_time = datetime.now()
+    current_week_number = current_time.isocalendar()[1]
+    current_year = current_time.year
+
+    cutoff_day = 4  # Friday
+    cutoff_hour = 14  # 2PM
+
+    is_past_cutoff = (
+        current_time.weekday() > cutoff_day or
+        (current_time.weekday() == cutoff_day and current_time.hour >= cutoff_hour)
+    )
+
+    target_week = current_week_number + 1 if is_past_cutoff else current_week_number
+    target_year = current_year
+
+    if target_week > 52:
+        target_week = 1
+        target_year += 1
+
+    filter_kwargs = {"week_number": target_week, "year": target_year}
+    if target_day:
+        filter_kwargs["selected_day__iexact"] = target_day
+
+    return (
+        ManagerOrder.objects
+        .filter(**filter_kwargs)
+        .exclude(status__iexact="cancelled")
+        .order_by("selected_day")
+    )
+
+
+@api_view(['GET'])
+def download_manager_orders(request):
+    try:
+        # === Style setup ===
+        header_font = Font(bold=True, size=12, color="FFFFFF")
+        header_fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
+        title_font = Font(bold=True, size=14)
+        title_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
+        border = Border(left=Side(style="thin"), right=Side(style="thin"),
+                        top=Side(style="thin"), bottom=Side(style="thin"))
+        center_align = Alignment(horizontal="center", vertical="center")
+        left_align = Alignment(horizontal="left", vertical="center")
+
+        def apply_header(sheet, title_text, columns):
+            sheet.merge_cells(start_row=1, end_row=1, start_column=1, end_column=len(columns))
+            title_cell = sheet.cell(row=1, column=1, value=title_text)
+            title_cell.font = title_font
+            title_cell.fill = title_fill
+            title_cell.alignment = center_align
+
+            for col_num, column_title in enumerate(columns, 1):
+                cell = sheet.cell(row=2, column=col_num, value=column_title)
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.border = border
+                cell.alignment = center_align
+                sheet.column_dimensions[get_column_letter(col_num)].width = 25
+
+        def apply_data_styling(sheet, start_row):
+            for row in sheet.iter_rows(min_row=start_row):
+                for cell in row:
+                    cell.border = border
+                    cell.alignment = left_align if cell.column == 1 else center_align
+
+        # === Create in-memory zip ===
+        zip_buffer = io.BytesIO()
+
+        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+            for day in WEEK_DAYS:
+                workbook = Workbook()
+                workbook.remove(workbook.active)
+
+                day_orders = fetch_manager_orders(target_day=day)
+                day_totals = []
+
+                all_schools = list(PrimarySchool.objects.all()) + list(SecondarySchool.objects.all())
+
+                for school in all_schools:
+                    school_name = getattr(school, 'school_name', None) or getattr(school, 'secondary_school_name', 'Unknown School')
+
+                    if hasattr(school, 'school_name'):
+                        school_orders = day_orders.filter(manager__primary_school=school)
+                    else:
+                        school_orders = day_orders.filter(manager__secondary_school=school)
+
+                    sheet = workbook.create_sheet(title=school_name[:31])
+                    apply_header(sheet, f"Manager Orders for {day} - {school_name}",
+                                 ["Manager", "Item", "Quantity", "Remarks", "Prod. Price", "Total Price"])
+
+                    row_num = 3
+                    if not school_orders.exists():
+                        sheet.cell(row=3, column=1, value="No orders found")
+                        sheet.merge_cells(start_row=3, end_row=3, start_column=1, end_column=6)
+                        continue
+
+                    for order in school_orders.prefetch_related('items', 'manager'):
+                        for item in order.items.all():
+                            total_price = float(item.quantity) * float(item.production_price or 0)
+                            sheet.cell(row=row_num, column=1, value=order.manager.username)
+                            sheet.cell(row=row_num, column=2, value=item.item)
+                            sheet.cell(row=row_num, column=3, value=item.quantity)
+                            sheet.cell(row=row_num, column=4, value=item.remarks or "")
+                            sheet.cell(row=row_num, column=5, value=float(item.production_price or 0))
+                            sheet.cell(row=row_num, column=6, value=total_price)
+                            row_num += 1
+
+                            day_totals.append({
+                                "school": school_name,
+                                "manager": order.manager.username,
+                                "item": item.item,
+                                "quantity": item.quantity,
+                                "remarks": item.remarks or "",
+                                "production_price": float(item.production_price or 0),
+                                "total_price": total_price,
+                            })
+
+                    apply_data_styling(sheet, 3)
+
+                # === Day Total Sheet ===
+                total_sheet = workbook.create_sheet(title=f"{day} Total")
+                apply_header(total_sheet, f"Day Total Summary - {day}",
+                             ["School", "Manager", "Item", "Qty", "Remarks", "Prod. Price", "Total Price"])
+
+                row_num = 3
+                if not day_totals:
+                    total_sheet.cell(row=3, column=1, value="No orders found")
+                    total_sheet.merge_cells(start_row=3, end_row=3, start_column=1, end_column=7)
+                else:
+                    for entry in day_totals:
+                        total_sheet.cell(row=row_num, column=1, value=entry["school"])
+                        total_sheet.cell(row=row_num, column=2, value=entry["manager"])
+                        total_sheet.cell(row=row_num, column=3, value=entry["item"])
+                        total_sheet.cell(row=row_num, column=4, value=entry["quantity"])
+                        total_sheet.cell(row=row_num, column=5, value=entry["remarks"])
+                        total_sheet.cell(row=row_num, column=6, value=entry["production_price"])
+                        total_sheet.cell(row=row_num, column=7, value=entry["total_price"])
+                        row_num += 1
+
+                apply_data_styling(total_sheet, 3)
+
+                excel_buffer = io.BytesIO()
+                workbook.save(excel_buffer)
+                excel_buffer.seek(0)
+
+                zip_file.writestr(f"{day}_Manager_Orders.xlsx", excel_buffer.getvalue())
+
+        # === Save zip to disk and return link ===
+        zip_buffer.seek(0)
+        export_dir = os.path.join(settings.MEDIA_ROOT, "exports")
+        os.makedirs(export_dir, exist_ok=True)
+
+        file_name = f"Manager_Orders_{datetime.now().strftime('%Y_%m_%d_%H_%M')}.zip"
+        file_path = os.path.join(export_dir, file_name)
+        with open(file_path, "wb") as f:
+            f.write(zip_buffer.getvalue())
+
+        download_link = f"{settings.MEDIA_URL}exports/{file_name}"
+        return JsonResponse({"download_link": download_link})
+
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(["GET"])

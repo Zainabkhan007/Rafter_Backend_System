@@ -108,6 +108,7 @@ urlpatterns = [
 
    path('download_menu_all/',  views.download_menu, name='download_menu_all'),
    path('download-all-schools-menu/', views.download_all_schools_menu, name='download_all_schools_menu'),
+   path('download_manager_orders/', views.download_manager_orders, name='download_manager_orders'),
    path("get_menu/",views.get_active_status_menu,name='get_active_status_menu'),
    path("get_user_count/",views.get_user_count,name='get_user_count'),
    path("deactivate_menus/",views.deactivate_menus,name='deactivate_menus'),
