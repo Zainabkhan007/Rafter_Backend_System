@@ -70,8 +70,103 @@ class CanteenStaffSerializer(serializers.ModelSerializer):
         if 'password' not in validated_data:
             validated_data['password'] = instance.password
         return super().update(instance, validated_data)
- 
- 
+class ManagerSerializer(serializers.ModelSerializer):
+    school_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Manager
+        fields = [
+            'id',
+            'username',
+            'password',
+            'school_type',
+            'primary_school',
+            'secondary_school',
+            'school_name',
+        ]
+        extra_kwargs = {'password': {'write_only': True}}
+
+    def get_school_name(self, obj):
+        if obj.school_type == 'primary' and obj.primary_school:
+            return obj.primary_school.school_name
+        elif obj.school_type == 'secondary' and obj.secondary_school:
+            return obj.secondary_school.secondary_school_name
+        return 'Unknown School'
+
+class ManagerOrderItemSerializer(serializers.ModelSerializer):
+    menu_item_id = serializers.PrimaryKeyRelatedField(
+        queryset=MenuItems.objects.all(),
+        source='menu_item',
+        write_only=True,
+        required=False,
+    )
+    menu_item_name = serializers.CharField(source='menu_item.name', read_only=True)
+
+    class Meta:
+        model = ManagerOrderItem
+        fields = [
+            'id',
+            'day',
+            'item',
+            'quantity',
+            'remarks',
+            'menu_item_id',  
+            'menu_item_name',  
+        ]
+
+
+class ManagerOrderSerializer(serializers.ModelSerializer):
+    items = ManagerOrderItemSerializer(many=True)
+    manager = serializers.PrimaryKeyRelatedField(queryset=Manager.objects.all())
+
+    class Meta:
+        model = ManagerOrder
+        fields = [
+            'id',
+            'manager',
+            'order_date',
+            'week_number',
+            'year',
+            'status',
+            'selected_day',
+            'is_delivered',
+            'items',
+            'total_production_price',
+        ]
+        read_only_fields = ['order_date', 'total_production_price']
+
+    def create(self, validated_data):
+        items_data = validated_data.pop('items', [])
+        order = ManagerOrder.objects.create(**validated_data)
+
+        for item_data in items_data:
+            menu_item = item_data.get('menu_item', None)
+            ManagerOrderItem.objects.create(order=order, **item_data)
+
+        return order
+
+
+class WorkerSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Worker
+        fields = ['id', 'username', 'password']
+        extra_kwargs = {'password': {'write_only': True}}
+
+
+class DocumentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Document
+        fields = ['id', 'title', 'content', 'created_at', 'updated_at']
+
+
+class WorkerDocumentStatusSerializer(serializers.ModelSerializer):
+    document_title = serializers.CharField(source="document.title", read_only=True)
+
+    class Meta:
+        model = WorkerDocumentStatus
+        fields = ['id', 'worker', 'document', 'document_title', 'status', 'read_at']     
+
+
 class LoginSerializer(serializers.Serializer):
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True, min_length=8, max_length=128)
@@ -248,25 +343,42 @@ class MenuSerializer(serializers.ModelSerializer):
 
 
 class MenuItemsSerializer(serializers.ModelSerializer):
-    allergies = serializers.SlugRelatedField(queryset=Allergens.objects.all(), slug_field='allergy', many=True, required=False)
+    allergies = serializers.SlugRelatedField(
+        queryset=Allergens.objects.all(),
+        slug_field='allergy',
+        many=True,
+        required=False
+    )
     image_url = serializers.SerializerMethodField()
 
     class Meta:
         model = MenuItems
-        fields = ['id', 'item_name', 'item_description', 'ingredients', 'nutrients', 'allergies', 'image', 'image_url']
+        fields = [
+            'id',
+            'item_name',
+            'item_description',
+            'ingredients',
+            'nutrients',
+            'allergies',
+            'image',
+            'image_url',
+            'production_price',
+            'is_available', 
+        ]
     
     def get_image_url(self, obj):
         request = self.context.get('request')
         if obj.image and request:
             return request.build_absolute_uri(obj.image.url)
         return None
-    
-    # Optionally validate the image field
+
     def validate(self, data):
         # Ensure image is optional
         if 'image' in data and not data['image']:
             data['image'] = None
         return data
+
+
 class OrderItemSerializer(serializers.ModelSerializer):
     # This correctly gets the menu name from the related Menu object
     item_name = serializers.CharField(source='menu.name', read_only=True)

@@ -5,12 +5,13 @@ urlpatterns = [
    # For registration
     path('password-reset/', views.password_reset, name='password_reset'), 
     path('password/reset/confirm/', views.password_reset_confirm, name='password_reset_confirm'),
-
     path("register/",views.register,name='register'),
     path('verify-email/<uuid:token>/', views.verify_email, name='verify_email'),
     path('login/', views.login,name='login'),
     path('password_reset/', include('django_rest_passwordreset.urls', namespace='password_reset')),
     path('admin_login/', views.admin_login,name='admin_login'),
+    path('manager/login/', views.manager_login, name='manager_login'),
+    path('worker/login/', views.worker_login, name='worker_login'),
     path('get_user_info/<int:id>/<str:user_type>/', views.get_user_info, name='get_user_info'),
     path('update_user_info/<int:id>/<str:user_type>/', views.update_user_info, name='update_user_info'),
     path('auth/', include('dj_rest_auth.urls')),
@@ -23,6 +24,10 @@ urlpatterns = [
      
     path('get_cateenstaff/', views.get_cateenstaff, name='get_cateenstaff'),
     path('cateenstaff_by_id/<int:pk>/', views.cateenstaff_by_id, name='cateenstaff_by_id'),
+    path('managers/', views.get_managers, name='get_managers'),
+    path('managers/<int:pk>/', views.manager_by_id, name='manager_by_id'),
+    path('workers/', views.get_workers, name='get_workers'),
+    path('workers/<int:pk>/', views.worker_by_id, name='worker_by_id'),
 
     path('add_child/', views.add_child, name='add_child'),
     path('edit_child/<int:child_id>/', views.edit_child, name='edit_child'),
@@ -70,6 +75,10 @@ urlpatterns = [
     
     path("add_menu_item/",views.add_menu_item,name='add_menu_item'),
     path("get_menu_items/",views.get_menu_items,name='get_menu_items'),
+    path('make_menu_available/', views.make_menu_available, name='make_menu_available'),
+    path('make_menu_unavailable/', views.make_menu_unavailable, name='make_menu_unavailable'),
+
+
     path('update_menu_items/<int:pk>/', views.update_menu_items, name='update_menu_items'),
     path("get_active_menu/",views.get_active_menu,name='get_active_menu'),
 
@@ -84,7 +93,7 @@ urlpatterns = [
     path('complete_order/', views.complete_order, name='complete_order'),
     path('cancel_order/', views.cancel_order, name='cancel_order'),
     path('get_all_orders/', views.get_all_orders, name='get_all_orders'),
-    path('get_order_by_id/<int:order_id>/', views.get_order_by_id, name='get_order_by_id'),
+    path('get_order_by_id/<str:order_id>/', views.get_order_by_id, name='get_order_by_id'),
     path('get_orders_by_user/', views.get_orders_by_user, name='get_orders_by_user'),
     path('get_orders_by_school/', views.get_orders_by_school, name='get_orders_by_school'),
 
@@ -94,14 +103,25 @@ urlpatterns = [
    path('top_up_credits/', views.top_up_credits, name='top_up_credits'),
 
    path('payment/', views.CreateOrderAndPaymentAPIView.as_view(), name='create-payment-intent'),
+   path('manager/orders/create/', views.CreateManagerOrderAPIView.as_view(), name='manager-order-create'),
    path('top_up_payment/', views.top_up_payment, name='top_up_payment'),
 
    path('download_menu_all/',  views.download_menu, name='download_menu_all'),
    path('download-all-schools-menu/', views.download_all_schools_menu, name='download_all_schools_menu'),
+   path('download_manager_orders/', views.download_manager_orders, name='download_manager_orders'),
    path("get_menu/",views.get_active_status_menu,name='get_active_status_menu'),
    path("get_user_count/",views.get_user_count,name='get_user_count'),
    path("deactivate_menus/",views.deactivate_menus,name='deactivate_menus'),
    path("app-version/<str:platform>/", views.get_app_version, name="app-version"),
+    path('documents/create/', views.create_document),
+    path('documents/all/', views.get_all_documents),
+    path('documents/edit/', views.edit_document),
+    path('documents/delete/', views.delete_document),
+    path('documents/worker/', views.get_worker_documents),
+    path('documents/detail/', views.get_document_detail),
+    path('documents/mark-read/', views.mark_document_read),
+    path('documents/report/', views.export_worker_document_status),
+
    
 
    

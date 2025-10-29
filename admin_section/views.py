@@ -8,12 +8,13 @@ import logging
 from rest_framework.generics import ListAPIView
 from .serializers import *
 import re
+import io
 from django.contrib.auth.models import User
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from django.utils.timezone import now
 import logging
 from collections import defaultdict
-from django.utils.timezone import localtime
+from django.utils.timezone import localtime, make_aware
 from urllib.parse import quote
 from django.core.signing import TimestampSigner, BadSignature, SignatureExpired
 from django.utils.crypto import get_random_string
@@ -96,45 +97,123 @@ def verify_apple_token(identity_token: str):
 
 @api_view(["POST"])
 def register(request):
+    login_method = request.data.get("login_method", "email")
     email = request.data.get("email")
-    login_method = request.data.get("login_method", "email")  # default to email if not provided
+    username = request.data.get("username")
+    password = request.data.get("password")
+    confirm_password = request.data.get("confirm_password") or request.data.get("password_confirmation")
+    school_type = request.data.get("school_type")
+    school_id = request.data.get("school_id")  # frontend sends school_id
 
-    if not email:
-        return Response({"error": "Email is required."}, status=status.HTTP_400_BAD_REQUEST)
+    if login_method in ["manager", "worker"]:
+        if not username:
+            return Response({"error": "Username is required."}, status=400)
+        if not password or not confirm_password:
+            return Response({"error": "Password and confirm password are required."}, status=400)
+        if password != confirm_password:
+            return Response({"error": "Passwords do not match."}, status=400)
 
-    # Check if already registered
-    if StaffRegisteration.objects.filter(email=email).exists() or \
-       ParentRegisteration.objects.filter(email=email).exists() or \
-       SecondaryStudent.objects.filter(email=email).exists() or \
-       CanteenStaff.objects.filter(email=email).exists():
-        return Response({"error": "Email already registered."}, status=status.HTTP_400_BAD_REQUEST)
+        # Map school_id to correct field
+        primary_school_id = school_id if school_type == "primary" else None
+        secondary_school_id = school_id if school_type == "secondary" else None
 
-    existing_unverified = UnverifiedUser.objects.filter(email=email).first()
+        # MANAGER ACCOUNT
+        if login_method == "manager":
+            if Manager.objects.filter(username=username).exists():
+                return Response({"error": "Username already exists."}, status=400)
+            if password != confirm_password:
+                return Response({"error": "Passwords do not match."}, status=400)
 
-    # Handle recent attempts (only apply for email flow)
-    if existing_unverified:
-        if login_method == "email":
-            if existing_unverified.created_at > timezone.now() - timedelta(seconds=60):
+
+            primary_school_id = school_id if school_type == "primary" else None
+            secondary_school_id = school_id if school_type == "secondary" else None
+            manager = Manager.objects.create(
+                username=username,
+                password=make_password(password),
+                school_type=school_type,
+                primary_school_id=primary_school_id,
+                secondary_school_id=secondary_school_id,
+            )
+
+            # Optional: return school name in response
+            school_name = None
+            if school_type == "primary" and primary_school_id:
+                school_name = PrimarySchool.objects.filter(id=primary_school_id).first()
+                school_name = school_name.school_name if school_name else "Unknown School"
+            elif school_type == "secondary" and secondary_school_id:
+                school_name = SecondarySchool.objects.filter(id=secondary_school_id).first()
+                school_name = school_name.secondary_school_name if school_name else "Unknown School"
+
+            return Response(
+                {
+                    "message": "Manager account created successfully.",
+                    "user_type": "manager",
+                    "id": manager.id,
+                    "school_name": school_name or "Unknown School",
+                    "school_type": school_type,
+                    "primary_school": primary_school_id,
+                    "secondary_school": secondary_school_id,
+                },
+                status=201,
+            )
+
+        # WORKER ACCOUNT
+
+    if login_method == "worker":
+        if Worker.objects.filter(username=username).exists():
+            return Response({"error": "Username already exists."}, status=400)
+
+        # Passwords already validated
+        worker = Worker.objects.create(
+            username=username,
+            password=make_password(password)
+        )
+
+        return Response(
+            {
+                "message": "Worker account created successfully.",
+                "user_type": "worker",
+                "id": worker.id,
+            },
+            status=201,
+        )
+
+    # -------------------------------------------------
+    # EMAIL-BASED REGISTRATION (Parent, Staff, Student)
+    # -------------------------------------------------
+    if login_method not in ["manager", "worker"]:
+        if not email:
+            return Response({"error": "Email is required for this registration type."}, status=400)
+
+        # Check if email already registered
+        if (
+            StaffRegisteration.objects.filter(email=email).exists()
+            or ParentRegisteration.objects.filter(email=email).exists()
+            or SecondaryStudent.objects.filter(email=email).exists()
+            or CanteenStaff.objects.filter(email=email).exists()
+        ):
+            return Response({"error": "Email already registered."}, status=400)
+
+        existing_unverified = UnverifiedUser.objects.filter(email=email).first()
+        if existing_unverified:
+            if login_method == "email" and existing_unverified.created_at > timezone.now() - timedelta(seconds=60):
                 return Response(
                     {"error": "A verification email has already been sent recently. Please check your inbox."},
-                    status=status.HTTP_400_BAD_REQUEST
+                    status=400,
                 )
-        # Delete any old unverified user regardless of method
-        existing_unverified.delete()
+            existing_unverified.delete()
 
-    # Create new unverified user (for both email and social logins)
-    new_unverified = UnverifiedUser.objects.create(
-        email=email,
-        data=request.data,
-        login_method=login_method
-    )
+        new_unverified = UnverifiedUser.objects.create(
+            email=email,
+            data=request.data,
+            login_method=login_method,
+        )
 
-    # If it's email login, send verification email
-    if login_method == "email":
-        verification_link = f"{settings.FRONTEND_URL}/verify-email/{new_unverified.token}/"
-        send_mail(
-            subject="Action Required: Confirm Your Email Address",
-            message=f"""
+        if login_method == "email":
+            verification_link = f"{settings.FRONTEND_URL}/verify-email/{new_unverified.token}/"
+            send_mail(
+                subject="Action Required: Confirm Your Email Address",
+                message=f"""
 Hi there,
 
 Thank you for registering with us.
@@ -148,23 +227,24 @@ If you did not create an account with us, you can safely ignore this email.
 Best regards,  
 The Rafters Team
 """,
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[email],
-        )
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[email],
+            )
+            return Response(
+                {"message": "Verification email sent. Please check your inbox."},
+                status=200,
+            )
+
         return Response(
-            {"message": "Verification email sent. Please check your inbox."},
-            status=status.HTTP_200_OK
+            {
+                "message": "OAuth login successful. Additional info required.",
+                "token": str(new_unverified.token),
+                "provider": login_method,
+            },
+            status=200,
         )
 
-    # For social login flow
-    return Response(
-        {
-            "message": "OAuth login successful. Additional info required.",
-            "token": str(new_unverified.token),
-            "provider": login_method
-        },
-        status=status.HTTP_200_OK
-    )
+    return Response({"error": "Invalid registration type."}, status=400)
 
 
 
@@ -180,18 +260,20 @@ def verify_email(request, token):
 
         # If already verified
         if unverified.is_verified:
-            return Response({"message": "This email is already verified."},
-                            status=status.HTTP_200_OK)
+            return Response(
+                {"message": "This email is already verified."},
+                status=status.HTTP_200_OK,
+            )
 
-        # Token has expired
+        # Token expired (after 1 hour)
         if timezone.now() > unverified.created_at + timedelta(hours=1):
             old_data = unverified.data
             email = old_data.get("email")
 
-            # Delete the expired token
+            # Delete old record
             unverified.delete()
 
-            # Generate a new token and send it
+            # Generate a new token and resend
             new_unverified = UnverifiedUser.objects.create(
                 email=email,
                 data=old_data,
@@ -215,54 +297,79 @@ The Rafters Team
                 recipient_list=[email],
             )
 
-            return Response({"error": "Verification link has expired. A new one has been sent to your email."},
-                            status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {
+                    "error": "Verification link has expired. A new one has been sent to your email."
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        # If we reach here, the token is valid — proceed with registration
         user_data = unverified.data
         user_type = user_data.get("user_type")
-        school_field = None
 
+        phone_no = user_data.get("phone_no")
+        if not phone_no or not str(phone_no).isdigit():
+            user_data["phone_no"] = None  
+
+        serializer = None
+
+        # Handle user creation based on type
         if user_data.get("school_type"):
-            school = PrimarySchool.objects.get(id=user_data["school_id"]) if user_data["school_type"] == "primary" else SecondarySchool.objects.get(id=user_data["school_id"])
+            if user_data["school_type"] == "primary":
+                school = PrimarySchool.objects.get(id=user_data["school_id"])
+            else:
+                school = SecondarySchool.objects.get(id=user_data["school_id"])
 
-            if user_data["user_type"] == "student":
+            if user_type == "student":
                 user_data["school"] = school.id
                 serializer = SecondaryStudentSerializer(data=user_data)
 
-            elif user_data["user_type"] == "staff":
+            elif user_type == "staff":
                 key = "primary_school" if user_data["school_type"] == "primary" else "secondary_school"
                 user_data[key] = school.id
                 serializer = StaffRegisterationSerializer(data=user_data)
 
-            elif user_data["user_type"] == "canteenstaff":
+            elif user_type == "canteenstaff":
                 key = "primary_school" if user_data["school_type"] == "primary" else "secondary_school"
                 user_data[key] = school.id
                 serializer = CanteenStaffSerializer(data=user_data)
 
             else:
-                return Response({"error": "Invalid user type."},
-                                status=status.HTTP_400_BAD_REQUEST)
+                return Response(
+                    {"error": "Invalid user type."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
-        elif user_data["user_type"] == "parent":
+        elif user_type == "parent":
             serializer = ParentRegisterationSerializer(data=user_data)
 
         else:
-            return Response({"error": "Invalid user type."},
-                            status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"error": "Invalid user type."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
+        # Save if valid
         if serializer.is_valid():
             serializer.save()
             unverified.is_verified = True
             unverified.save()
-            return Response({"message": "Email verified successfully. User account has been created."},
-                            status=status.HTTP_201_CREATED)
+
+            return Response(
+                {
+                    "message": "Email verified successfully. User account has been created."
+                },
+                status=status.HTTP_201_CREATED,
+            )
         else:
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     except UnverifiedUser.DoesNotExist:
-        return Response({"error": "Invalid or non-existing verification link."},
-                        status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {"error": "Invalid or non-existing verification link."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
 
 
 @api_view(["POST"])
@@ -688,7 +795,70 @@ def cateenstaff_by_id(request, pk):
         staff.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
+@csrf_exempt
+@api_view(['GET'])
+def get_managers(request):
+    managers = Manager.objects.all()
+    serializer = ManagerSerializer(managers, many=True)
+    return Response(serializer.data, status=status.HTTP_200_OK)
 
+
+@api_view(['GET', 'PUT', 'DELETE'])
+def manager_by_id(request, pk):
+    try:
+        manager = Manager.objects.get(pk=pk)
+    except Manager.DoesNotExist:
+        raise NotFound({'error': 'Manager not found'})
+
+    if request.method == 'GET':
+        serializer = ManagerSerializer(manager)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    elif request.method == 'PUT':
+        serializer = ManagerSerializer(manager, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    elif request.method == 'DELETE':
+        manager.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ---------------------------
+# WORKER APIS
+# ---------------------------
+
+@csrf_exempt
+@api_view(['GET'])
+def get_workers(request):
+    workers = Worker.objects.all()
+    serializer = WorkerSerializer(workers, many=True)
+    return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+@api_view(['GET', 'PUT', 'DELETE'])
+def worker_by_id(request, pk):
+    try:
+        worker = Worker.objects.get(pk=pk)
+    except Worker.DoesNotExist:
+        raise NotFound({'error': 'Worker not found'})
+
+    if request.method == 'GET':
+        serializer = WorkerSerializer(worker)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    elif request.method == 'PUT':
+        serializer = WorkerSerializer(worker, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    elif request.method == 'DELETE':
+        worker.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 def generate_unique_username(first_name, last_name):
     from admin_section.models import PrimaryStudentsRegister
@@ -2045,107 +2215,33 @@ def add_order_item(request):
             return Response(serializer.data,status=status.HTTP_201_CREATED, )
         else:
             return Response({ "error" : serializer.errors},status = status.HTTP_400_BAD_REQUEST)
-@api_view(['POST'])
-def get_all_orders(request):
-    user_type = request.data.get('user_type')
-    user_id = request.data.get('user_id')
-    child_id = request.data.get('child_id')
-
-    if user_type == 'staff' and user_id:
-        try:
-            staff = StaffRegisteration.objects.get(id=user_id)
-            orders = Order.objects.filter(staff=staff).order_by('-order_date')
-        except StaffRegisteration.DoesNotExist:
-            return Response({'error': 'Staff not found.'}, status=status.HTTP_404_NOT_FOUND)
-    
-    elif user_type == 'parent' and child_id:
-        try:
-            child = PrimaryStudentsRegister.objects.get(id=child_id)
-            orders = Order.objects.filter(child_id=child_id).order_by('-order_date')
-        except PrimaryStudentsRegister.DoesNotExist:
-            return Response({'error': 'Child not found.'}, status=status.HTTP_404_NOT_FOUND)
-    
-    else:
-        orders = Order.objects.all().order_by('-order_date')
-
-    if not orders.exists():
-        return Response({'error': 'No orders found.'}, status=status.HTTP_404_NOT_FOUND)
-
-    order_details = []
-
-    for order in orders:
-        order_items = OrderItem.objects.filter(order=order)
         
-        items_details = [
-            {
-                'item_name': item.menu.name,
-                'item_price': item.menu.price,  
-                'quantity': item.quantity
-            }
-            for item in order_items
-        ]
-
-        # Convert UTC datetime to local timezone
-        local_order_date = timezone.localtime(order.order_date)
-        formatted_order_date = local_order_date.strftime('%d %b')
-
-        order_data = {
-            'order_id': order.id,
-            'selected_day': order.selected_day,
-            'total_price': order.total_price,
-            'order_date': formatted_order_date,
-            'status': order.status,
-            'week_number': order.week_number,
-            'year': order.year,
-            'items': items_details,  
-            'user_name': order.user_name,
-        }
-
-        if order.user_type in ['parent', 'staff']:
-            order_data['child_id'] = order.child_id
-
-        if order.primary_school:
-            order_data['school_id'] = order.primary_school.id
-            order_data['school_type'] = 'primary'
-        elif order.secondary_school:
-            order_data['school_id'] = order.secondary_school.id
-            order_data['school_type'] = 'secondary'
-
-        order_details.append(order_data)
-
-    return Response({
-        'message': 'Orders retrieved successfully!',
-        'orders': order_details
-    }, status=status.HTTP_200_OK)
-
+def safe_localtime(dt):
+    """Ensure datetime is timezone-aware before converting to localtime."""
+    if isinstance(dt, date) and not isinstance(dt, datetime):
+        dt = make_aware(datetime.combine(dt, datetime.min.time()))
+    return localtime(dt)
 
 @api_view(['GET'])
 def get_all_orders(request):
-    orders = Order.objects.all().order_by('-order_date')
-
-    if not orders.exists():
-        return Response({'error': 'No orders found.'}, status=status.HTTP_404_NOT_FOUND)
-
     order_details = []
 
+    # Regular orders
+    orders = Order.objects.all().order_by('-order_date')
     for order in orders:
         order_items = OrderItem.objects.filter(order=order)
-        
         items_details = []
         for item in order_items:
-            # Use the snapshot fields for safety
             item_name = item._menu_name if item._menu_name else (item.menu.name if item.menu else "Deleted Menu")
             item_price = item._menu_price if item._menu_price else (item.menu.price if item.menu else 0)
-
             items_details.append({
                 'item_name': item_name,
-                'item_price': item_price,  
+                'item_price': item_price,
                 'quantity': item.quantity
             })
 
-        # ✅ Convert UTC → Local time before formatting
-        local_order_date = timezone.localtime(order.order_date)
-        formatted_order_date = local_order_date.strftime('%d %b')
+        local_order_date = safe_localtime(order.order_date)
+        formatted_order_date = local_order_date.strftime('%d %B, %Y')
 
         order_data = {
             'order_id': order.id,
@@ -2155,14 +2251,13 @@ def get_all_orders(request):
             'status': order.status,
             'week_number': order.week_number,
             'year': order.year,
-            'items': items_details,  
+            'items': items_details,
             'user_name': order.user_name,
+            'user_type': order.user_type,
             'payment_id': order.payment_id,
         }
 
-        if order.user_type in ['parent', 'staff']:
-            order_data['child_id'] = order.child_id
-
+        # Add school info
         if order.primary_school:
             order_data['school_id'] = order.primary_school.id
             order_data['school_name'] = order.primary_school.school_name
@@ -2172,183 +2267,128 @@ def get_all_orders(request):
             order_data['school_name'] = order.secondary_school.secondary_school_name
             order_data['school_type'] = 'secondary'
 
+        if order.user_type in ['parent', 'staff']:
+            order_data['child_id'] = order.child_id
+
+        order_details.append(order_data)
+
+    # Manager orders
+    manager_orders = ManagerOrder.objects.all().order_by('-order_date')
+    for m_order in manager_orders:
+        m_items = ManagerOrderItem.objects.filter(order=m_order)
+        items_details = [
+            {
+                'day': item.day,
+                'item': item.item,
+                'quantity': item.quantity,
+                'production_price': item.production_price or 0
+            }
+            for item in m_items
+        ]
+
+        local_order_date = safe_localtime(m_order.order_date)
+        formatted_order_date = local_order_date.strftime('%d %B, %Y')
+
+        order_data = {
+            'order_id': f"m_{m_order.id}",
+            'selected_day': m_order.selected_day,
+            'total_production_price': m_order.total_production_price,
+            'order_date': formatted_order_date,
+            'status': m_order.status,
+            'week_number': m_order.week_number,
+            'year': m_order.year,
+            'is_delivered': m_order.is_delivered,
+            'user_name': m_order.manager.username if hasattr(m_order.manager, 'username') else str(m_order.manager),
+            'user_type': 'manager',
+            'items': items_details,
+        }
+
+        # Add school info for manager orders if they have a school
+        if hasattr(m_order.manager, 'primary_school') and m_order.manager.primary_school:
+            order_data['school_id'] = m_order.manager.primary_school.id
+            order_data['school_name'] = m_order.manager.primary_school.school_name
+            order_data['school_type'] = 'primary'
+        elif hasattr(m_order.manager, 'secondary_school') and m_order.manager.secondary_school:
+            order_data['school_id'] = m_order.manager.secondary_school.id
+            order_data['school_name'] = m_order.manager.secondary_school.secondary_school_name
+            order_data['school_type'] = 'secondary'
+
         order_details.append(order_data)
 
     return Response({
         'message': 'Orders retrieved successfully!',
         'orders': order_details
     }, status=status.HTTP_200_OK)
+
+
+
 
 @api_view(['GET'])
 def get_order_by_id(request, order_id):
+    if str(order_id).startswith('m_'):
+        manager_order_id = str(order_id).replace('m_', '')
+        try:
+            order = ManagerOrder.objects.get(id=manager_order_id)
+            order_items = ManagerOrderItem.objects.filter(order=order)
+
+            items_details = [
+                {
+                    'day': item.day,
+                    'item': item.item,
+                    'quantity': item.quantity,
+                    'production_price': item.production_price or 0
+                }
+                for item in order_items
+            ]
+
+            local_order_date = safe_localtime(order.order_date)
+            formatted_order_date = local_order_date.strftime('%d %B, %Y')
+
+            order_data = {
+                'order_id': f"m_{order.id}",
+                'selected_day': order.selected_day,
+                'total_production_price': order.total_production_price,
+                'order_date': formatted_order_date,
+                'status': order.status,
+                'week_number': order.week_number,
+                'year': order.year,
+                'is_delivered': order.is_delivered,
+                'manager_name': order.manager.username if hasattr(order.manager, 'username') else str(order.manager),
+                'items': items_details,
+                'user_type': 'manager'
+            }
+
+            return Response(
+                {'message': 'Manager order retrieved successfully!', 'order': order_data},
+                status=status.HTTP_200_OK
+            )
+
+        except ManagerOrder.DoesNotExist:
+            return Response({'error': 'Manager order not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    # ---------------- NORMAL ORDER ----------------
     try:
         order = Order.objects.get(id=order_id)
         order_items = OrderItem.objects.filter(order=order)
-        
-        items_details = []
-        for item in order_items:
-            # Use the snapshot fields for safety
-            item_name = item._menu_name if item._menu_name else (item.menu.name if item.menu else "Deleted Menu")
-            item_price = item._menu_price if item._menu_price else (item.menu.price if item.menu else 0)
-
-            items_details.append({
-                'item_name': item_name,
-                'item_price': item_price, 
-                'quantity': item.quantity
-            })
-          
-       
-        local_order_date = timezone.localtime(order.order_date)
-        formatted_order_date = local_order_date.strftime('%d %b')
-        order_data = {
-            'order_id': order.id,
-            'selected_day': order.selected_day,
-            'total_price': order.total_price,
-            'order_date': formatted_order_date,
-            'status': order.status,
-            'week_number': order.week_number,
-            'year': order.year,
-            'items': items_details,  
-            'user_name': order.user_name,
-        }
-
-        if order.user_type in ['parent', 'staff']:
-            order_data['child_id'] = order.child_id
-      
-        if order.primary_school:
-            order_data['school_id'] = order.primary_school.id
-            order_data['school_type'] = 'primary'
-        elif order.secondary_school:
-            order_data['school_id'] = order.secondary_school.id
-            order_data['school_type'] = 'secondary'
-        return Response({
-            'message': 'Order retrieved successfully!',
-            'order': order_data
-        }, status=status.HTTP_200_OK)
-
-    except Order.DoesNotExist:
-        return Response({'error': 'Order not found.'}, status=status.HTTP_404_NOT_FOUND)
-
-@api_view(['POST'])
-def get_orders_by_school(request):
-    school_id = request.data.get('school_id')
-    school_type = request.data.get('school_type')
-
-    if not school_id or not school_type:
-        return Response({'error': 'Both school_id and school_type are required.'}, status=status.HTTP_400_BAD_REQUEST)
-
-    if school_type not in ['primary', 'secondary']:
-        return Response({'error': 'Invalid school_type. It should be either "primary" or "secondary".'}, status=status.HTTP_400_BAD_REQUEST)
-
-    if school_type == 'primary':
-        orders = Order.objects.filter(primary_school_id=school_id).order_by('-order_date')
-    elif school_type == 'secondary':
-        orders = Order.objects.filter(secondary_school_id=school_id).order_by('-order_date')
-
-    if not orders.exists():
-        return Response({'error': 'No orders found for the given school.'}, status=status.HTTP_404_NOT_FOUND)
-
-    order_details = []
-
-    for order in orders:
-        order_items = OrderItem.objects.filter(order=order)
-        
-        items_details = []
-        for item in order_items:
-            # Use the snapshot fields for safety
-            item_name = item._menu_name if item._menu_name else (item.menu.name if item.menu else "Deleted Menu")
-            item_price = item._menu_price if item._menu_price else (item.menu.price if item.menu else 0)
-            
-            items_details.append({
-                'item_name': item_name,
-                'item_price': item_price,  
-                'quantity': item.quantity
-            })
-
-        order_data = {
-            'order_id': order.id,
-            'selected_day': order.selected_day,
-            'total_price': order.total_price,
-            'order_date': str(order.order_date),
-            'status': order.status,
-            'week_number': order.week_number,
-            'year': order.year,
-            'items': items_details,  
-            'user_name': order.user_name,
-        }
-
-        if order.user_type in ['parent', 'staff']:
-            order_data['child_id'] = order.child_id
-
-        if order.primary_school:
-            order_data['school_id'] = order.primary_school.id
-            order_data['school_type'] = 'primary'
-        elif order.secondary_school:
-            order_data['school_id'] = order.secondary_school.id
-            order_data['school_type'] = 'secondary'
-
-        order_details.append(order_data)
-    
-    return Response({
-        'message': 'Orders retrieved successfully!',
-        'orders': order_details
-    }, status=status.HTTP_200_OK)
-
-
-@api_view(['POST'])
-def get_orders_by_user(request):
-    user_id = request.data.get('user_id')
-    user_type = request.data.get('user_type')
-    child_id = request.data.get('child_id')
-
-    if not user_type:
-        return Response({'error': 'user_type is required.'}, status=status.HTTP_400_BAD_REQUEST)
-
-    if user_type not in ['student', 'parent', 'staff']:
-        return Response({'error': 'Invalid user_type. It should be one of ["student", "parent", "staff"].'},
-                        status=status.HTTP_400_BAD_REQUEST)
-
-    orders = Order.objects.none()
-
-    if user_type == 'staff' and child_id:
-        orders = Order.objects.filter(child_id=child_id).order_by('-order_date')
-
-    elif user_type == 'staff' and user_id:
-        orders = Order.objects.filter(user_id=user_id, user_type='staff').order_by('-order_date')
-
-    elif user_type == 'parent':
-        orders = Order.objects.filter(user_id=user_id, user_type='parent').order_by('-order_date')
-
-    elif user_type == 'student':
-        orders = Order.objects.filter(user_id=user_id, user_type='student').order_by('-order_date')
-
-    if not orders.exists():
-        return Response({'error': 'No orders found for the given user.'}, status=status.HTTP_404_NOT_FOUND)
-
-    order_details = []
-
-    for order in orders:
-        order_items = order.order_items.all()
 
         items_details = []
         for item in order_items:
             item_name = item._menu_name if item._menu_name else (item.menu.name if item.menu else "Deleted Menu")
             item_price = item._menu_price if item._menu_price else (item.menu.price if item.menu else 0)
-
             items_details.append({
                 'item_name': item_name,
                 'item_price': item_price,
                 'quantity': item.quantity
             })
-        local_date = localtime(order.order_date).date()
-        formatted_order_date = local_date.strftime('%d %B, %Y')   
+
+        local_order_date = safe_localtime(order.order_date)
+        formatted_order_date = local_order_date.strftime('%d %B, %Y')
 
         order_data = {
             'order_id': order.id,
             'selected_day': order.selected_day,
             'total_price': order.total_price,
             'order_date': formatted_order_date,
-            'order_date_raw': str(local_date), 
             'status': order.status,
             'week_number': order.week_number,
             'year': order.year,
@@ -2366,12 +2406,224 @@ def get_orders_by_user(request):
             order_data['school_id'] = order.secondary_school.id
             order_data['school_type'] = 'secondary'
 
+        return Response({'message': 'Order retrieved successfully!', 'order': order_data},
+                        status=status.HTTP_200_OK)
+
+    except Order.DoesNotExist:
+        return Response({'error': 'Order not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+@api_view(['POST'])
+def get_orders_by_school(request):
+    school_id = request.data.get('school_id')
+    school_type = request.data.get('school_type')
+
+    if not school_id or not school_type:
+        return Response({'error': 'Both school_id and school_type are required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if school_type not in ['primary', 'secondary']:
+        return Response({'error': 'Invalid school_type. It should be either "primary" or "secondary".'},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    if school_type == 'primary':
+        orders = Order.objects.filter(primary_school_id=school_id).order_by('-order_date')
+    else:
+        orders = Order.objects.filter(secondary_school_id=school_id).order_by('-order_date')
+
+    manager_orders = ManagerOrder.objects.filter(school_id=school_id, school_type=school_type).order_by('-order_date')
+
+    if not orders.exists() and not manager_orders.exists():
+        return Response({'error': 'No orders found for the given school.'}, status=status.HTTP_404_NOT_FOUND)
+
+    order_details = []
+
+    # Normal Orders
+    for order in orders:
+        order_items = order.order_items.all()
+        items_details = []
+        for item in order_items:
+            item_name = item._menu_name if item._menu_name else (item.menu.name if item.menu else "Deleted Menu")
+            item_price = item._menu_price if item._menu_price else (item.menu.price if item.menu else 0)
+            items_details.append({
+                'item_name': item_name,
+                'item_price': item_price,
+                'quantity': item.quantity
+            })
+
+        local_order_date = safe_localtime(order.order_date)
+        formatted_order_date = local_order_date.strftime('%d %B, %Y')
+
+        order_data = {
+            'order_id': order.id,
+            'selected_day': order.selected_day,
+            'total_price': order.total_price,
+            'order_date': formatted_order_date,
+            'status': order.status,
+            'week_number': order.week_number,
+            'year': order.year,
+            'items': items_details,
+            'user_name': order.user_name,
+            'user_type': order.user_type,
+            'school_id': school_id,
+            'school_type': school_type
+        }
+
+        if order.user_type in ['parent', 'staff']:
+            order_data['child_id'] = order.child_id
+
         order_details.append(order_data)
 
-    return Response({
-        'message': 'Orders retrieved successfully!',
-        'orders': order_details
-    }, status=status.HTTP_200_OK)
+    # Manager Orders
+    for m_order in manager_orders:
+        order_items = ManagerOrderItem.objects.filter(order=m_order)
+        items_details = [
+            {
+                'day': item.day,
+                'item': item.item,
+                'quantity': item.quantity,
+                'production_price': item.production_price or 0
+            }
+            for item in order_items
+        ]
+
+        local_order_date = safe_localtime(m_order.order_date)
+        formatted_order_date = local_order_date.strftime('%d %B, %Y')
+
+        order_data = {
+            'order_id': f"m_{m_order.id}",
+            'selected_day': m_order.selected_day,
+            'total_production_price': m_order.total_production_price,
+            'order_date': formatted_order_date,
+            'status': m_order.status,
+            'week_number': m_order.week_number,
+            'year': m_order.year,
+            'is_delivered': m_order.is_delivered,
+            'manager_name': m_order.manager.username if hasattr(m_order.manager, 'username') else str(m_order.manager),
+            'items': items_details,
+            'user_type': 'manager',
+            'school_id': school_id,
+            'school_type': school_type
+        }
+
+        order_details.append(order_data)
+
+    return Response({'message': 'Orders retrieved successfully!', 'orders': order_details},
+                    status=status.HTTP_200_OK)
+
+@api_view(['POST'])
+def get_orders_by_user(request):
+    user_id = request.data.get('user_id')
+    user_type = request.data.get('user_type')
+    child_id = request.data.get('child_id')
+
+    if not user_type:
+        return Response({'error': 'user_type is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if user_type not in ['student', 'parent', 'staff', 'manager']:
+        return Response({'error': 'Invalid user_type.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    order_details = []
+    orders = Order.objects.none()
+
+    # Normal user logic
+    if user_type == 'staff' and child_id:
+        orders = Order.objects.filter(child_id=child_id).order_by('-order_date')
+    elif user_type == 'staff' and user_id:
+        orders = Order.objects.filter(user_id=user_id, user_type='staff').order_by('-order_date')
+    elif user_type == 'parent':
+        orders = Order.objects.filter(user_id=user_id, user_type='parent').order_by('-order_date')
+    elif user_type == 'student':
+        orders = Order.objects.filter(user_id=user_id, user_type='student').order_by('-order_date')
+
+    for order in orders:
+        order_items = order.order_items.all()
+        items_details = []
+        for item in order_items:
+            item_name = item._menu_name if item._menu_name else (item.menu.name if item.menu else "Deleted Menu")
+            item_price = item._menu_price if item._menu_price else (item.menu.price if item.menu else 0)
+            items_details.append({
+                'item_name': item_name,
+                'item_price': item_price,
+                'quantity': item.quantity
+            })
+
+        local_date = safe_localtime(order.order_date).date()
+        formatted_order_date = local_date.strftime('%d %B, %Y')
+
+        order_data = {
+            'order_id': order.id,
+            'selected_day': order.selected_day,
+            'total_price': order.total_price,
+            'order_date': formatted_order_date,
+            'order_date_raw': str(local_date),
+            'status': order.status,
+            'week_number': order.week_number,
+            'year': order.year,
+            'items': items_details,
+            'user_name': order.user_name,
+            'user_type': order.user_type,
+        }
+
+        if order.user_type in ['parent', 'staff']:
+            order_data['child_id'] = order.child_id
+
+        if order.primary_school:
+            order_data['school_id'] = order.primary_school.id
+            order_data['school_type'] = 'primary'
+        elif order.secondary_school:
+            order_data['school_id'] = order.secondary_school.id
+            order_data['school_type'] = 'secondary'
+
+        order_details.append(order_data)
+
+    # Manager Orders
+    if user_type == 'manager' and user_id:
+        manager_orders = ManagerOrder.objects.filter(manager_id=user_id).order_by('-order_date')
+
+        for m_order in manager_orders:
+            order_items = ManagerOrderItem.objects.filter(order=m_order)
+            items_details = [
+                {
+                    'day': item.day,
+                    'item': item.item,
+                    'quantity': item.quantity,
+                    'production_price': item.production_price or 0
+                }
+                for item in order_items
+            ]
+
+            local_order_date = safe_localtime(m_order.order_date)
+            formatted_order_date = local_order_date.strftime('%d %B, %Y')
+
+            order_data = {
+                'order_id': f"m_{m_order.id}",
+                'selected_day': m_order.selected_day,
+                'total_production_price': m_order.total_production_price,
+                'order_date': formatted_order_date,
+                'order_date_raw': str(local_order_date.date()),
+                'status': m_order.status,
+                'week_number': m_order.week_number,
+                'year': m_order.year,
+                'is_delivered': m_order.is_delivered,
+                'manager_name': m_order.manager.username,
+                'items': items_details,
+                'user_type': 'manager',
+            }
+
+            if m_order.manager.school_type == 'primary' and m_order.manager.primary_school:
+                order_data['school_id'] = m_order.manager.primary_school.id
+                order_data['school_type'] = 'primary'
+            elif m_order.manager.school_type == 'secondary' and m_order.manager.secondary_school:
+                order_data['school_id'] = m_order.manager.secondary_school.id
+                order_data['school_type'] = 'secondary'
+
+            order_details.append(order_data)
+
+    if not order_details:
+        return Response({'error': 'No orders found for the given user.'}, status=status.HTTP_404_NOT_FOUND)
+
+    return Response({'message': 'Orders retrieved successfully!', 'orders': order_details},
+                    status=status.HTTP_200_OK)
+
 
 @api_view(['POST'])
 def contactmessage(request):
@@ -3183,7 +3435,199 @@ def download_all_schools_menu(request):
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+WEEK_DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
 
+def fetch_manager_orders(target_day=None):
+    current_time = datetime.now()
+    current_week_number = current_time.isocalendar()[1]
+    current_year = current_time.year
+
+    cutoff_day = 4  # Friday
+    cutoff_hour = 14  # 2PM
+
+    is_past_cutoff = (
+        current_time.weekday() > cutoff_day or
+        (current_time.weekday() == cutoff_day and current_time.hour >= cutoff_hour)
+    )
+
+    target_week = current_week_number + 1 if is_past_cutoff else current_week_number
+    target_year = current_year
+
+    if target_week > 52:
+        target_week = 1
+        target_year += 1
+
+    filter_kwargs = {"week_number": target_week, "year": target_year}
+    if target_day:
+        filter_kwargs["selected_day__iexact"] = target_day
+
+    return (
+        ManagerOrder.objects
+        .filter(**filter_kwargs)
+        .exclude(status__iexact="cancelled")
+        .order_by("selected_day")
+    )
+
+
+@api_view(['GET']) 
+def download_manager_orders(request):
+    try:
+        day_filter = request.GET.get('day')
+        zip_buffer = BytesIO()
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+
+            days_to_process = [day_filter] if day_filter else WEEK_DAYS
+
+            for day in days_to_process:
+                workbook = generate_manager_workbook(day)
+                
+                day_part = day if day else 'weekly'
+                filename = f"manager_orders_{day_part}.xlsx"
+
+                with BytesIO() as excel_buffer:
+                    workbook.save(excel_buffer)
+                    excel_buffer.seek(0)
+                    zip_file.writestr(filename, excel_buffer.getvalue())
+
+        zip_buffer.seek(0)
+
+        # Save to disk and return download link
+        menu_files_directory = settings.MENU_FILES_ROOT
+        os.makedirs(menu_files_directory, exist_ok=True)
+
+        day_part = day_filter if day_filter else 'weekly'
+        filename = f"manager_orders_{day_part}.zip"
+        file_path = os.path.join(menu_files_directory, filename)
+        
+        with open(file_path, 'wb') as f:
+            f.write(zip_buffer.getvalue())
+
+        return Response({
+            'message': 'Manager orders file generated successfully!',
+            'download_link': f"{settings.MENU_FILES_URL}{filename}"
+        }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+def generate_manager_workbook(target_day):
+    workbook = Workbook()
+    workbook.remove(workbook.active)
+
+    # Styles (same as your working code)
+    header_font = Font(bold=True, size=12, color="FFFFFF")
+    header_fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
+    title_font = Font(bold=True, size=14, color="000000")
+    title_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
+    border = Border(left=Side(style="thin"), right=Side(style="thin"), top=Side(style="thin"), bottom=Side(style="thin"))
+    center_align = Alignment(horizontal="center", vertical="center")
+    left_align = Alignment(horizontal="left", vertical="center")
+
+    def apply_header_styling(sheet, title_text, columns):
+        sheet.merge_cells(start_row=1, end_row=1, start_column=1, end_column=len(columns))
+        title_cell = sheet.cell(row=1, column=1, value=title_text)
+        title_cell.font = title_font
+        title_cell.fill = title_fill
+        title_cell.alignment = center_align
+
+        for col_num, column_title in enumerate(columns, 1):
+            cell = sheet.cell(row=2, column=col_num, value=column_title)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.border = border
+            cell.alignment = center_align
+            sheet.column_dimensions[get_column_letter(col_num)].width = 20
+
+    def apply_data_styling(sheet, start_row):
+        for row in sheet.iter_rows(min_row=start_row):
+            for cell in row:
+                cell.border = border
+                cell.alignment = left_align if cell.column in [1, 2, 4] else center_align
+
+    # Fetch manager orders for the target day
+    manager_orders = fetch_manager_orders(target_day=target_day)
+    
+    # Group orders by school
+    orders_by_school = defaultdict(list)
+    day_totals = []
+
+    for order in manager_orders.prefetch_related('items', 'manager'):
+        school = None
+        school_name = "Unknown School"
+        
+        # Determine school
+        if hasattr(order.manager, 'primary_school') and order.manager.primary_school:
+            school = order.manager.primary_school
+            school_name = school.school_name
+        elif hasattr(order.manager, 'secondary_school') and order.manager.secondary_school:
+            school = order.manager.secondary_school
+            school_name = school.secondary_school_name
+        
+        # Process order items
+        for item in order.items.all():
+            order_data = {
+                'manager_name': order.manager.username,
+                'item_name': item.item,
+                'quantity': item.quantity,
+                'remarks': item.remarks or "",
+                'production_price': float(item.production_price or 0),
+                'total_price': float(item.quantity) * float(item.production_price or 0),
+                'order_id': order.id,
+                'school_name': school_name
+            }
+            orders_by_school[school_name].append(order_data)
+            day_totals.append(order_data)
+
+    # Create sheets for each school
+    for school_name, orders in orders_by_school.items():
+        # Clean sheet name (Excel has 31 char limit)
+        sheet_name = school_name[:31]
+        sheet = workbook.create_sheet(title=sheet_name)
+        
+        title = f"Manager Orders for {target_day} - {school_name}"
+        columns = ["Manager", "Item", "Quantity", "Remarks", "Production Price", "Total Price"]
+        apply_header_styling(sheet, title, columns)
+
+        row_num = 3
+        for order_data in orders:
+            sheet.cell(row=row_num, column=1, value=order_data['manager_name'])
+            sheet.cell(row=row_num, column=2, value=order_data['item_name'])
+            sheet.cell(row=row_num, column=3, value=order_data['quantity'])
+            sheet.cell(row=row_num, column=4, value=order_data['remarks'])
+            sheet.cell(row=row_num, column=5, value=order_data['production_price'])
+            sheet.cell(row=row_num, column=6, value=order_data['total_price'])
+            row_num += 1
+
+        if row_num == 3:
+            sheet.cell(row=3, column=1, value="No manager orders")
+            sheet.merge_cells(start_row=3, end_row=3, start_column=1, end_column=6)
+
+        apply_data_styling(sheet, 3)
+
+    # Create Day Total sheet (summary of all schools)
+    total_sheet = workbook.create_sheet(title=f"{target_day} Total")
+    apply_header_styling(total_sheet, f"Manager Orders Summary - {target_day}", 
+                        ["School", "Manager", "Item", "Quantity", "Remarks", "Production Price", "Total Price"])
+
+    row_num = 3
+    if not day_totals:
+        total_sheet.cell(row=3, column=1, value="No manager orders")
+        total_sheet.merge_cells(start_row=3, end_row=3, start_column=1, end_column=7)
+    else:
+        for order_data in day_totals:
+            total_sheet.cell(row=row_num, column=1, value=order_data['school_name'])
+            total_sheet.cell(row=row_num, column=2, value=order_data['manager_name'])
+            total_sheet.cell(row=row_num, column=3, value=order_data['item_name'])
+            total_sheet.cell(row=row_num, column=4, value=order_data['quantity'])
+            total_sheet.cell(row=row_num, column=5, value=order_data['remarks'])
+            total_sheet.cell(row=row_num, column=6, value=order_data['production_price'])
+            total_sheet.cell(row=row_num, column=7, value=order_data['total_price'])
+            row_num += 1
+
+    apply_data_styling(total_sheet, 3)
+
+    return workbook
 @api_view(["GET"])
 def get_user_count(request):
     try:
@@ -3801,3 +4245,451 @@ def get_app_version(request, platform):
         return Response(serializer.data)
     except AppVersion.DoesNotExist:
         return Response({"error": "Platform not found"}, status=404)
+@api_view(['POST'])
+def make_menu_available(request):
+    menu_id = request.data.get('menu_id')
+
+    if not menu_id:
+        return Response({'error': 'menu_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        menu_item = MenuItems.objects.get(id=menu_id)
+    except MenuItems.DoesNotExist:
+        return Response({'error': 'Menu item not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    menu_item.is_available = True
+    menu_item.save()
+
+    return Response({
+        'message': f'Menu item "{menu_item.item_name}" is now available.',
+        'menu_id': menu_item.id,
+        'is_available': menu_item.is_available,
+    }, status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+def make_menu_unavailable(request):
+    menu_id = request.data.get('menu_id')
+
+    if not menu_id:
+        return Response({'error': 'menu_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        menu_item = MenuItems.objects.get(id=menu_id)
+    except MenuItems.DoesNotExist:
+        return Response({'error': 'Menu item not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    menu_item.is_available = False
+    menu_item.save()
+
+    return Response({
+        'message': f'Menu item "{menu_item.item_name}" is now unavailable.',
+        'menu_id': menu_item.id,
+        'is_available': menu_item.is_available,
+    }, status=status.HTTP_200_OK)
+
+
+
+@api_view(['POST'])
+def manager_login(request):
+    username = request.data.get("username", "").strip().lower()
+    password = request.data.get("password")
+    print('username',username)
+    print('password',password)
+
+    if not username or not password:
+        return Response({'detail': 'Both username and password are required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        manager = Manager.objects.get(username=username)
+    except Manager.DoesNotExist:
+        return Response({'detail': 'Invalid username or password.'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    if not check_password(password, manager.password):
+        return Response({'detail': 'Invalid username or password.'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    data = {
+        "id": manager.id,
+        "username": manager.username,
+        "school_type": manager.school_type,
+        "primary_school": manager.primary_school.id if manager.primary_school else None,
+        "secondary_school": manager.secondary_school.id if manager.secondary_school else None,
+    }
+
+    return Response({"detail": "Login successful!", "manager": data}, status=status.HTTP_200_OK)
+
+
+
+@api_view(['POST'])
+def worker_login(request):
+    username = request.data.get("username", "").strip().lower()
+    password = request.data.get("password")
+
+    if not username or not password:
+        return Response({'detail': 'Both username and password are required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        worker = Worker.objects.get(username=username)
+    except Worker.DoesNotExist:
+        return Response({'detail': 'Invalid username or password.'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    if not check_password(password, worker.password):
+        return Response({'detail': 'Invalid username or password.'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    data = {
+        "id": worker.id,
+        "username": worker.username,
+    }
+
+    return Response({"detail": "Login successful!", "worker": data}, status=status.HTTP_200_OK)
+
+
+class CreateManagerOrderAPIView(APIView):
+    """
+    Create an order for Managers.
+    This view takes:
+      - manager_id
+      - cart (list of {day, item, quantity, remarks})
+    """
+
+    def post(self, request, *args, **kwargs):
+        try:
+            data = request.data
+            manager_id = data.get("manager_id")
+            cart_items = data.get("cart", [])
+
+            if not manager_id:
+                return Response({"error": "Manager ID is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+            if not cart_items:
+                return Response({"error": "Cart cannot be empty."}, status=status.HTTP_400_BAD_REQUEST)
+
+            manager = Manager.objects.filter(id=manager_id).first()
+            if not manager:
+                return Response({"error": "Manager not found."}, status=status.HTTP_404_NOT_FOUND)
+
+            grouped_items = {}
+            for item in cart_items:
+                day = item.get("day")
+                if not day:
+                    return Response({"error": "Each item must include a day."}, status=status.HTTP_400_BAD_REQUEST)
+                grouped_items.setdefault(day, []).append(item)
+
+            created_orders = []
+            with transaction.atomic():
+                for day, items in grouped_items.items():
+                    today = datetime.now()
+
+                    try:
+                        target_day_index = [
+                            "monday", "tuesday", "wednesday", "thursday",
+                            "friday", "saturday", "sunday"
+                        ].index(day.lower())
+                    except ValueError:
+                        return Response({"error": f"Invalid day '{day}'."}, status=status.HTTP_400_BAD_REQUEST)
+
+                    # ✅ Same calculation as user orders
+                    days_ahead = (target_day_index - today.weekday() + 7) % 7
+                    order_date = today + timedelta(days=days_ahead)
+                    week_number = order_date.isocalendar()[1]
+                    year = order_date.year
+
+                    # ✅ Create ManagerOrder with correct order_date
+                    order = ManagerOrder.objects.create(
+                        manager=manager,
+                        week_number=week_number,
+                        year=year,
+                        selected_day=day,
+                        order_date=order_date.date(),  # <-- Added line
+                        status="pending",
+                        is_delivered=False,
+                    )
+
+                    for cart_item in items:
+                        item_name = cart_item.get("item")
+                        quantity = int(cart_item.get("quantity", 1))
+                        remarks = cart_item.get("remarks", "")
+
+                        menu_item = MenuItems.objects.filter(item_name__iexact=item_name).first()
+                        if not menu_item:
+                            return Response(
+                                {"error": f"Menu item '{item_name}' not found."},
+                                status=status.HTTP_404_NOT_FOUND
+                            )
+
+                        ManagerOrderItem.objects.create(
+                            order=order,
+                            day=day,
+                            item=item_name,
+                            quantity=quantity,
+                            remarks=remarks,
+                            menu_item=menu_item
+                        )
+
+                    created_orders.append(order)
+
+            serializer = ManagerOrderSerializer(created_orders, many=True)
+            orders_data = serializer.data
+
+            for order in orders_data:
+                order["order_id"] = f"m_{order['id']}"
+                del order["id"]
+
+            return Response({
+                "message": "Manager orders created successfully.",
+                "orders": orders_data
+            }, status=status.HTTP_201_CREATED)
+
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
+
+# ------------------------------
+# Create Document (Admin only)
+# ------------------------------
+@api_view(['POST'])
+def create_document(request):
+    title = request.data.get('title')
+    content = request.data.get('content')
+
+    if not title or not content:
+        return Response({'error': 'Title and content are required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+
+    document = Document.objects.create(
+        title=title,
+        content=content,
+    )
+
+    return Response({
+        'message': 'Document created successfully.',
+        'document_id': document.id,
+        'title': document.title,
+        'content': document.content,
+    }, status=status.HTTP_201_CREATED)
+
+
+# ------------------------------
+# Fetch All Documents
+# ------------------------------
+@api_view(['GET'])
+def get_all_documents(request):
+    documents = Document.objects.all().order_by('-created_at')
+    data = [{
+        'id': doc.id,
+        'title': doc.title,
+        'content': doc.content,
+        'created_at': doc.created_at,
+        'updated_at': doc.updated_at
+    } for doc in documents]
+    return Response(data, status=status.HTTP_200_OK)
+
+
+# ------------------------------
+# Edit Document
+# ------------------------------
+@api_view(['POST'])
+def edit_document(request):
+    document_id = request.data.get('document_id')
+    title = request.data.get('title')
+    content = request.data.get('content')
+
+    if not document_id:
+        return Response({'error': 'document_id is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        document = Document.objects.get(id=document_id)
+    except Document.DoesNotExist:
+        return Response({'error': 'Document not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    if title:
+        document.title = title
+    if content:
+        document.content = content
+
+    document.save()
+    return Response({'message': 'Document updated successfully.'}, status=status.HTTP_200_OK)
+
+
+# ------------------------------
+# Delete Document
+# ------------------------------
+@api_view(['POST'])
+def delete_document(request):
+    document_id = request.data.get('document_id')
+    if not document_id:
+        return Response({'error': 'document_id is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        document = Document.objects.get(id=document_id)
+        document.delete()
+    except Document.DoesNotExist:
+        return Response({'error': 'Document not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    return Response({'message': 'Document deleted successfully.'}, status=status.HTTP_200_OK)
+
+
+# ------------------------------
+# Fetch Documents for a Worker (with read/unread status)
+# ------------------------------
+@api_view(['POST'])
+def get_worker_documents(request):
+    worker_id = request.data.get('worker_id')
+
+    if not worker_id:
+        return Response({'error': 'worker_id is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        worker = Worker.objects.get(id=worker_id)
+    except Worker.DoesNotExist:
+        return Response({'error': 'Worker not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    documents = Document.objects.all()
+    data = []
+
+    for doc in documents:
+        status_obj = WorkerDocumentStatus.objects.filter(worker=worker, document=doc).first()
+        data.append({
+            'document_id': doc.id,
+            'title': doc.title,
+            'status': status_obj.status if status_obj else 'unread',
+            'read_at': status_obj.read_at if status_obj else None
+        })
+
+    return Response(data, status=status.HTTP_200_OK)
+
+
+# ------------------------------
+# Fetch Document Detail (by document_id)
+# ------------------------------
+@api_view(['POST'])
+def get_document_detail(request):
+    document_id = request.data.get('document_id')
+
+    if not document_id:
+        return Response({'error': 'document_id is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        document = Document.objects.get(id=document_id)
+    except Document.DoesNotExist:
+        return Response({'error': 'Document not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    return Response({
+        'id': document.id,
+        'title': document.title,
+        'content': document.content,
+        'created_at': document.created_at,
+        'updated_at': document.updated_at,
+    }, status=status.HTTP_200_OK)
+
+
+# ------------------------------
+# Mark Document as Read (worker action)
+# ------------------------------
+@api_view(['POST'])
+def mark_document_read(request):
+    worker_id = request.data.get('worker_id')
+    document_id = request.data.get('document_id')
+    status_value = request.data.get('status')  # 'read' or 'unread'
+
+    if not worker_id or not document_id or not status_value:
+        return Response({'error': 'worker_id, document_id and status are required.'},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        worker = Worker.objects.get(id=worker_id)
+        document = Document.objects.get(id=document_id)
+    except (Worker.DoesNotExist, Document.DoesNotExist):
+        return Response({'error': 'Worker or Document not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    obj, created = WorkerDocumentStatus.objects.get_or_create(worker=worker, document=document)
+    obj.status = status_value
+    obj.read_at = timezone.now() if status_value == 'read' else None
+    obj.save()
+
+    return Response({
+        'message': f'Document marked as {status_value}.',
+        'worker': worker.username,
+        'document': document.title,
+        'read_at': obj.read_at
+    }, status=status.HTTP_200_OK)
+
+@api_view(['GET'])
+def export_worker_document_status(request):
+    """
+    Export Excel showing all documents vs all workers with read status.
+    Rows = Documents, Columns = Workers, Values = Read Timestamp or 'Unread'
+    """
+    try:
+        # Create workbook and sheet
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Document Status"
+
+        # Styles
+        header_fill = PatternFill(start_color="009c5b", end_color="009c5b", fill_type="solid")
+        read_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")  
+        unread_fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid") 
+        header_font = Font(bold=True, color="FFFFFF")
+        center_align = Alignment(horizontal="center", vertical="center")
+        workers = list(Worker.objects.all())
+        documents = list(Document.objects.all())
+
+        # Header row
+        headers = ["Document Title"] + [worker.username for worker in workers]
+        ws.append(headers)
+
+        # Apply header styles
+        for col in range(1, len(headers) + 1):
+            cell = ws.cell(row=1, column=col)
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = center_align
+
+        # Fill data rows
+        for doc in documents:
+            row_data = [doc.title]
+            for worker in workers:
+                status_obj = WorkerDocumentStatus.objects.filter(worker=worker, document=doc).first()
+
+                if status_obj and status_obj.status == "read":
+                    value = status_obj.read_at.strftime("%Y-%m-%d %H:%M") if status_obj.read_at else "Read"
+                else:
+                    value = "Unread"
+
+                row_data.append(value)
+
+            ws.append(row_data)
+
+        # Apply coloring for each cell based on status
+        for row_idx in range(2, len(documents) + 2):
+            for col_idx in range(2, len(workers) + 2):
+                cell = ws.cell(row=row_idx, column=col_idx)
+                if cell.value == "Unread":
+                    cell.fill = unread_fill
+                else:
+                    cell.fill = read_fill
+                cell.alignment = center_align
+
+        # Auto-adjust column widths
+        for column_cells in ws.columns:
+            length = max(len(str(cell.value or "")) for cell in column_cells)
+            ws.column_dimensions[column_cells[0].column_letter].width = length + 4
+
+        # Save workbook to memory
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+
+        # Prepare response
+        response = HttpResponse(
+            output.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response["Content-Disposition"] = 'attachment; filename="document_status_report.xlsx"'
+        return response
+
+    except Exception as e:
+        return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
