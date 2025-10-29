@@ -67,6 +67,21 @@ class ManagerOrderItemAdmin(admin.ModelAdmin):
     list_filter = ('day',)
     readonly_fields = ('production_price',)
 
+@admin.register(Document)
+class DocumentAdmin(admin.ModelAdmin):
+    list_display = ("id", "title", "created_at")
+    search_fields = ("title", "content")
+    ordering = ("-created_at",)
+    list_per_page = 20
+
+
+@admin.register(WorkerDocumentStatus)
+class WorkerDocumentStatusAdmin(admin.ModelAdmin):
+    list_display = ("id", "worker", "document", "status", "read_at")
+    list_filter = ("status", "read_at")
+    search_fields = ("worker__username", "document__title")
+    ordering = ("-read_at",)
+    list_per_page = 30
 
 @admin.register(AppVersion)
 class AppVersionAdmin(admin.ModelAdmin):

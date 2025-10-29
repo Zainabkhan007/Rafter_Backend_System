@@ -393,6 +393,32 @@ class Worker(models.Model):
     def __str__(self):
         return f'{self.username} - Worker'
 
+class Document(models.Model):
+    title = models.CharField(max_length=255)
+    content = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.title
+
+
+class WorkerDocumentStatus(models.Model):
+    STATUS_CHOICES = [
+        ('unread', 'Unread'),
+        ('read', 'Read'),
+    ]
+    worker = models.ForeignKey(Worker, on_delete=models.CASCADE, related_name="document_statuses")
+    document = models.ForeignKey(Document, on_delete=models.CASCADE, related_name="worker_statuses")
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='unread')
+    read_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        unique_together = ('worker', 'document')
+
+    def __str__(self):
+        return f"{self.worker.username} - {self.document.title} ({self.status})"
+
 
 class ContactMessage(models.Model):
     full_name = models.CharField(max_length=100)

@@ -153,6 +153,20 @@ class WorkerSerializer(serializers.ModelSerializer):
         extra_kwargs = {'password': {'write_only': True}}
 
 
+class DocumentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Document
+        fields = ['id', 'title', 'content', 'created_at', 'updated_at']
+
+
+class WorkerDocumentStatusSerializer(serializers.ModelSerializer):
+    document_title = serializers.CharField(source="document.title", read_only=True)
+
+    class Meta:
+        model = WorkerDocumentStatus
+        fields = ['id', 'worker', 'document', 'document_title', 'status', 'read_at']     
+
+
 class LoginSerializer(serializers.Serializer):
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True, min_length=8, max_length=128)

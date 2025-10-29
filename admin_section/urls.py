@@ -113,6 +113,15 @@ urlpatterns = [
    path("get_user_count/",views.get_user_count,name='get_user_count'),
    path("deactivate_menus/",views.deactivate_menus,name='deactivate_menus'),
    path("app-version/<str:platform>/", views.get_app_version, name="app-version"),
+    path('documents/create/', views.create_document),
+    path('documents/all/', views.get_all_documents),
+    path('documents/edit/', views.edit_document),
+    path('documents/delete/', views.delete_document),
+    path('documents/worker/', views.get_worker_documents),
+    path('documents/detail/', views.get_document_detail),
+    path('documents/mark-read/', views.mark_document_read),
+    path('documents/report/', views.export_worker_document_status),
+
    
 
    

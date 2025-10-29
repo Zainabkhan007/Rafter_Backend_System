@@ -3469,139 +3469,165 @@ def fetch_manager_orders(target_day=None):
     )
 
 
-@api_view(['GET'])
+@api_view(['GET']) 
 def download_manager_orders(request):
     try:
-        # === Style setup ===
-        header_font = Font(bold=True, size=12, color="FFFFFF")
-        header_fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
-        title_font = Font(bold=True, size=14)
-        title_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
-        border = Border(left=Side(style="thin"), right=Side(style="thin"),
-                        top=Side(style="thin"), bottom=Side(style="thin"))
-        center_align = Alignment(horizontal="center", vertical="center")
-        left_align = Alignment(horizontal="left", vertical="center")
+        day_filter = request.GET.get('day')
+        zip_buffer = BytesIO()
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
 
-        def apply_header(sheet, title_text, columns):
-            sheet.merge_cells(start_row=1, end_row=1, start_column=1, end_column=len(columns))
-            title_cell = sheet.cell(row=1, column=1, value=title_text)
-            title_cell.font = title_font
-            title_cell.fill = title_fill
-            title_cell.alignment = center_align
+            days_to_process = [day_filter] if day_filter else WEEK_DAYS
 
-            for col_num, column_title in enumerate(columns, 1):
-                cell = sheet.cell(row=2, column=col_num, value=column_title)
-                cell.font = header_font
-                cell.fill = header_fill
-                cell.border = border
-                cell.alignment = center_align
-                sheet.column_dimensions[get_column_letter(col_num)].width = 25
+            for day in days_to_process:
+                workbook = generate_manager_workbook(day)
+                
+                day_part = day if day else 'weekly'
+                filename = f"manager_orders_{day_part}.xlsx"
 
-        def apply_data_styling(sheet, start_row):
-            for row in sheet.iter_rows(min_row=start_row):
-                for cell in row:
-                    cell.border = border
-                    cell.alignment = left_align if cell.column == 1 else center_align
+                with BytesIO() as excel_buffer:
+                    workbook.save(excel_buffer)
+                    excel_buffer.seek(0)
+                    zip_file.writestr(filename, excel_buffer.getvalue())
 
-        # === Create in-memory zip ===
-        zip_buffer = io.BytesIO()
-
-        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-            for day in WEEK_DAYS:
-                workbook = Workbook()
-                workbook.remove(workbook.active)
-
-                day_orders = fetch_manager_orders(target_day=day)
-                day_totals = []
-
-                all_schools = list(PrimarySchool.objects.all()) + list(SecondarySchool.objects.all())
-
-                for school in all_schools:
-                    school_name = getattr(school, 'school_name', None) or getattr(school, 'secondary_school_name', 'Unknown School')
-
-                    if hasattr(school, 'school_name'):
-                        school_orders = day_orders.filter(manager__primary_school=school)
-                    else:
-                        school_orders = day_orders.filter(manager__secondary_school=school)
-
-                    sheet = workbook.create_sheet(title=school_name[:31])
-                    apply_header(sheet, f"Manager Orders for {day} - {school_name}",
-                                 ["Manager", "Item", "Quantity", "Remarks", "Prod. Price", "Total Price"])
-
-                    row_num = 3
-                    if not school_orders.exists():
-                        sheet.cell(row=3, column=1, value="No orders found")
-                        sheet.merge_cells(start_row=3, end_row=3, start_column=1, end_column=6)
-                        continue
-
-                    for order in school_orders.prefetch_related('items', 'manager'):
-                        for item in order.items.all():
-                            total_price = float(item.quantity) * float(item.production_price or 0)
-                            sheet.cell(row=row_num, column=1, value=order.manager.username)
-                            sheet.cell(row=row_num, column=2, value=item.item)
-                            sheet.cell(row=row_num, column=3, value=item.quantity)
-                            sheet.cell(row=row_num, column=4, value=item.remarks or "")
-                            sheet.cell(row=row_num, column=5, value=float(item.production_price or 0))
-                            sheet.cell(row=row_num, column=6, value=total_price)
-                            row_num += 1
-
-                            day_totals.append({
-                                "school": school_name,
-                                "manager": order.manager.username,
-                                "item": item.item,
-                                "quantity": item.quantity,
-                                "remarks": item.remarks or "",
-                                "production_price": float(item.production_price or 0),
-                                "total_price": total_price,
-                            })
-
-                    apply_data_styling(sheet, 3)
-
-                # === Day Total Sheet ===
-                total_sheet = workbook.create_sheet(title=f"{day} Total")
-                apply_header(total_sheet, f"Day Total Summary - {day}",
-                             ["School", "Manager", "Item", "Qty", "Remarks", "Prod. Price", "Total Price"])
-
-                row_num = 3
-                if not day_totals:
-                    total_sheet.cell(row=3, column=1, value="No orders found")
-                    total_sheet.merge_cells(start_row=3, end_row=3, start_column=1, end_column=7)
-                else:
-                    for entry in day_totals:
-                        total_sheet.cell(row=row_num, column=1, value=entry["school"])
-                        total_sheet.cell(row=row_num, column=2, value=entry["manager"])
-                        total_sheet.cell(row=row_num, column=3, value=entry["item"])
-                        total_sheet.cell(row=row_num, column=4, value=entry["quantity"])
-                        total_sheet.cell(row=row_num, column=5, value=entry["remarks"])
-                        total_sheet.cell(row=row_num, column=6, value=entry["production_price"])
-                        total_sheet.cell(row=row_num, column=7, value=entry["total_price"])
-                        row_num += 1
-
-                apply_data_styling(total_sheet, 3)
-
-                excel_buffer = io.BytesIO()
-                workbook.save(excel_buffer)
-                excel_buffer.seek(0)
-
-                zip_file.writestr(f"{day}_Manager_Orders.xlsx", excel_buffer.getvalue())
-
-        # === Save zip to disk and return link ===
         zip_buffer.seek(0)
-        export_dir = os.path.join(settings.MEDIA_ROOT, "exports")
-        os.makedirs(export_dir, exist_ok=True)
 
-        file_name = f"Manager_Orders_{datetime.now().strftime('%Y_%m_%d_%H_%M')}.zip"
-        file_path = os.path.join(export_dir, file_name)
-        with open(file_path, "wb") as f:
+        # Save to disk and return download link
+        menu_files_directory = settings.MENU_FILES_ROOT
+        os.makedirs(menu_files_directory, exist_ok=True)
+
+        day_part = day_filter if day_filter else 'weekly'
+        filename = f"manager_orders_{day_part}.zip"
+        file_path = os.path.join(menu_files_directory, filename)
+        
+        with open(file_path, 'wb') as f:
             f.write(zip_buffer.getvalue())
 
-        download_link = f"{settings.MEDIA_URL}exports/{file_name}"
-        return JsonResponse({"download_link": download_link})
+        return Response({
+            'message': 'Manager orders file generated successfully!',
+            'download_link': f"{settings.MENU_FILES_URL}{filename}"
+        }, status=status.HTTP_200_OK)
 
     except Exception as e:
-        return JsonResponse({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+def generate_manager_workbook(target_day):
+    workbook = Workbook()
+    workbook.remove(workbook.active)
+
+    # Styles (same as your working code)
+    header_font = Font(bold=True, size=12, color="FFFFFF")
+    header_fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
+    title_font = Font(bold=True, size=14, color="000000")
+    title_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
+    border = Border(left=Side(style="thin"), right=Side(style="thin"), top=Side(style="thin"), bottom=Side(style="thin"))
+    center_align = Alignment(horizontal="center", vertical="center")
+    left_align = Alignment(horizontal="left", vertical="center")
+
+    def apply_header_styling(sheet, title_text, columns):
+        sheet.merge_cells(start_row=1, end_row=1, start_column=1, end_column=len(columns))
+        title_cell = sheet.cell(row=1, column=1, value=title_text)
+        title_cell.font = title_font
+        title_cell.fill = title_fill
+        title_cell.alignment = center_align
+
+        for col_num, column_title in enumerate(columns, 1):
+            cell = sheet.cell(row=2, column=col_num, value=column_title)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.border = border
+            cell.alignment = center_align
+            sheet.column_dimensions[get_column_letter(col_num)].width = 20
+
+    def apply_data_styling(sheet, start_row):
+        for row in sheet.iter_rows(min_row=start_row):
+            for cell in row:
+                cell.border = border
+                cell.alignment = left_align if cell.column in [1, 2, 4] else center_align
+
+    # Fetch manager orders for the target day
+    manager_orders = fetch_manager_orders(target_day=target_day)
+    
+    # Group orders by school
+    orders_by_school = defaultdict(list)
+    day_totals = []
+
+    for order in manager_orders.prefetch_related('items', 'manager'):
+        school = None
+        school_name = "Unknown School"
+        
+        # Determine school
+        if hasattr(order.manager, 'primary_school') and order.manager.primary_school:
+            school = order.manager.primary_school
+            school_name = school.school_name
+        elif hasattr(order.manager, 'secondary_school') and order.manager.secondary_school:
+            school = order.manager.secondary_school
+            school_name = school.secondary_school_name
+        
+        # Process order items
+        for item in order.items.all():
+            order_data = {
+                'manager_name': order.manager.username,
+                'item_name': item.item,
+                'quantity': item.quantity,
+                'remarks': item.remarks or "",
+                'production_price': float(item.production_price or 0),
+                'total_price': float(item.quantity) * float(item.production_price or 0),
+                'order_id': order.id,
+                'school_name': school_name
+            }
+            orders_by_school[school_name].append(order_data)
+            day_totals.append(order_data)
+
+    # Create sheets for each school
+    for school_name, orders in orders_by_school.items():
+        # Clean sheet name (Excel has 31 char limit)
+        sheet_name = school_name[:31]
+        sheet = workbook.create_sheet(title=sheet_name)
+        
+        title = f"Manager Orders for {target_day} - {school_name}"
+        columns = ["Manager", "Item", "Quantity", "Remarks", "Production Price", "Total Price"]
+        apply_header_styling(sheet, title, columns)
+
+        row_num = 3
+        for order_data in orders:
+            sheet.cell(row=row_num, column=1, value=order_data['manager_name'])
+            sheet.cell(row=row_num, column=2, value=order_data['item_name'])
+            sheet.cell(row=row_num, column=3, value=order_data['quantity'])
+            sheet.cell(row=row_num, column=4, value=order_data['remarks'])
+            sheet.cell(row=row_num, column=5, value=order_data['production_price'])
+            sheet.cell(row=row_num, column=6, value=order_data['total_price'])
+            row_num += 1
+
+        if row_num == 3:
+            sheet.cell(row=3, column=1, value="No manager orders")
+            sheet.merge_cells(start_row=3, end_row=3, start_column=1, end_column=6)
+
+        apply_data_styling(sheet, 3)
+
+    # Create Day Total sheet (summary of all schools)
+    total_sheet = workbook.create_sheet(title=f"{target_day} Total")
+    apply_header_styling(total_sheet, f"Manager Orders Summary - {target_day}", 
+                        ["School", "Manager", "Item", "Quantity", "Remarks", "Production Price", "Total Price"])
+
+    row_num = 3
+    if not day_totals:
+        total_sheet.cell(row=3, column=1, value="No manager orders")
+        total_sheet.merge_cells(start_row=3, end_row=3, start_column=1, end_column=7)
+    else:
+        for order_data in day_totals:
+            total_sheet.cell(row=row_num, column=1, value=order_data['school_name'])
+            total_sheet.cell(row=row_num, column=2, value=order_data['manager_name'])
+            total_sheet.cell(row=row_num, column=3, value=order_data['item_name'])
+            total_sheet.cell(row=row_num, column=4, value=order_data['quantity'])
+            total_sheet.cell(row=row_num, column=5, value=order_data['remarks'])
+            total_sheet.cell(row=row_num, column=6, value=order_data['production_price'])
+            total_sheet.cell(row=row_num, column=7, value=order_data['total_price'])
+            row_num += 1
+
+    apply_data_styling(total_sheet, 3)
+
+    return workbook
 @api_view(["GET"])
 def get_user_count(request):
     try:
@@ -4262,6 +4288,8 @@ def make_menu_unavailable(request):
         'is_available': menu_item.is_available,
     }, status=status.HTTP_200_OK)
 
+
+
 @api_view(['POST'])
 def manager_login(request):
     username = request.data.get("username", "").strip().lower()
@@ -4414,3 +4442,254 @@ class CreateManagerOrderAPIView(APIView):
 
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
+
+# ------------------------------
+# Create Document (Admin only)
+# ------------------------------
+@api_view(['POST'])
+def create_document(request):
+    title = request.data.get('title')
+    content = request.data.get('content')
+
+    if not title or not content:
+        return Response({'error': 'Title and content are required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+
+    document = Document.objects.create(
+        title=title,
+        content=content,
+    )
+
+    return Response({
+        'message': 'Document created successfully.',
+        'document_id': document.id,
+        'title': document.title,
+        'content': document.content,
+    }, status=status.HTTP_201_CREATED)
+
+
+# ------------------------------
+# Fetch All Documents
+# ------------------------------
+@api_view(['GET'])
+def get_all_documents(request):
+    documents = Document.objects.all().order_by('-created_at')
+    data = [{
+        'id': doc.id,
+        'title': doc.title,
+        'content': doc.content,
+        'created_at': doc.created_at,
+        'updated_at': doc.updated_at
+    } for doc in documents]
+    return Response(data, status=status.HTTP_200_OK)
+
+
+# ------------------------------
+# Edit Document
+# ------------------------------
+@api_view(['POST'])
+def edit_document(request):
+    document_id = request.data.get('document_id')
+    title = request.data.get('title')
+    content = request.data.get('content')
+
+    if not document_id:
+        return Response({'error': 'document_id is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        document = Document.objects.get(id=document_id)
+    except Document.DoesNotExist:
+        return Response({'error': 'Document not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    if title:
+        document.title = title
+    if content:
+        document.content = content
+
+    document.save()
+    return Response({'message': 'Document updated successfully.'}, status=status.HTTP_200_OK)
+
+
+# ------------------------------
+# Delete Document
+# ------------------------------
+@api_view(['POST'])
+def delete_document(request):
+    document_id = request.data.get('document_id')
+    if not document_id:
+        return Response({'error': 'document_id is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        document = Document.objects.get(id=document_id)
+        document.delete()
+    except Document.DoesNotExist:
+        return Response({'error': 'Document not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    return Response({'message': 'Document deleted successfully.'}, status=status.HTTP_200_OK)
+
+
+# ------------------------------
+# Fetch Documents for a Worker (with read/unread status)
+# ------------------------------
+@api_view(['POST'])
+def get_worker_documents(request):
+    worker_id = request.data.get('worker_id')
+
+    if not worker_id:
+        return Response({'error': 'worker_id is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        worker = Worker.objects.get(id=worker_id)
+    except Worker.DoesNotExist:
+        return Response({'error': 'Worker not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    documents = Document.objects.all()
+    data = []
+
+    for doc in documents:
+        status_obj = WorkerDocumentStatus.objects.filter(worker=worker, document=doc).first()
+        data.append({
+            'document_id': doc.id,
+            'title': doc.title,
+            'status': status_obj.status if status_obj else 'unread',
+            'read_at': status_obj.read_at if status_obj else None
+        })
+
+    return Response(data, status=status.HTTP_200_OK)
+
+
+# ------------------------------
+# Fetch Document Detail (by document_id)
+# ------------------------------
+@api_view(['POST'])
+def get_document_detail(request):
+    document_id = request.data.get('document_id')
+
+    if not document_id:
+        return Response({'error': 'document_id is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        document = Document.objects.get(id=document_id)
+    except Document.DoesNotExist:
+        return Response({'error': 'Document not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    return Response({
+        'id': document.id,
+        'title': document.title,
+        'content': document.content,
+        'created_at': document.created_at,
+        'updated_at': document.updated_at,
+    }, status=status.HTTP_200_OK)
+
+
+# ------------------------------
+# Mark Document as Read (worker action)
+# ------------------------------
+@api_view(['POST'])
+def mark_document_read(request):
+    worker_id = request.data.get('worker_id')
+    document_id = request.data.get('document_id')
+    status_value = request.data.get('status')  # 'read' or 'unread'
+
+    if not worker_id or not document_id or not status_value:
+        return Response({'error': 'worker_id, document_id and status are required.'},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        worker = Worker.objects.get(id=worker_id)
+        document = Document.objects.get(id=document_id)
+    except (Worker.DoesNotExist, Document.DoesNotExist):
+        return Response({'error': 'Worker or Document not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    obj, created = WorkerDocumentStatus.objects.get_or_create(worker=worker, document=document)
+    obj.status = status_value
+    obj.read_at = timezone.now() if status_value == 'read' else None
+    obj.save()
+
+    return Response({
+        'message': f'Document marked as {status_value}.',
+        'worker': worker.username,
+        'document': document.title,
+        'read_at': obj.read_at
+    }, status=status.HTTP_200_OK)
+
+@api_view(['GET'])
+def export_worker_document_status(request):
+    """
+    Export Excel showing all documents vs all workers with read status.
+    Rows = Documents, Columns = Workers, Values = Read Timestamp or 'Unread'
+    """
+    try:
+        # Create workbook and sheet
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Document Status"
+
+        # Styles
+        header_fill = PatternFill(start_color="009c5b", end_color="009c5b", fill_type="solid")
+        read_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")  
+        unread_fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid") 
+        header_font = Font(bold=True, color="FFFFFF")
+        center_align = Alignment(horizontal="center", vertical="center")
+        workers = list(Worker.objects.all())
+        documents = list(Document.objects.all())
+
+        # Header row
+        headers = ["Document Title"] + [worker.username for worker in workers]
+        ws.append(headers)
+
+        # Apply header styles
+        for col in range(1, len(headers) + 1):
+            cell = ws.cell(row=1, column=col)
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = center_align
+
+        # Fill data rows
+        for doc in documents:
+            row_data = [doc.title]
+            for worker in workers:
+                status_obj = WorkerDocumentStatus.objects.filter(worker=worker, document=doc).first()
+
+                if status_obj and status_obj.status == "read":
+                    value = status_obj.read_at.strftime("%Y-%m-%d %H:%M") if status_obj.read_at else "Read"
+                else:
+                    value = "Unread"
+
+                row_data.append(value)
+
+            ws.append(row_data)
+
+        # Apply coloring for each cell based on status
+        for row_idx in range(2, len(documents) + 2):
+            for col_idx in range(2, len(workers) + 2):
+                cell = ws.cell(row=row_idx, column=col_idx)
+                if cell.value == "Unread":
+                    cell.fill = unread_fill
+                else:
+                    cell.fill = read_fill
+                cell.alignment = center_align
+
+        # Auto-adjust column widths
+        for column_cells in ws.columns:
+            length = max(len(str(cell.value or "")) for cell in column_cells)
+            ws.column_dimensions[column_cells[0].column_letter].width = length + 4
+
+        # Save workbook to memory
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+
+        # Prepare response
+        response = HttpResponse(
+            output.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response["Content-Disposition"] = 'attachment; filename="document_status_report.xlsx"'
+        return response
+
+    except Exception as e:
+        return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
