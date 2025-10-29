@@ -960,61 +960,61 @@ def add_child(request):
 
 
     
-@api_view(['GET', 'PUT',"DELETE"])
+@api_view(['GET', 'PUT', 'DELETE'])
 def edit_child(request, child_id):
     child = get_object_or_404(PrimaryStudentsRegister, id=child_id)
 
     if request.method == 'GET':
-      
         serializer = PrimaryStudentSerializer(child)
         return Response({'child': serializer.data}, status=status.HTTP_200_OK)
 
     elif request.method == 'PUT':
-      
         first_name = request.data.get('first_name', child.first_name)
         last_name = request.data.get('last_name', child.last_name)
         class_year = request.data.get('class_year', child.class_year)
-
-        school_id = request.data.get('school', None)  
+        school_id = request.data.get('school', None)
+        teacher_id = request.data.get('teacher_id', None)  
         allergies = request.data.get('allergies', [])
 
-        
+
         if school_id:
             try:
-               
-                school = PrimarySchool.objects.get(id=school_id) 
+                school = PrimarySchool.objects.get(id=school_id)
                 child.school = school
             except PrimarySchool.DoesNotExist:
                 return Response({'message': 'School not found'}, status=status.HTTP_400_BAD_REQUEST)
 
+        if teacher_id:
+            try:
+                teacher = Teacher.objects.get(id=teacher_id)  
+                child.teacher = teacher
+            except Teacher.DoesNotExist:
+                return Response({'message': 'Teacher not found'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # --- Update child basic info ---
         child.first_name = first_name
         child.last_name = last_name
         child.class_year = class_year
 
-      
+        # --- Update allergies ---
         if allergies is not None:
-            child.allergies.clear() 
+            child.allergies.clear()
             for allergy in allergies:
-                allergen = Allergens.objects.filter(allergy=allergy).first() 
+                allergen = Allergens.objects.filter(allergy=allergy).first()
                 if allergen:
                     child.allergies.add(allergen)
 
-        
+        # --- Save child ---
         child.save()
 
-        
         return Response({
             'message': 'Child details updated successfully.',
             'child': PrimaryStudentSerializer(child).data
         }, status=status.HTTP_200_OK)
-    
-    elif request.method == 'DELETE':
-        # Deleting the child record
-        child.delete()
-        return Response({
-            'message': 'Child record deleted successfully.'
-        }, status=status.HTTP_204_NO_CONTENT)
 
+    elif request.method == 'DELETE':
+        child.delete()
+        return Response({'message': 'Child record deleted successfully.'}, status=status.HTTP_204_NO_CONTENT)
 
 
 # Primary School Sction
@@ -2429,7 +2429,17 @@ def get_orders_by_school(request):
     else:
         orders = Order.objects.filter(secondary_school_id=school_id).order_by('-order_date')
 
-    manager_orders = ManagerOrder.objects.filter(school_id=school_id, school_type=school_type).order_by('-order_date')
+    if school_type == 'primary':
+        manager_orders = ManagerOrder.objects.filter(
+            manager__school_type='primary',
+            manager__primary_school_id=school_id
+        ).order_by('-order_date')
+    else:
+        manager_orders = ManagerOrder.objects.filter(
+            manager__school_type='secondary',
+            manager__secondary_school_id=school_id
+        ).order_by('-order_date')
+
 
     if not orders.exists() and not manager_orders.exists():
         return Response({'error': 'No orders found for the given school.'}, status=status.HTTP_404_NOT_FOUND)
@@ -2508,6 +2518,8 @@ def get_orders_by_school(request):
 
     return Response({'message': 'Orders retrieved successfully!', 'orders': order_details},
                     status=status.HTTP_200_OK)
+
+
 
 @api_view(['POST'])
 def get_orders_by_user(request):
@@ -4615,6 +4627,8 @@ def mark_document_read(request):
         'document': document.title,
         'read_at': obj.read_at
     }, status=status.HTTP_200_OK)
+
+
 
 @api_view(['GET'])
 def export_worker_document_status(request):
