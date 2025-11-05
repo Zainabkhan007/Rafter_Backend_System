@@ -3119,7 +3119,7 @@ def generate_workbook(school, student_orders, staff_orders, school_type, role='a
     day_totals = defaultdict(lambda: defaultdict(int))
     grouped_orders = defaultdict(lambda: defaultdict(list))
     staff_orders_by_day = defaultdict(list)
-    teacher_totals = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))  # day -> teacher -> item -> quantity
+    teacher_totals = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))  
 
     # === Styles ===
     header_font = Font(bold=True, size=12, color="FFFFFF")
