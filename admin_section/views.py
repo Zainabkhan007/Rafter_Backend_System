@@ -3113,6 +3113,7 @@ def fetch_orders(school_id, school_type, target_day=None):
 
 
 def generate_workbook(school, student_orders, staff_orders, school_type, role='admin', day_filter=None):
+
     workbook = Workbook()
     workbook.remove(workbook.active)
 
@@ -3126,6 +3127,7 @@ def generate_workbook(school, student_orders, staff_orders, school_type, role='a
     header_fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
     title_font = Font(bold=True, size=14, color="000000")
     title_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
+    total_fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")  # light yellow for total row
     border = Border(left=Side(style="thin"), right=Side(style="thin"), top=Side(style="thin"), bottom=Side(style="thin"))
     center_align = Alignment(horizontal="center", vertical="center")
     left_align = Alignment(horizontal="left", vertical="center")
@@ -3255,7 +3257,7 @@ def generate_workbook(school, student_orders, staff_orders, school_type, role='a
 
                 apply_data_styling(sheet, 3)
 
-        # === NEW: Teacher Totals Sheet for Primary Schools ===
+        # === NEW: Teacher Totals Sheet for Primary Schools (with per-teacher totals) ===
         if school_type == 'primary' and role in ['admin', 'chef', 'staff']:
             sheet = workbook.create_sheet(title=f"{day} Teacher Totals"[:31])
             sheet.sheet_properties.tabColor = "00B0F0"
@@ -3264,11 +3266,22 @@ def generate_workbook(school, student_orders, staff_orders, school_type, role='a
             row_num = 3
             if teacher_totals.get(day):
                 for teacher_name, items in teacher_totals[day].items():
+                    teacher_total_sum = 0
                     for menu_name, total_qty in items.items():
                         sheet.cell(row=row_num, column=1, value=teacher_name)
                         sheet.cell(row=row_num, column=2, value=menu_name)
                         sheet.cell(row=row_num, column=3, value=total_qty)
+                        teacher_total_sum += total_qty
                         row_num += 1
+
+                    # Add teacher total row
+                    sheet.cell(row=row_num, column=1, value=f"Total for {teacher_name}")
+                    sheet.merge_cells(start_row=row_num, end_row=row_num, start_column=1, end_column=2)
+                    total_cell = sheet.cell(row=row_num, column=3, value=teacher_total_sum)
+                    total_cell.font = Font(bold=True)
+                    total_cell.fill = total_fill
+                    total_cell.border = border
+                    row_num += 1  # leave space after total row
             else:
                 sheet.cell(row=3, column=1, value="No data available")
                 sheet.merge_cells(start_row=3, end_row=3, start_column=1, end_column=3)
