@@ -2823,9 +2823,13 @@ class CreateOrderAndPaymentAPIView(APIView):
                 for day, items_list in daily_orders.items():
                     today = datetime.now()
                     target_day_num = ['monday', 'tuesday', 'wednesday', 'thursday',
-                                      'friday', 'saturday', 'sunday'].index(day.lower())
+                                    'friday', 'saturday', 'sunday'].index(day.lower())
                     days_ahead = (target_day_num - today.weekday() + 7) % 7
+                    if today.weekday() >= 4: 
+                        days_ahead += 7
+
                     order_date = today + timedelta(days=days_ahead)
+
                     week_number = order_date.isocalendar()[1]
                     order_date = order_date.replace(hour=0, minute=0, second=0, microsecond=0)
 
@@ -3116,6 +3120,7 @@ def generate_workbook(school, student_orders, staff_orders, school_type, role='a
     workbook = Workbook()
     workbook.remove(workbook.active)
 
+    # === Data stores ===
     day_totals = defaultdict(lambda: defaultdict(int))
     grouped_orders = defaultdict(lambda: defaultdict(list))
     staff_orders_by_day = defaultdict(list)
@@ -3128,7 +3133,8 @@ def generate_workbook(school, student_orders, staff_orders, school_type, role='a
     title_font = Font(bold=True, size=14, color="000000")
     title_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
     total_fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
-    border = Border(left=Side(style="thin"), right=Side(style="thin"), top=Side(style="thin"), bottom=Side(style="thin"))
+    border = Border(left=Side(style="thin"), right=Side(style="thin"),
+                    top=Side(style="thin"), bottom=Side(style="thin"))
     center_align = Alignment(horizontal="center", vertical="center")
     left_align = Alignment(horizontal="left", vertical="center")
 
@@ -3155,102 +3161,96 @@ def generate_workbook(school, student_orders, staff_orders, school_type, role='a
 
     # === Process student orders ===
     for order in student_orders:
-        order_items = order.order_items.all()
         selected_day = order.selected_day
+        order_items = order.order_items.all()
 
         item_data = {
-            item._menu_name if item._menu_name else (item.menu.name if item.menu else "Deleted Menu"): item.quantity
+            (item._menu_name or (item.menu.name if item.menu else "Deleted Menu")): item.quantity
             for item in order_items
         }
 
         order_data = {
-            'order_id': order.id,
-            'student_name': "Unknown",
-            'class_year': None,
-            'teacher_name': None,
-            'order_items': item_data
+            "order_id": order.id,
+            "student_name": "Unknown",
+            "class_year": None,
+            "teacher_name": None,
+            "order_items": item_data,
         }
 
-        if school_type == 'primary':
+        if school_type == "primary":
             student = PrimaryStudentsRegister.objects.filter(id=order.child_id).first()
             if student:
                 full_name = f"{(student.first_name or '').strip()} {(student.last_name or '').strip()}".strip()
-                order_data['student_name'] = full_name or (student.email.split('@')[0] if student.email else "Unknown")
+                order_data["student_name"] = full_name or (student.email.split("@")[0] if student.email else "Unknown")
                 teacher_name = student.teacher.teacher_name if student.teacher else "Unknown"
-                order_data['teacher_name'] = teacher_name
+                order_data["teacher_name"] = teacher_name
                 grouped_orders[selected_day][teacher_name].append(order_data)
 
+                # Update teacher totals
                 for menu_name, quantity in item_data.items():
                     teacher_totals[selected_day][teacher_name][menu_name] += quantity
+                    day_totals[selected_day][menu_name] += quantity  # ✅ FIXED: count for day total
 
         else:
             student = SecondaryStudent.objects.filter(id=order.user_id).first()
             if student:
                 full_name = f"{(student.first_name or '').strip()} {(student.last_name or '').strip()}".strip()
-                order_data['student_name'] = full_name or (student.email.split('@')[0] if student.email else "Unknown")
+                order_data["student_name"] = full_name or (student.email.split("@")[0] if student.email else "Unknown")
                 class_year = student.class_year if student.class_year else "Unknown"
-                order_data['class_year'] = class_year
+                order_data["class_year"] = class_year
                 grouped_orders[selected_day][class_year].append(order_data)
 
                 for menu_name, quantity in item_data.items():
                     class_totals[selected_day][class_year][menu_name] += quantity
-                    day_totals[selected_day][menu_name] += quantity  # for chef totals
+                    day_totals[selected_day][menu_name] += quantity
 
     # === Process staff orders ===
     for order in staff_orders:
-        order_items = order.order_items.all()
         selected_day = order.selected_day
+        order_items = order.order_items.all()
 
         item_data = {
-            item._menu_name if item._menu_name else (item.menu.name if item.menu else "Deleted Menu"): item.quantity
+            (item._menu_name or (item.menu.name if item.menu else "Deleted Menu")): item.quantity
             for item in order_items
         }
 
-        staff_order_data = {
-            'order_id': order.id,
-            'staff_name': "Unknown",
-            'order_items': item_data
-        }
-
+        staff_order_data = {"order_id": order.id, "staff_name": "Unknown", "order_items": item_data}
         staff = StaffRegisteration.objects.filter(id=order.user_id).first()
         if staff:
-            staff_order_data['staff_name'] = staff.username
+            staff_order_data["staff_name"] = staff.username
 
         staff_orders_by_day[selected_day].append(staff_order_data)
 
-        for menu_name, quantity in staff_order_data['order_items'].items():
+        for menu_name, quantity in staff_order_data["order_items"].items():
             day_totals[selected_day][menu_name] += quantity
 
     # === Generate Sheets ===
     all_days = list(DAY_COLORS.keys())
     days_to_generate = [day_filter] if day_filter in all_days else all_days
-
     has_visible_sheet = False
 
     for day in days_to_generate:
-
-        # === Class/Teacher sheets for Admin/Staff ===
-        if role in ['admin', 'staff']:
-            entity_list = Teacher.objects.filter(school=school) if school_type == 'primary' else CLASS_YEARS
+        # === Class or Teacher Sheets for Admin/Staff ===
+        if role in ["admin", "staff"]:
+            entity_list = Teacher.objects.filter(school=school) if school_type == "primary" else CLASS_YEARS
             for entity in entity_list:
-                entity_name = entity.teacher_name if school_type == 'primary' else entity
-                sheet_title = f"{entity_name} - {day}"[:31]
-                sheet = workbook.create_sheet(title=sheet_title)
+                entity_name = entity.teacher_name if school_type == "primary" else entity
+                sheet = workbook.create_sheet(title=f"{entity_name} - {day}"[:31])
                 sheet.sheet_properties.tabColor = DAY_COLORS.get(day, "FFFFFF")
                 has_visible_sheet = True
 
                 title = (
                     f"{entity_name} Order Sheet for {day} of {school}"
-                    if school_type == 'primary'
+                    if school_type == "primary"
                     else f"Class {entity_name} Order Sheet for {day} of {school}"
                 )
                 apply_header_styling(sheet, title, ["Order ID", "Student Name", "Menu Items", "Quantity"])
 
                 row_num = 3
                 for order_data in grouped_orders.get(day, {}).get(entity_name, []):
-                    for menu_name, quantity in order_data['order_items'].items():
-                        sheet.cell(row=row_num, column=1, value=order_data['order_id'])
-                        sheet.cell(row=row_num, column=2, value=order_data['student_name'])
+                    for menu_name, quantity in order_data["order_items"].items():
+                        sheet.cell(row=row_num, column=1, value=order_data["order_id"])
+                        sheet.cell(row=row_num, column=2, value=order_data["student_name"])
                         sheet.cell(row=row_num, column=3, value=menu_name)
                         sheet.cell(row=row_num, column=4, value=quantity)
                         row_num += 1
@@ -3261,28 +3261,25 @@ def generate_workbook(school, student_orders, staff_orders, school_type, role='a
 
                 apply_data_styling(sheet, 3)
 
-        # === Teacher Totals Sheet (Primary) ===
-        if school_type == 'primary' and role in ['admin', 'chef', 'staff']:
+        # === Teacher Totals (Primary) ===
+        if school_type == "primary" and role in ["admin", "chef", "staff"]:
             sheet = workbook.create_sheet(title=f"{day} Teacher Totals"[:31])
             sheet.sheet_properties.tabColor = "00B0F0"
-            has_visible_sheet = True
             apply_header_styling(sheet, f"Teacher Totals for {day} ({school})", ["Teacher Name", "Menu Item", "Total Quantity"])
-
             row_num = 3
             if teacher_totals.get(day):
                 for teacher_name, items in teacher_totals[day].items():
-                    teacher_total_sum = 0
+                    total_sum = 0
                     for menu_name, total_qty in items.items():
                         sheet.cell(row=row_num, column=1, value=teacher_name)
                         sheet.cell(row=row_num, column=2, value=menu_name)
                         sheet.cell(row=row_num, column=3, value=total_qty)
-                        teacher_total_sum += total_qty
+                        total_sum += total_qty
                         row_num += 1
-
-                    # Add total row
+                    # Teacher total row
                     sheet.cell(row=row_num, column=1, value=f"Total for {teacher_name}")
                     sheet.merge_cells(start_row=row_num, end_row=row_num, start_column=1, end_column=2)
-                    total_cell = sheet.cell(row=row_num, column=3, value=teacher_total_sum)
+                    total_cell = sheet.cell(row=row_num, column=3, value=total_sum)
                     total_cell.font = Font(bold=True)
                     total_cell.fill = total_fill
                     total_cell.border = border
@@ -3290,58 +3287,60 @@ def generate_workbook(school, student_orders, staff_orders, school_type, role='a
             else:
                 sheet.cell(row=3, column=1, value="No data available")
                 sheet.merge_cells(start_row=3, end_row=3, start_column=1, end_column=3)
-
             apply_data_styling(sheet, 3)
-                # === Staff Sheet for Admin ===
-        if role == 'admin':
-            sheet = workbook.create_sheet(title=f"Staff {day}"[:31])
-            sheet.sheet_properties.tabColor = "CCCCCC"
-            apply_header_styling(sheet, f"Staff Order Sheet for {day} of {school}", ["Order ID", "Staff Name", "Menu Items", "Quantity"])
 
-        if school_type == 'secondary' and role in ['admin', 'chef', 'staff']:
+        # === Class Totals (Secondary) ===
+        if school_type == "secondary" and role in ["admin", "chef", "staff"]:
             sheet = workbook.create_sheet(title=f"{day} Class Totals"[:31])
             sheet.sheet_properties.tabColor = "00B0F0"
-            has_visible_sheet = True
-            apply_header_styling(sheet, f"Class Totals for {day} ({school})", ["Class Year", "Student Name", "Menu Item", "Quantity"])
-
+            apply_header_styling(sheet, f"Class Totals for {day} ({school})", ["Class Year", "Menu Item", "Total Quantity"])
             row_num = 3
-            if grouped_orders.get(day):
-                for class_year, orders in grouped_orders[day].items():
-                    class_total = 0
-                    for order_data in orders:
-                        student_name = order_data.get('student_name', 'Unknown')
-                        for menu_name, qty in order_data['order_items'].items():
-                            sheet.cell(row=row_num, column=1, value=class_year)
-                            sheet.cell(row=row_num, column=2, value=student_name)
-                            sheet.cell(row=row_num, column=3, value=menu_name)
-                            sheet.cell(row=row_num, column=4, value=qty)
-                            class_total += qty
-                            row_num += 1
-                    # Total for class
+            if class_totals.get(day):
+                for class_year, items in class_totals[day].items():
+                    total_sum = 0
+                    for menu_name, total_qty in items.items():
+                        sheet.cell(row=row_num, column=1, value=class_year)
+                        sheet.cell(row=row_num, column=2, value=menu_name)
+                        sheet.cell(row=row_num, column=3, value=total_qty)
+                        total_sum += total_qty
+                        row_num += 1
+                    # Total per class
                     sheet.cell(row=row_num, column=1, value=f"Total for {class_year}")
-                    sheet.merge_cells(start_row=row_num, end_row=row_num, start_column=1, end_column=3)
-                    total_cell = sheet.cell(row=row_num, column=4, value=class_total)
+                    sheet.merge_cells(start_row=row_num, end_row=row_num, start_column=1, end_column=2)
+                    total_cell = sheet.cell(row=row_num, column=3, value=total_sum)
                     total_cell.font = Font(bold=True)
                     total_cell.fill = total_fill
                     total_cell.border = border
                     row_num += 1
             else:
                 sheet.cell(row=3, column=1, value="No data available")
-                sheet.merge_cells(start_row=3, end_row=3, start_column=1, end_column=4)
-
+                sheet.merge_cells(start_row=3, end_row=3, start_column=1, end_column=3)
             apply_data_styling(sheet, 3)
 
-        # === Chef Day Total Sheet (Secondary: item + total quantity only) ===
-        sheet = workbook.create_sheet(title=f"{day} Total"[:31])
-        sheet.sheet_properties.tabColor = "FFD700"
+        # === Staff Sheet (Admin only) ===
+        if role == "admin":
+            sheet = workbook.create_sheet(title=f"Staff {day}"[:31])
+            sheet.sheet_properties.tabColor = "CCCCCC"
+            apply_header_styling(sheet, f"Staff Order Sheet for {day} of {school}", ["Order ID", "Staff Name", "Menu Item", "Quantity"])
+            row_num = 3
+            if staff_orders_by_day.get(day):
+                for order_data in staff_orders_by_day[day]:
+                    for menu_name, quantity in order_data["order_items"].items():
+                        sheet.cell(row=row_num, column=1, value=order_data["order_id"])
+                        sheet.cell(row=row_num, column=2, value=order_data["staff_name"])
+                        sheet.cell(row=row_num, column=3, value=menu_name)
+                        sheet.cell(row=row_num, column=4, value=quantity)
+                        row_num += 1
+            else:
+                sheet.cell(row=3, column=1, value="No orders")
+                sheet.merge_cells(start_row=3, end_row=3, start_column=1, end_column=4)
+            apply_data_styling(sheet, 3)
 
-        if school_type == 'secondary':
-            apply_header_styling(
-                sheet,
-                f"Chef Day Total for {day} of {school} (Secondary)",
-                ["Menu Item", "Total Quantity"]
-            )
-
+        # === Day Total (Both Types) ===
+        if role in ["admin", "chef", "staff"]:
+            sheet = workbook.create_sheet(title=f"{day} Total"[:31])
+            sheet.sheet_properties.tabColor = "FFD700"
+            apply_header_styling(sheet, f"Day Total for {day} ({school})", ["Menu Item", "Total Quantity"])
             row_num = 3
             if day_totals.get(day):
                 for menu_name, qty in sorted(day_totals[day].items()):
@@ -3351,31 +3350,37 @@ def generate_workbook(school, student_orders, staff_orders, school_type, role='a
             else:
                 sheet.cell(row=3, column=1, value="No orders")
                 sheet.merge_cells(start_row=3, end_row=3, start_column=1, end_column=2)
+            apply_data_styling(sheet, 3)
 
-        else:
-            # Primary
-            apply_header_styling(
-                sheet,
-                f"Chef Day Total for {day} of {school} (Primary)",
-                ["Menu Item", "Total Quantity"]
-            )
+        # === Sticker Sheet (Primary Only) ===
+        if school_type == "primary" and role == "chef":
+            sheet = workbook.create_sheet(title=f"{day} Stickers"[:31])
+            sheet.sheet_properties.tabColor = "92D050"
+            apply_header_styling(sheet, f"{day} Sticker Sheet for {school} (Primary)", ["Student Name", "Teacher Name", "Menu Item", "Quantity"])
             row_num = 3
-            if day_totals.get(day):
-                for menu_name, qty in sorted(day_totals[day].items()):
-                    sheet.cell(row=row_num, column=1, value=menu_name)
-                    sheet.cell(row=row_num, column=2, value=qty)
-                    row_num += 1
-            else:
+            has_data = False
+            for teacher_name, orders in grouped_orders.get(day, {}).items():
+                for order_data in orders:
+                    student_name = order_data.get("student_name", "Unknown")
+                    for menu_name, quantity in order_data["order_items"].items():
+                        sheet.cell(row=row_num, column=1, value=student_name)
+                        sheet.cell(row=row_num, column=2, value=teacher_name)
+                        sheet.cell(row=row_num, column=3, value=menu_name)
+                        sheet.cell(row=row_num, column=4, value=quantity)
+                        row_num += 1
+                        has_data = True
+            if not has_data:
                 sheet.cell(row=3, column=1, value="No orders")
-                sheet.merge_cells(start_row=3, end_row=3, start_column=1, end_column=2)
+                sheet.merge_cells(start_row=3, end_row=3, start_column=1, end_column=4)
+            apply_data_styling(sheet, 3)
 
-        apply_data_styling(sheet, 3)
-
+    # === Handle no data ===
     if not has_visible_sheet:
         sheet = workbook.create_sheet(title="No Data")
         sheet.cell(row=1, column=1, value="No orders found for the given filters.")
 
     return workbook
+
 
 @api_view(['POST'])
 def download_menu(request):
