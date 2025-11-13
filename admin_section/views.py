@@ -3351,37 +3351,72 @@ def generate_workbook(school, student_orders, staff_orders, school_type, role='a
                 sheet.merge_cells(start_row=3, end_row=3, start_column=1, end_column=4)
             apply_data_styling(sheet, 3)
 
-        # === Detailed Day Total (Admin + Staff) ===
+                # === Detailed Day Total (Admin + Staff) ===
         if role in ["admin", "staff"]:
             sheet = workbook.create_sheet(title=f"{day} Canteen Staff "[:31])
             sheet.sheet_properties.tabColor = "FF9966"
-            apply_header_styling(sheet, f"Detailed Day Total for {day} ({school})", ["Teacher/Class", "Student Name", "Menu Item", "Quantity"])
+            apply_header_styling(
+                sheet,
+                f"Detailed Day Total for {day} ({school})",
+                ["Order ID", "Teacher/Class", "Student Name", "Menu Item", "Quantity"],
+            )
+
             row_num = 3
             has_data = False
 
-            for entity_name, orders in grouped_orders.get(day, {}).items():
+            # Custom sort order for classes/teachers
+            sort_order = {
+                "Kindy": 0,
+                "Prep": 1,
+                "1st": 2,
+                "2nd": 3,
+                "3rd": 4,
+                "4th": 5,
+                "5th": 6,
+                "6th": 7,
+                "7th": 8,
+                "8th": 9,
+                "9th": 10,
+                "10th": 11,
+                "11th": 12,
+                "12th": 13,
+            }
+
+            # Sort class/teacher keys based on defined order or alphabetically
+            def sort_key(name):
+                return sort_order.get(name, 9999)  # Unmatched go to bottom alphabetically
+
+            for entity_name in sorted(grouped_orders.get(day, {}).keys(), key=sort_key):
+                orders = grouped_orders[day][entity_name]
                 sorted_orders = sorted(orders, key=lambda x: x.get("student_name", ""))
+
                 for order_data in sorted_orders:
                     student_name = order_data.get("student_name", "Unknown")
+                    order_id = order_data.get("order_id", "")
                     for menu_name, qty in order_data["order_items"].items():
-                        sheet.cell(row=row_num, column=1, value=entity_name)
-                        sheet.cell(row=row_num, column=2, value=student_name)
-                        sheet.cell(row=row_num, column=3, value=menu_name)
-                        sheet.cell(row=row_num, column=4, value=qty)
+                        sheet.cell(row=row_num, column=1, value=order_id)
+                        sheet.cell(row=row_num, column=2, value=entity_name)
+                        sheet.cell(row=row_num, column=3, value=student_name)
+                        sheet.cell(row=row_num, column=4, value=menu_name)
+                        sheet.cell(row=row_num, column=5, value=qty)
                         row_num += 1
                         has_data = True
 
             if not has_data:
                 sheet.cell(row=3, column=1, value="No orders")
-                sheet.merge_cells(start_row=3, end_row=3, start_column=1, end_column=4)
+                sheet.merge_cells(start_row=3, end_row=3, start_column=1, end_column=5)
 
             apply_data_styling(sheet, 3)
+
 
     if not has_visible_sheet:
         sheet = workbook.create_sheet(title="No Data")
         sheet.cell(row=1, column=1, value="No orders found for the given filters.")
 
     return workbook
+
+
+
 
 @api_view(['POST'])
 def download_menu(request):
