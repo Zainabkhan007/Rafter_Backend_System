@@ -2822,11 +2822,27 @@ class CreateOrderAndPaymentAPIView(APIView):
                 # Create orders
                 for day, items_list in daily_orders.items():
                     today = datetime.now()
-                    target_day_num = ['monday', 'tuesday', 'wednesday', 'thursday',
-                                    'friday', 'saturday', 'sunday'].index(day.lower())
-                    days_ahead = (target_day_num - today.weekday() + 7) % 7
-                    if today.weekday() >= 4: 
-                        days_ahead += 7
+                    current_weekday = today.weekday()
+
+                    days_map = {
+                        'monday': 0, 'tuesday': 1, 'wednesday': 2,
+                        'thursday': 3, 'friday': 4, 'saturday': 5, 'sunday': 6
+                    }
+
+                    target_day_num = days_map[day.lower()]
+
+                    # Calculate next occurrence of the target day
+                    days_ahead = (target_day_num - current_weekday + 7) % 7
+
+                    # No same-day ordering → push to next week
+                    if days_ahead == 0:
+                        days_ahead = 7
+
+                    order_date = today + timedelta(days=days_ahead)
+                    order_date = order_date.replace(hour=0, minute=0, second=0, microsecond=0)
+
+                    week_number = order_date.isocalendar()[1]
+
 
                     order_date = today + timedelta(days=days_ahead)
 
