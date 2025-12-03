@@ -105,6 +105,7 @@ urlpatterns = [
    path('payment/', views.CreateOrderAndPaymentAPIView.as_view(), name='create-payment-intent'),
    path('manager/orders/create/', views.CreateManagerOrderAPIView.as_view(), name='manager-order-create'),
    path('top_up_payment/', views.top_up_payment, name='top_up_payment'),
+   path('transactions/', views.get_user_transactions, name='get_user_transactions'),
 
    path('download_menu_all/',  views.download_menu, name='download_menu_all'),
    path('download-all-schools-menu/', views.download_all_schools_menu, name='download_all_schools_menu'),

@@ -1,75 +1,57 @@
 import jwt
 import requests
-from rest_framework.response import Response
-from rest_framework import status
-from rest_framework.decorators import api_view, APIView
 import os
 import logging
-from rest_framework.generics import ListAPIView
-from .serializers import *
 import re
 import io
-from django.contrib.auth.models import User
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-from django.utils.timezone import now
-import logging
-from collections import defaultdict
-from django.utils.timezone import localtime, make_aware
-from urllib.parse import quote
-from django.core.signing import TimestampSigner, BadSignature, SignatureExpired
-from django.utils.crypto import get_random_string
-from io import BytesIO
-from openpyxl import Workbook
-from datetime import date
-import datetime
-from django.db import transaction
 import json
-from django_rest_passwordreset.signals import reset_password_token_created
-from django.views.decorators.csrf import csrf_exempt
-
-from django.shortcuts import get_object_or_404
-from rest_framework.filters import SearchFilter
-from io import BytesIO
-import openpyxl
-from openpyxl.utils import get_column_letter
-from django.core.files.storage import FileSystemStorage
-from datetime import datetime,timedelta
-from django.http import HttpResponse,JsonResponse
-from django.db.models import Count
-from rest_framework.exceptions import NotFound
 import calendar
 import stripe
 import zipfile
+import uuid
+from collections import defaultdict
+from datetime import date, datetime, timedelta
+from urllib.parse import quote
 from io import BytesIO
-import datetime
+
+from django.shortcuts import get_object_or_404
+from django.contrib.auth.models import User
 from django.contrib.auth import authenticate
-from rest_framework_simplejwt.tokens import RefreshToken
-from django.conf import settings
-from django.contrib.auth.hashers import make_password
-from .models import *
+from django.contrib.auth.hashers import make_password, check_password
+from django.core.signing import TimestampSigner, BadSignature, SignatureExpired
 from django.core.mail import send_mail
-from django.core.files.storage import default_storage
+from django.core.files.storage import FileSystemStorage, default_storage
 from django.core.files.base import ContentFile
-from django.contrib.auth.tokens import default_token_generator
-from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
-from django.contrib.auth import get_user_model
-from .custom_tokens import CustomPasswordResetTokenGenerator 
-from rest_framework.decorators import api_view, parser_classes
-from rest_framework.parsers import MultiPartParser, FormParser
-from rest_framework.parsers import JSONParser
+from django.http import HttpResponse, JsonResponse
+from django.db import transaction
+from django.db.models import Count
+from django.utils.timezone import now, localtime, make_aware
+from django.utils import timezone
+from django.conf import settings
+from django.views.decorators.csrf import csrf_exempt
+
+from rest_framework.decorators import api_view, parser_classes, APIView
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.response import Response
 from rest_framework import status
+from rest_framework.generics import ListAPIView
+from rest_framework.filters import SearchFilter
+from rest_framework.exceptions import NotFound
+from rest_framework_simplejwt.tokens import RefreshToken
+
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
+
+from jwt.algorithms import RSAAlgorithm
+
+from .serializers import *
+from .models import *
+from .custom_tokens import CustomPasswordResetTokenGenerator
+
 logger = logging.getLogger(__name__)
 stripe.api_key = settings.STRIPE_SECRET_KEY
 ALLOWED_FILE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif']
-from .models import Allergens
-
-from django.utils import timezone
-from datetime import timedelta
-import jwt
-import requests
-from jwt.algorithms import RSAAlgorithm
-from rest_framework.response import Response
 
 APPLE_KEYS_URL = "https://appleid.apple.com/auth/keys"
 APPLE_AUDIENCE = "app.raftersfoodservices.ie"
@@ -2182,6 +2164,20 @@ def cancel_order(request):
             user.save()
             credit_message = f"Credits of {order.total_price} have been added to your account."
 
+            # Create transaction record for credit refund
+            Transaction.objects.create(
+                user_id=order.user_id,
+                user_type=order.user_type,
+                transaction_type='refund',
+                payment_method='credits',
+                amount=order.total_price,  # Positive because credits added back
+                order=order,
+                description=f"Refund for cancelled order #{order.id}",
+                parent=user if order.user_type == 'parent' else None,
+                staff=user if order.user_type == 'staff' else None,
+                student=user if order.user_type == 'student' else None
+            )
+
         order_info = {
             'order_id': order.id,
             'user_name': order.user_name,
@@ -2805,8 +2801,9 @@ class CreateOrderAndPaymentAPIView(APIView):
                 return Response({'error': 'School ID is required for students and parents.'},
                                 status=status.HTTP_400_BAD_REQUEST)
 
-            # Primary students/parents get free meals → all prices forced to 0
-            is_primary_free = school_type == "primary"
+            # Only primary school CHILDREN get free meals (when ordering for a child with child_id)
+            # Primary school STAFF ordering for themselves (no child_id) must pay
+            is_primary_free = school_type == "primary" and child_id is not None
 
             # Transaction for atomicity
             with transaction.atomic():
@@ -2886,6 +2883,7 @@ class CreateOrderAndPaymentAPIView(APIView):
 
                         OrderItem.objects.create(
                             order=order_instance,
+                            menu=menu_item,
                             quantity=quantity,
                             _menu_name=menu_item.name,
                             _menu_price=item_price
@@ -2899,22 +2897,32 @@ class CreateOrderAndPaymentAPIView(APIView):
                     calculated_total_price += daily_total_price
                     created_orders.append(order_instance)
 
-   
-                if is_primary_free:
-                    calculated_total_price = 0
-
-
                 # ---------------------------
-                # Handle primary (free meals)
+                # Handle primary (free meals) - only for children with child_id
                 # ---------------------------
                 if is_primary_free:
                     for order in created_orders:
                         order.status = 'pending'
                         order.save()
 
+                        # Record transaction for free meals (amount = 0)
+                        Transaction.objects.create(
+                            user_id=user.id,
+                            user_type=user_type,
+                            transaction_type='payment',
+                            payment_method='credits',
+                            amount=0,  # Free meal, no charge
+                            order=order,
+                            description=f"Free meal order #{order.id} for primary school child",
+                            parent=user if user_type == 'parent' else None,
+                            staff=user if user_type == 'staff' else None,
+                            student=user if user_type == 'student' else None
+                        )
+
                     return Response({
                         'message': 'Orders created successfully with free meal for child.',
-                        'orders': OrderSerializer(created_orders, many=True).data
+                        'orders': OrderSerializer(created_orders, many=True).data,
+                        'total_orders': len(created_orders)
                     }, status=status.HTTP_201_CREATED)
 
                 # ---------------------------
@@ -2924,21 +2932,51 @@ class CreateOrderAndPaymentAPIView(APIView):
                     if user.credits < calculated_total_price:
                         raise ValueError("Insufficient credits to complete the order.")
 
+                    # Check if orders were actually created
+                    if not created_orders:
+                        return Response({
+                            'error': 'No orders were created. Please check your order data.'
+                        }, status=status.HTTP_400_BAD_REQUEST)
+
                     user.credits -= calculated_total_price
                     user.save()
 
+                    # Create transaction record for credit payment
                     for order in created_orders:
                         order.status = 'pending'
                         order.save()
 
+                        # Record transaction for each order
+                        Transaction.objects.create(
+                            user_id=user.id,
+                            user_type=user_type,
+                            transaction_type='payment',
+                            payment_method='credits',
+                            amount=-order.total_price,  # Negative because credits deducted
+                            order=order,
+                            description=f"Payment for order #{order.id} using credits",
+                            parent=user if user_type == 'parent' else None,
+                            staff=user if user_type == 'staff' else None,
+                            student=user if user_type == 'student' else None
+                        )
+
                     return Response({
                         'message': 'Orders created and credits deducted successfully!',
-                        'orders': OrderSerializer(created_orders, many=True).data
+                        'orders': OrderSerializer(created_orders, many=True).data,
+                        'total_orders': len(created_orders),
+                        'credits_deducted': calculated_total_price,
+                        'remaining_credits': user.credits
                     }, status=status.HTTP_201_CREATED)
 
                 # ---------------------------
                 # Handle Stripe payment (secondary with payment_id)
                 # ---------------------------
+                # Check if orders were actually created
+                if not created_orders:
+                    return Response({
+                        'error': 'No orders were created. Please check your order data.'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
                 total_price_in_cents = int(calculated_total_price * 100)
 
                 customers = stripe.Customer.list(email=user.email).data
@@ -2964,15 +3002,33 @@ class CreateOrderAndPaymentAPIView(APIView):
                     return_url=f"{request.scheme}://{request.get_host()}/payment-success/",
                 )
 
+                # Create transaction record for Stripe payment
                 for order in created_orders:
                     order.payment_id = payment_intent.id
                     order.status = 'pending'
                     order.save()
 
+                    # Record transaction for each order
+                    Transaction.objects.create(
+                        user_id=user.id,
+                        user_type=user_type,
+                        transaction_type='payment',
+                        payment_method='stripe',
+                        amount=-order.total_price,  # Negative because payment made
+                        order=order,
+                        payment_intent_id=payment_intent.id,
+                        description=f"Payment for order #{order.id} via Stripe",
+                        parent=user if user_type == 'parent' else None,
+                        staff=user if user_type == 'staff' else None,
+                        student=user if user_type == 'student' else None
+                    )
+
                 return Response({
                     'message': 'Orders and payment intent created successfully!',
                     'orders': OrderSerializer(created_orders, many=True).data,
-                    'payment_intent': payment_intent.client_secret
+                    'payment_intent': payment_intent.client_secret,
+                    'total_orders': len(created_orders),
+                    'total_paid': calculated_total_price
                 }, status=status.HTTP_201_CREATED)
 
         except stripe.error.CardError as e:
@@ -3054,6 +3110,21 @@ def top_up_payment(request):
         # ✅ On success → top up credits
         if payment_intent.status == 'succeeded':
             user.top_up_credits(float(amount))
+
+            # Create transaction record for credit top-up
+            Transaction.objects.create(
+                user_id=user.id,
+                user_type=user_type,
+                transaction_type='credit',
+                payment_method='stripe',
+                amount=float(amount),  # Positive because credits added
+                payment_intent_id=payment_intent.id,
+                description=f"Credit top-up of €{amount} via Stripe",
+                parent=user if user_type == 'parent' else None,
+                staff=user if user_type == 'staff' else None,
+                student=user if user_type == 'student' else None
+            )
+
             return Response({
                 "message": f"{user_type.capitalize()} credits successfully updated.",
                 "credits": user.credits,
@@ -3068,6 +3139,109 @@ def top_up_payment(request):
         return Response({"error": f"Stripe error: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     except Exception as e:
         return Response({"error": f"Error processing payment: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+def get_user_transactions(request):
+    """
+    Endpoint to fetch all transaction records for a user.
+    Query Parameters:
+    - user_id: ID of the user
+    - user_type: Type of user (parent, staff, student)
+    """
+    try:
+        user_id = request.GET.get('user_id')
+        user_type = request.GET.get('user_type')
+
+        if not user_id or not user_type:
+            return Response(
+                {"error": "Both user_id and user_type are required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Validate user_type
+        if user_type not in ['parent', 'staff', 'student']:
+            return Response(
+                {"error": "Invalid user_type. Must be 'parent', 'staff', or 'student'"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Verify user exists
+        user_exists = False
+        if user_type == 'parent':
+            user_exists = ParentRegisteration.objects.filter(id=user_id).exists()
+        elif user_type == 'staff':
+            user_exists = StaffRegisteration.objects.filter(id=user_id).exists()
+        elif user_type == 'student':
+            user_exists = SecondaryStudent.objects.filter(id=user_id).exists()
+
+        if not user_exists:
+            return Response(
+                {"error": f"User with id {user_id} and type {user_type} not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Fetch transactions for the user
+        transactions = Transaction.objects.filter(
+            user_id=user_id,
+            user_type=user_type
+        ).order_by('-created_at')
+
+        # Format transaction data
+        transactions_data = []
+        for txn in transactions:
+            # Determine the sign of the amount for display
+            amount_display = float(txn.amount)
+            if amount_display > 0:
+                amount_str = f"+€{amount_display:.2f}"
+            elif amount_display < 0:
+                amount_str = f"-€{abs(amount_display):.2f}"
+            else:
+                amount_str = f"€{amount_display:.2f}"  # Zero amount (free meals)
+
+            # Format the date
+            transaction_date = txn.created_at.strftime('%d %B, %Y %H:%M')
+
+            # Get school information from the order
+            school_name = None
+            school_type = None
+            if txn.order:
+                if txn.order.primary_school:
+                    school_name = txn.order.primary_school.school_name
+                    school_type = 'primary'
+                elif txn.order.secondary_school:
+                    school_name = txn.order.secondary_school.secondary_school_name
+                    school_type = 'secondary'
+
+            transactions_data.append({
+                'id': txn.id,
+                'transaction_type': txn.transaction_type,
+                'payment_method': txn.payment_method,
+                'amount': float(txn.amount),
+                'amount_display': amount_str,
+                'description': txn.description,
+                'order_id': txn.order.id if txn.order else None,
+                'school_name': school_name,
+                'school_type': school_type,
+                'payment_intent_id': txn.payment_intent_id,
+                'created_at': transaction_date,
+                'created_at_timestamp': txn.created_at.isoformat()
+            })
+
+        return Response({
+            "success": True,
+            "user_id": user_id,
+            "user_type": user_type,
+            "total_transactions": transactions.count(),
+            "transactions": transactions_data
+        }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        return Response(
+            {"error": f"Error fetching transactions: {str(e)}"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
 
 def get_custom_week_and_year():
   

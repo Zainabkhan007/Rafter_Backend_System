@@ -433,3 +433,27 @@ class AppVersionSerializer(serializers.ModelSerializer):
     class Meta:
         model = AppVersion
         fields = ["platform", "latest_version", "min_supported_version", "force_update"]
+
+class TransactionSerializer(serializers.ModelSerializer):
+    user_name = serializers.SerializerMethodField()
+    order_id = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Transaction
+        fields = [
+            'id', 'user_id', 'user_type', 'user_name', 'transaction_type',
+            'payment_method', 'amount', 'order_id', 'payment_intent_id',
+            'description', 'created_at'
+        ]
+
+    def get_user_name(self, obj):
+        if obj.user_type == 'parent' and obj.parent:
+            return f"{obj.parent.first_name} {obj.parent.last_name}"
+        elif obj.user_type == 'staff' and obj.staff:
+            return f"{obj.staff.first_name} {obj.staff.last_name}"
+        elif obj.user_type == 'student' and obj.student:
+            return f"{obj.student.first_name} {obj.student.last_name}"
+        return "Unknown"
+
+    def get_order_id(self, obj):
+        return obj.order.id if obj.order else None
