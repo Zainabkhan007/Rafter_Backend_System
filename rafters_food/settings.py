@@ -11,7 +11,13 @@ ROOT_URLCONF = 'rafters_food.urls'
 ADMIN_PASSWORD = 'password123'
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-environ.Env.read_env()
+
+# Load .env file from BASE_DIR
+env_file = os.path.join(BASE_DIR, '.env')
+if os.path.exists(env_file):
+    environ.Env.read_env(env_file)
+else:
+    environ.Env.read_env()
 
 SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-td7slw974l-a6!kd1txk2+4f7r-voiiy&uzcc9g^1uraniz5kz')
 DEBUG = os.getenv('DEBUG', 'True') == 'True'
