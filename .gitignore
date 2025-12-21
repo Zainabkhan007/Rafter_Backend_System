@@ -18,8 +18,24 @@ env/
 
 # Database / media
 db.sqlite3
+db.sqlite3.backup
+*.sqlite3
 media/
 staticfiles/
+
+# Environment variables
+.env
+.env.local
+.env.production
+
+# AWS credentials
+*.pem
+*.key
+
+# Backups
+backups/
+*.sql
+*.sql.gz
 
 # IDE files
 .vscode/

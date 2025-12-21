@@ -37,13 +37,16 @@ class Allergens(models.Model):
 class ParentRegisteration(models.Model):
     first_name = models.CharField(max_length=30)
     last_name = models.CharField(max_length=30)
-    username = models.CharField(max_length=30, blank=True, null=True) 
+    username = models.CharField(max_length=30, blank=True, null=True)
     email = models.EmailField(max_length=254, unique=True)
     phone_no = models.BigIntegerField(blank=True, null=True)
     password = models.CharField(max_length=128)
     stripe_customer_id = models.CharField(max_length=255, null=True, blank=True)
     allergies = models.ManyToManyField(Allergens, blank=True)
     credits = models.FloatField(default=0.0)
+    created_at = models.DateTimeField(auto_now_add=True, null=True, blank=True)
+    android_version = models.CharField(max_length=20, blank=True, null=True)
+    ios_version = models.CharField(max_length=20, blank=True, null=True)
 
     def save(self, *args, **kwargs):
         if self.password and (not self.pk or not ParentRegisteration.objects.filter(id=self.pk, password=self.password).exists()):
@@ -67,6 +70,9 @@ class StaffRegisteration(models.Model):
     primary_school = models.ForeignKey(PrimarySchool, on_delete=models.CASCADE, null=True, blank=True)
     secondary_school = models.ForeignKey(SecondarySchool, on_delete=models.CASCADE, null=True, blank=True)
     credits = models.FloatField(default=0.0)
+    created_at = models.DateTimeField(auto_now_add=True, null=True, blank=True)
+    android_version = models.CharField(max_length=20, blank=True, null=True)
+    ios_version = models.CharField(max_length=20, blank=True, null=True)
 
     def save(self, *args, **kwargs):
         if self.password and (not self.pk or not StaffRegisteration.objects.filter(id=self.pk, password=self.password).exists()):
@@ -111,7 +117,7 @@ class Teacher(models.Model):
 class SecondaryStudent(models.Model):
     first_name = models.CharField(max_length=30, default="")
     last_name = models.CharField(max_length=30, default="")
-    username = models.CharField(max_length=30, default="")  
+    username = models.CharField(max_length=30, default="")
     email = models.EmailField(max_length=254, default="")
     phone_no = models.BigIntegerField(blank=True, null=True)
     password = models.CharField(max_length=128, default="")
@@ -120,6 +126,9 @@ class SecondaryStudent(models.Model):
     allergies = models.ManyToManyField(Allergens, blank=True)
     school = models.ForeignKey(SecondarySchool, on_delete=models.CASCADE, related_name='student', null=True, blank=True)
     credits = models.FloatField(default=0.0)
+    created_at = models.DateTimeField(auto_now_add=True, null=True, blank=True)
+    android_version = models.CharField(max_length=20, blank=True, null=True)
+    ios_version = models.CharField(max_length=20, blank=True, null=True)
 
     def save(self, *args, **kwargs):
         if self.password and (not self.pk or not SecondaryStudent.objects.filter(id=self.pk, password=self.password).exists()):
@@ -212,6 +221,7 @@ class Order(models.Model):
     week_number = models.BigIntegerField(null=True)
     year = models.BigIntegerField(null=True)
     order_date = models.DateTimeField(default=datetime.utcnow)
+    created_at = models.DateTimeField(default=timezone.now)
     selected_day = models.CharField(max_length=10)
     is_delivered = models.BooleanField(default=False)
     status = models.CharField(max_length=20, default='pending')
@@ -256,7 +266,7 @@ class Order(models.Model):
 class OrderItem(models.Model):
     menu = models.ForeignKey(
         'Menu',
-        on_delete=models.SET_NULL, 
+        on_delete=models.SET_NULL,
         null=True,
         blank=True,
         related_name='order_items_menu'
@@ -283,6 +293,43 @@ class OrderItem(models.Model):
     @property
     def menu_price(self):
         return self._menu_price or (self.menu.price if self.menu else 0)
+
+
+# ------------------------------
+# Transaction/Payment Records
+# ------------------------------
+class Transaction(models.Model):
+    TRANSACTION_TYPE_CHOICES = [
+        ('payment', 'Payment'),
+        ('credit', 'Credit'),
+        ('refund', 'Refund'),
+    ]
+
+    PAYMENT_METHOD_CHOICES = [
+        ('stripe', 'Stripe'),
+        ('credits', 'Credits'),
+    ]
+
+    user_id = models.BigIntegerField()
+    user_type = models.CharField(max_length=50)
+    transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPE_CHOICES)
+    payment_method = models.CharField(max_length=20, choices=PAYMENT_METHOD_CHOICES)
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    order = models.ForeignKey(Order, on_delete=models.SET_NULL, null=True, blank=True, related_name='transactions')
+    payment_intent_id = models.CharField(max_length=255, blank=True, null=True)
+    description = models.TextField(blank=True, null=True)
+    created_at = models.DateTimeField(default=timezone.now)
+
+    # User references
+    parent = models.ForeignKey(ParentRegisteration, on_delete=models.SET_NULL, null=True, blank=True, related_name='transactions')
+    staff = models.ForeignKey(StaffRegisteration, on_delete=models.SET_NULL, null=True, blank=True, related_name='transactions')
+    student = models.ForeignKey(SecondaryStudent, on_delete=models.SET_NULL, null=True, blank=True, related_name='transactions')
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Transaction {self.id} - {self.user_type} {self.user_id} - {self.amount} ({self.payment_method})"
 
 
 # ------------------------------
