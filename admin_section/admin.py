@@ -5,7 +5,7 @@ from .models import *
 
 @admin.register(ParentRegisteration)
 class ParentAdmin(admin.ModelAdmin):
-    list_display = ("id", "first_name", "last_name", "email", "credits")
+    list_display = ("id", "first_name", "last_name", "email", "credits", "created_at")
 
 @admin.register(PrimaryStudentsRegister)
 class PrimaryStudentAdmin(admin.ModelAdmin):
@@ -13,11 +13,11 @@ class PrimaryStudentAdmin(admin.ModelAdmin):
 
 @admin.register(StaffRegisteration)
 class StaffAdmin(admin.ModelAdmin):
-    list_display = ("id", "first_name", "last_name", "email", "credits")
+    list_display = ("id", "first_name", "last_name", "email", "credits", "created_at")
 
 @admin.register(SecondaryStudent)
 class SecondaryStudentAdmin(admin.ModelAdmin):
-    list_display = ("id", "first_name", "last_name", "email", "class_year", "credits")
+    list_display = ("id", "first_name", "last_name", "email", "class_year", "credits", "created_at")
 
 @admin.register(Order)
 class OrderAdmin(admin.ModelAdmin):

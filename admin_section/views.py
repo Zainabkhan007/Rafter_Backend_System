@@ -3243,6 +3243,107 @@ def get_user_transactions(request):
         )
 
 
+@api_view(['POST'])
+def update_user_version(request):
+    """
+    Update the user's app version (Android or iOS).
+    Called when user accesses dashboard to track which app version they're using.
+
+    Request body:
+    {
+        "user_id": 1,
+        "user_type": "parent|staff|student",
+        "platform": "android|ios",
+        "version": "1.0.0"
+    }
+    """
+    try:
+        user_id = request.data.get('user_id')
+        user_type = request.data.get('user_type', '').lower()
+        platform = request.data.get('platform', '').lower()
+        version = request.data.get('version')
+
+        # Validate required fields
+        if not user_id:
+            return Response(
+                {"error": "user_id is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if user_type not in ['parent', 'staff', 'student']:
+            return Response(
+                {"error": "user_type must be 'parent', 'staff', or 'student'"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if platform not in ['android', 'ios']:
+            return Response(
+                {"error": "platform must be 'android' or 'ios'"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if not version:
+            return Response(
+                {"error": "version is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Get the user based on user_type
+        user = None
+        if user_type == 'parent':
+            try:
+                user = ParentRegisteration.objects.get(id=user_id)
+            except ParentRegisteration.DoesNotExist:
+                return Response(
+                    {"error": f"Parent with id {user_id} not found"},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+        elif user_type == 'staff':
+            try:
+                user = StaffRegisteration.objects.get(id=user_id)
+            except StaffRegisteration.DoesNotExist:
+                return Response(
+                    {"error": f"Staff with id {user_id} not found"},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+        elif user_type == 'student':
+            try:
+                user = SecondaryStudent.objects.get(id=user_id)
+            except SecondaryStudent.DoesNotExist:
+                return Response(
+                    {"error": f"Student with id {user_id} not found"},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+        # Update the appropriate version field
+        if platform == 'android':
+            old_version = user.android_version
+            user.android_version = version
+        else:  # ios
+            old_version = user.ios_version
+            user.ios_version = version
+
+        user.save()
+
+        return Response({
+            "success": True,
+            "message": f"Successfully updated {platform} version for {user_type}",
+            "user_id": user_id,
+            "user_type": user_type,
+            "platform": platform,
+            "old_version": old_version,
+            "new_version": version
+        }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        return Response(
+            {"error": f"Error updating version: {str(e)}"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
 def get_custom_week_and_year():
   
     today = datetime.today()

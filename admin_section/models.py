@@ -37,13 +37,16 @@ class Allergens(models.Model):
 class ParentRegisteration(models.Model):
     first_name = models.CharField(max_length=30)
     last_name = models.CharField(max_length=30)
-    username = models.CharField(max_length=30, blank=True, null=True) 
+    username = models.CharField(max_length=30, blank=True, null=True)
     email = models.EmailField(max_length=254, unique=True)
     phone_no = models.BigIntegerField(blank=True, null=True)
     password = models.CharField(max_length=128)
     stripe_customer_id = models.CharField(max_length=255, null=True, blank=True)
     allergies = models.ManyToManyField(Allergens, blank=True)
     credits = models.FloatField(default=0.0)
+    created_at = models.DateTimeField(auto_now_add=True, null=True, blank=True)
+    android_version = models.CharField(max_length=20, blank=True, null=True)
+    ios_version = models.CharField(max_length=20, blank=True, null=True)
 
     def save(self, *args, **kwargs):
         if self.password and (not self.pk or not ParentRegisteration.objects.filter(id=self.pk, password=self.password).exists()):
@@ -67,6 +70,9 @@ class StaffRegisteration(models.Model):
     primary_school = models.ForeignKey(PrimarySchool, on_delete=models.CASCADE, null=True, blank=True)
     secondary_school = models.ForeignKey(SecondarySchool, on_delete=models.CASCADE, null=True, blank=True)
     credits = models.FloatField(default=0.0)
+    created_at = models.DateTimeField(auto_now_add=True, null=True, blank=True)
+    android_version = models.CharField(max_length=20, blank=True, null=True)
+    ios_version = models.CharField(max_length=20, blank=True, null=True)
 
     def save(self, *args, **kwargs):
         if self.password and (not self.pk or not StaffRegisteration.objects.filter(id=self.pk, password=self.password).exists()):
@@ -111,7 +117,7 @@ class Teacher(models.Model):
 class SecondaryStudent(models.Model):
     first_name = models.CharField(max_length=30, default="")
     last_name = models.CharField(max_length=30, default="")
-    username = models.CharField(max_length=30, default="")  
+    username = models.CharField(max_length=30, default="")
     email = models.EmailField(max_length=254, default="")
     phone_no = models.BigIntegerField(blank=True, null=True)
     password = models.CharField(max_length=128, default="")
@@ -120,6 +126,9 @@ class SecondaryStudent(models.Model):
     allergies = models.ManyToManyField(Allergens, blank=True)
     school = models.ForeignKey(SecondarySchool, on_delete=models.CASCADE, related_name='student', null=True, blank=True)
     credits = models.FloatField(default=0.0)
+    created_at = models.DateTimeField(auto_now_add=True, null=True, blank=True)
+    android_version = models.CharField(max_length=20, blank=True, null=True)
+    ios_version = models.CharField(max_length=20, blank=True, null=True)
 
     def save(self, *args, **kwargs):
         if self.password and (not self.pk or not SecondaryStudent.objects.filter(id=self.pk, password=self.password).exists()):
