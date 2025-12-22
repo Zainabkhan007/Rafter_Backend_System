@@ -2220,12 +2220,21 @@ def safe_localtime(dt):
 
 @api_view(['GET'])
 def get_all_orders(request):
+    from django.db.models import Prefetch
+
     order_details = []
 
-    # Regular orders
-    orders = Order.objects.all().order_by('-order_date')
+    # Optimize regular orders with select_related and prefetch_related
+    orders = Order.objects.select_related(
+        'primary_school',
+        'secondary_school'
+    ).prefetch_related(
+        Prefetch('orderitem_set', queryset=OrderItem.objects.select_related('menu'))
+    ).order_by('-order_date')
+
     for order in orders:
-        order_items = OrderItem.objects.filter(order=order)
+        # Access prefetched order items (no additional query)
+        order_items = order.orderitem_set.all()
         items_details = []
         for item in order_items:
             item_name = item._menu_name if item._menu_name else (item.menu.name if item.menu else "Deleted Menu")
@@ -2253,7 +2262,7 @@ def get_all_orders(request):
             'payment_id': order.payment_id,
         }
 
-        # Add school info
+        # Add school info (already loaded via select_related)
         if order.primary_school:
             order_data['school_id'] = order.primary_school.id
             order_data['school_name'] = order.primary_school.school_name
@@ -2268,10 +2277,16 @@ def get_all_orders(request):
 
         order_details.append(order_data)
 
-    # Manager orders
-    manager_orders = ManagerOrder.objects.all().order_by('-order_date')
+    # Optimize manager orders with select_related and prefetch_related
+    manager_orders = ManagerOrder.objects.select_related(
+        'manager'
+    ).prefetch_related(
+        'managerorderitem_set'
+    ).order_by('-order_date')
+
     for m_order in manager_orders:
-        m_items = ManagerOrderItem.objects.filter(order=m_order)
+        # Access prefetched manager order items (no additional query)
+        m_items = m_order.managerorderitem_set.all()
         items_details = [
             {
                 'day': item.day,
