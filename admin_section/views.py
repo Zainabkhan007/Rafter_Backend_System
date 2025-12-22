@@ -2229,12 +2229,12 @@ def get_all_orders(request):
         'primary_school',
         'secondary_school'
     ).prefetch_related(
-        Prefetch('orderitem_set', queryset=OrderItem.objects.select_related('menu'))
+        Prefetch('order_items', queryset=OrderItem.objects.select_related('menu'))
     ).order_by('-order_date')
 
     for order in orders:
         # Access prefetched order items (no additional query)
-        order_items = order.orderitem_set.all()
+        order_items = order.order_items.all()
         items_details = []
         for item in order_items:
             item_name = item._menu_name if item._menu_name else (item.menu.name if item.menu else "Deleted Menu")
@@ -2281,12 +2281,12 @@ def get_all_orders(request):
     manager_orders = ManagerOrder.objects.select_related(
         'manager'
     ).prefetch_related(
-        'managerorderitem_set'
+        'items'
     ).order_by('-order_date')
 
     for m_order in manager_orders:
         # Access prefetched manager order items (no additional query)
-        m_items = m_order.managerorderitem_set.all()
+        m_items = m_order.items.all()
         items_details = [
             {
                 'day': item.day,
