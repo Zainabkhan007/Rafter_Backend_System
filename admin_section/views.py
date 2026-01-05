@@ -5091,3 +5091,347 @@ def export_worker_document_status(request):
 
     except Exception as e:
         return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ============================================================================
+# ADMIN DASHBOARD ANALYTICS ENDPOINTS
+# ============================================================================
+
+@api_view(['POST'])
+def get_dashboard_analytics(request):
+    """
+    Comprehensive admin dashboard analytics endpoint
+    Accepts date range filtering via start_date and end_date
+    Returns: totals, school-wise data, top items, least favorite items
+    """
+    try:
+        start_date = request.data.get('start_date')
+        end_date = request.data.get('end_date')
+        school_id = request.data.get('school_id')
+        school_type = request.data.get('school_type')
+        
+        # Parse dates if provided
+        if start_date:
+            start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
+        if end_date:
+            end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
+            
+        # Build base query for orders
+        orders_query = Order.objects.all()
+        
+        if start_date and end_date:
+            orders_query = orders_query.filter(
+                created_at__date__gte=start_date,
+                created_at__date__lte=end_date
+            )
+        
+        if school_id and school_type:
+            if school_type == 'primary':
+                orders_query = orders_query.filter(primary_school_id=school_id)
+            else:
+                orders_query = orders_query.filter(secondary_school_id=school_id)
+        
+        # Calculate totals
+        total_orders = orders_query.count()
+        pending_orders = orders_query.filter(status='pending').count()
+        collected_orders = orders_query.filter(status='collected').count()
+        cancelled_orders = orders_query.filter(status='cancelled').count()
+        
+        # Total revenue
+        total_revenue = sum(float(order.total_price) for order in orders_query)
+        
+        # User counts
+        total_users = (
+            ParentRegisteration.objects.count() +
+            StaffRegisteration.objects.count() +
+            SecondaryStudent.objects.count() +
+            PrimaryStudentsRegister.objects.count()
+        )
+        
+        parent_count = ParentRegisteration.objects.count()
+        staff_count = StaffRegisteration.objects.count()
+        student_count = SecondaryStudent.objects.count() + PrimaryStudentsRegister.objects.count()
+        
+        # School count
+        total_schools = PrimarySchool.objects.count() + SecondarySchool.objects.count()
+        
+        response_data = {
+            'totals': {
+                'total_orders': total_orders,
+                'pending_orders': pending_orders,
+                'collected_orders': collected_orders,
+                'cancelled_orders': cancelled_orders,
+                'total_revenue': round(total_revenue, 2),
+                'total_users': total_users,
+                'parent_count': parent_count,
+                'staff_count': staff_count,
+                'student_count': student_count,
+                'total_schools': total_schools,
+            }
+        }
+        
+        return Response(response_data, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+def get_school_analytics(request):
+    """
+    Get analytics for each school with date range filtering
+    Returns order counts, revenue, and popular items per school
+    """
+    try:
+        start_date = request.data.get('start_date')
+        end_date = request.data.get('end_date')
+        
+        if start_date:
+            start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
+        if end_date:
+            end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
+            
+        schools_data = []
+        
+        # Primary schools
+        for school in PrimarySchool.objects.all():
+            orders = Order.objects.filter(primary_school=school)
+            
+            if start_date and end_date:
+                orders = orders.filter(
+                    created_at__date__gte=start_date,
+                    created_at__date__lte=end_date
+                )
+            
+            total_orders = orders.count()
+            pending = orders.filter(status='pending').count()
+            collected = orders.filter(status='collected').count()
+            cancelled = orders.filter(status='cancelled').count()
+            revenue = sum(float(o.total_price) for o in orders)
+            
+            # Student count for this school
+            student_count = PrimaryStudentsRegister.objects.filter(school=school).count()
+            
+            schools_data.append({
+                'school_id': school.id,
+                'school_name': school.school_name,
+                'school_type': 'primary',
+                'school_eircode': school.school_eircode,
+                'is_active': Menu.objects.filter(primary_schools=school, is_active=True).exists(),
+                'total_orders': total_orders,
+                'pending_orders': pending,
+                'collected_orders': collected,
+                'cancelled_orders': cancelled,
+                'revenue': round(revenue, 2),
+                'student_count': student_count,
+            })
+        
+        # Secondary schools
+        for school in SecondarySchool.objects.all():
+            orders = Order.objects.filter(secondary_school=school)
+            
+            if start_date and end_date:
+                orders = orders.filter(
+                    created_at__date__gte=start_date,
+                    created_at__date__lte=end_date
+                )
+            
+            total_orders = orders.count()
+            pending = orders.filter(status='pending').count()
+            collected = orders.filter(status='collected').count()
+            cancelled = orders.filter(status='cancelled').count()
+            revenue = sum(float(o.total_price) for o in orders)
+            
+            student_count = SecondaryStudent.objects.filter(school=school).count()
+            
+            schools_data.append({
+                'school_id': school.id,
+                'school_name': school.secondary_school_name,
+                'school_type': 'secondary',
+                'school_eircode': school.secondary_school_eircode,
+                'is_active': Menu.objects.filter(secondary_schools=school, is_active=True).exists(),
+                'total_orders': total_orders,
+                'pending_orders': pending,
+                'collected_orders': collected,
+                'cancelled_orders': cancelled,
+                'revenue': round(revenue, 2),
+                'student_count': student_count,
+            })
+        
+        return Response({'schools': schools_data}, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+def get_top_items(request):
+    """
+    Get top ordered menu items with date range and school filtering
+    """
+    try:
+        start_date = request.data.get('start_date')
+        end_date = request.data.get('end_date')
+        school_id = request.data.get('school_id')
+        school_type = request.data.get('school_type')
+        limit = request.data.get('limit', 10)  # Default to top 10
+        
+        if start_date:
+            start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
+        if end_date:
+            end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
+        
+        # Get orders with filtering
+        orders = Order.objects.all()
+        
+        if start_date and end_date:
+            orders = orders.filter(
+                created_at__date__gte=start_date,
+                created_at__date__lte=end_date
+            )
+        
+        if school_id and school_type:
+            if school_type == 'primary':
+                orders = orders.filter(primary_school_id=school_id)
+            else:
+                orders = orders.filter(secondary_school_id=school_id)
+        
+        # Count items from order items
+        item_counts = {}
+        for order in orders:
+            for item in order.order_items.all():
+                item_name = item._menu_name
+                if item_name in item_counts:
+                    item_counts[item_name]['quantity'] += item.quantity
+                    item_counts[item_name]['order_count'] += 1
+                else:
+                    item_counts[item_name] = {
+                        'item_name': item_name,
+                        'quantity': item.quantity,
+                        'order_count': 1,
+                    }
+        
+        # Sort by quantity and get top items
+        top_items = sorted(
+            item_counts.values(),
+            key=lambda x: x['quantity'],
+            reverse=True
+        )[:limit]
+        
+        return Response({'top_items': top_items}, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+def get_least_favorite_items(request):
+    """
+    Get least ordered menu items with date range and school filtering
+    """
+    try:
+        start_date = request.data.get('start_date')
+        end_date = request.data.get('end_date')
+        school_id = request.data.get('school_id')
+        school_type = request.data.get('school_type')
+        limit = request.data.get('limit', 10)
+        
+        if start_date:
+            start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
+        if end_date:
+            end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
+        
+        orders = Order.objects.all()
+        
+        if start_date and end_date:
+            orders = orders.filter(
+                created_at__date__gte=start_date,
+                created_at__date__lte=end_date
+            )
+        
+        if school_id and school_type:
+            if school_type == 'primary':
+                orders = orders.filter(primary_school_id=school_id)
+            else:
+                orders = orders.filter(secondary_school_id=school_id)
+        
+        item_counts = {}
+        for order in orders:
+            for item in order.order_items.all():
+                item_name = item._menu_name
+                if item_name in item_counts:
+                    item_counts[item_name]['quantity'] += item.quantity
+                    item_counts[item_name]['order_count'] += 1
+                else:
+                    item_counts[item_name] = {
+                        'item_name': item_name,
+                        'quantity': item.quantity,
+                        'order_count': 1,
+                    }
+        
+        # Sort by quantity ascending to get least favorite
+        least_items = sorted(
+            item_counts.values(),
+            key=lambda x: x['quantity']
+        )[:limit]
+        
+        return Response({'least_favorite_items': least_items}, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+def get_orders_over_time(request):
+    """
+    Get order counts grouped by date for chart display
+    """
+    try:
+        start_date = request.data.get('start_date')
+        end_date = request.data.get('end_date')
+        school_id = request.data.get('school_id')
+        school_type = request.data.get('school_type')
+        
+        if start_date:
+            start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
+        else:
+            start_date = (datetime.now() - timedelta(days=30)).date()
+            
+        if end_date:
+            end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
+        else:
+            end_date = datetime.now().date()
+        
+        orders = Order.objects.filter(
+            created_at__date__gte=start_date,
+            created_at__date__lte=end_date
+        )
+        
+        if school_id and school_type:
+            if school_type == 'primary':
+                orders = orders.filter(primary_school_id=school_id)
+            else:
+                orders = orders.filter(secondary_school_id=school_id)
+        
+        # Group by date
+        orders_by_date = {}
+        current_date = start_date
+        while current_date <= end_date:
+            orders_by_date[current_date.strftime('%Y-%m-%d')] = 0
+            current_date += timedelta(days=1)
+        
+        for order in orders:
+            order_date = order.created_at.date().strftime('%Y-%m-%d')
+            if order_date in orders_by_date:
+                orders_by_date[order_date] += 1
+        
+        # Convert to list format for chart
+        chart_data = [
+            {'date': date, 'count': count}
+            for date, count in sorted(orders_by_date.items())
+        ]
+        
+        return Response({'orders_over_time': chart_data}, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

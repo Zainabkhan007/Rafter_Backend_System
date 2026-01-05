@@ -124,12 +124,10 @@ urlpatterns = [
     path('documents/mark-read/', views.mark_document_read),
     path('documents/report/', views.export_worker_document_status),
 
-   
-
-   
-
+    # Admin Dashboard Analytics
+    path('dashboard/analytics/', views.get_dashboard_analytics, name='dashboard_analytics'),
+    path('dashboard/schools/', views.get_school_analytics, name='school_analytics'),
+    path('dashboard/top-items/', views.get_top_items, name='top_items'),
+    path('dashboard/least-favorite/', views.get_least_favorite_items, name='least_favorite_items'),
+    path('dashboard/orders-over-time/', views.get_orders_over_time, name='orders_over_time'),
 ]
-
-
-
-
