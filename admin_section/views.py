@@ -2477,15 +2477,18 @@ def get_orders_by_school(request):
             'order_id': order.id,
             'selected_day': order.selected_day,
             'total_price': order.total_price,
+            'total_amount': order.total_price,
             'order_date': formatted_order_date,
             'status': order.status,
             'week_number': order.week_number,
             'year': order.year,
             'items': items_details,
             'user_name': order.user_name,
+            'child_name': order.user_name,
             'user_type': order.user_type,
             'school_id': school_id,
-            'school_type': school_type
+            'school_type': school_type,
+            'created_at': order.created_at.isoformat() if hasattr(order, 'created_at') and order.created_at else None
         }
 
         if order.user_type in ['parent', 'staff']:
@@ -2513,16 +2516,19 @@ def get_orders_by_school(request):
             'order_id': f"m_{m_order.id}",
             'selected_day': m_order.selected_day,
             'total_production_price': m_order.total_production_price,
+            'total_amount': m_order.total_production_price,
             'order_date': formatted_order_date,
             'status': m_order.status,
             'week_number': m_order.week_number,
             'year': m_order.year,
             'is_delivered': m_order.is_delivered,
             'manager_name': m_order.manager.username if hasattr(m_order.manager, 'username') else str(m_order.manager),
+            'child_name': m_order.manager.username if hasattr(m_order.manager, 'username') else str(m_order.manager),
             'items': items_details,
             'user_type': 'manager',
             'school_id': school_id,
-            'school_type': school_type
+            'school_type': school_type,
+            'created_at': m_order.order_date.isoformat() if m_order.order_date else None
         }
 
         order_details.append(order_data)
