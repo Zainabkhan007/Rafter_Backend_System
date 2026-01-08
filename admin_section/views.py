@@ -2423,6 +2423,8 @@ def get_order_by_id(request, order_id):
     except Order.DoesNotExist:
         return Response({'error': 'Order not found.'}, status=status.HTTP_404_NOT_FOUND)
 
+
+
 @api_view(['POST'])
 def get_orders_by_school(request):
     school_id = request.data.get('school_id')
@@ -3832,6 +3834,174 @@ def download_all_schools_menu(request):
         day_part = day_filter if day_filter else 'weekly'
         response['Content-Disposition'] = f'attachment; filename="all_schools_{day_part}_orders_{role}.zip"'
         return response
+
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+def download_all_primary_schools_combined(request):
+    """
+    Download combined chef sheet for all primary schools.
+    Merges data from all primary schools into a single Excel file.
+    """
+    try:
+        day_filter = request.data.get('day')
+
+        # Create combined workbook
+        workbook = Workbook()
+        workbook.remove(workbook.active)
+
+        # Styles
+        header_font = Font(bold=True, size=12, color="FFFFFF")
+        header_fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
+        title_font = Font(bold=True, size=14, color="000000")
+        title_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
+        total_fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
+        border = Border(left=Side(style="thin"), right=Side(style="thin"),
+                        top=Side(style="thin"), bottom=Side(style="thin"))
+        center_align = Alignment(horizontal="center", vertical="center")
+        left_align = Alignment(horizontal="left", vertical="center")
+
+        def apply_header_styling(sheet, title_text, columns):
+            sheet.merge_cells(start_row=1, end_row=1, start_column=1, end_column=len(columns))
+            title_cell = sheet.cell(row=1, column=1, value=title_text)
+            title_cell.font = title_font
+            title_cell.fill = title_fill
+            title_cell.alignment = center_align
+
+            for col_num, column_title in enumerate(columns, 1):
+                cell = sheet.cell(row=2, column=col_num, value=column_title)
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.border = border
+                cell.alignment = center_align
+                sheet.column_dimensions[get_column_letter(col_num)].width = 25
+
+        def apply_data_styling(sheet, start_row):
+            for row in sheet.iter_rows(min_row=start_row):
+                for cell in row:
+                    cell.border = border
+                    cell.alignment = left_align if cell.column == 1 else center_align
+
+        # Combined data structures
+        combined_day_totals = defaultdict(lambda: defaultdict(int))
+        combined_school_totals = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
+
+        all_days = list(DAY_COLORS.keys())
+        days_to_generate = [day_filter] if day_filter in all_days else all_days
+
+        # Collect data from all primary schools
+        for school in PrimarySchool.objects.all():
+            student_orders, staff_orders = fetch_orders(school.id, 'primary', target_day=day_filter)
+
+            # Process student orders
+            for order in student_orders:
+                selected_day = order.selected_day
+                order_items = order.order_items.all()
+
+                for item in order_items:
+                    menu_name = item._menu_name or (item.menu.name if item.menu else "Deleted Menu")
+                    quantity = item.quantity
+
+                    # Add to combined totals
+                    combined_day_totals[selected_day][menu_name] += quantity
+                    combined_school_totals[selected_day][school.school_name][menu_name] += quantity
+
+            # Process staff orders
+            for order in staff_orders:
+                selected_day = order.selected_day
+                order_items = order.order_items.all()
+
+                for item in order_items:
+                    menu_name = item._menu_name or (item.menu.name if item.menu else "Deleted Menu")
+                    quantity = item.quantity
+
+                    combined_day_totals[selected_day][menu_name] += quantity
+                    combined_school_totals[selected_day][school.school_name][menu_name] += quantity
+
+        # Generate sheets for each day
+        for day in days_to_generate:
+            # Day Total Sheet
+            sheet = workbook.create_sheet(title=f"{day} Total"[:31])
+            sheet.sheet_properties.tabColor = DAY_COLORS.get(day, "FFFFFF")
+            apply_header_styling(sheet, f"Combined Primary Schools - {day} Total", ["Menu Item", "Total Quantity"])
+
+            row_num = 3
+            grand_total = 0
+
+            if combined_day_totals.get(day):
+                for menu_name, qty in sorted(combined_day_totals[day].items()):
+                    sheet.cell(row=row_num, column=1, value=menu_name)
+                    sheet.cell(row=row_num, column=2, value=qty)
+                    grand_total += qty
+                    row_num += 1
+
+                # Add grand total row
+                sheet.cell(row=row_num, column=1, value="Grand Total")
+                cell = sheet.cell(row=row_num, column=2, value=grand_total)
+                cell.font = Font(bold=True)
+                cell.fill = total_fill
+            else:
+                sheet.cell(row=3, column=1, value="No orders")
+                sheet.merge_cells(start_row=3, end_row=3, start_column=1, end_column=2)
+
+            apply_data_styling(sheet, 3)
+
+            # School Breakdown Sheet
+            sheet = workbook.create_sheet(title=f"{day} By School"[:31])
+            sheet.sheet_properties.tabColor = "00B0F0"
+            apply_header_styling(sheet, f"Combined Primary Schools - {day} By School", ["School Name", "Menu Item", "Total Quantity"])
+
+            row_num = 3
+            day_grand_total = 0
+
+            if combined_school_totals.get(day):
+                for school_name, items in sorted(combined_school_totals[day].items()):
+                    subtotal = 0
+                    for menu_name, qty in items.items():
+                        sheet.cell(row=row_num, column=1, value=school_name)
+                        sheet.cell(row=row_num, column=2, value=menu_name)
+                        sheet.cell(row=row_num, column=3, value=qty)
+                        subtotal += qty
+                        day_grand_total += qty
+                        row_num += 1
+
+                    # Add school subtotal
+                    sheet.cell(row=row_num, column=1, value=f"Total for {school_name}")
+                    sheet.merge_cells(start_row=row_num, end_row=row_num, start_column=1, end_column=2)
+                    total_cell = sheet.cell(row=row_num, column=3, value=subtotal)
+                    total_cell.font = Font(bold=True)
+                    total_cell.fill = total_fill
+                    row_num += 1
+
+                # Add grand total
+                row_num += 1
+                sheet.cell(row=row_num, column=1, value="Grand Total (All Schools)")
+                sheet.merge_cells(start_row=row_num, end_row=row_num, start_column=1, end_column=2)
+                cell = sheet.cell(row=row_num, column=3, value=day_grand_total)
+                cell.font = Font(bold=True)
+                cell.fill = total_fill
+            else:
+                sheet.cell(row=3, column=1, value="No data available")
+                sheet.merge_cells(start_row=3, end_row=3, start_column=1, end_column=3)
+
+            apply_data_styling(sheet, 3)
+
+        # Save file
+        day_part = day_filter if day_filter else "weekly"
+        filename = f"combined_primary_schools_chef_{day_part}.xlsx"
+
+        menu_files_directory = settings.MENU_FILES_ROOT
+        os.makedirs(menu_files_directory, exist_ok=True)
+
+        file_path = os.path.join(menu_files_directory, filename)
+        workbook.save(file_path)
+
+        return Response({
+            'message': 'Combined primary schools chef sheet generated successfully!',
+            'download_link': f"{settings.MENU_FILES_URL}{filename}"
+        }, status=status.HTTP_200_OK)
 
     except Exception as e:
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -5390,53 +5560,55 @@ def get_least_favorite_items(request):
 @api_view(['POST'])
 def get_orders_over_time(request):
     """
-    Get order counts grouped by date for chart display
+    Get order counts grouped by delivery date (selected_day) for chart display
     """
     try:
         start_date = request.data.get('start_date')
         end_date = request.data.get('end_date')
         school_id = request.data.get('school_id')
         school_type = request.data.get('school_type')
-        
+
         if start_date:
             start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
         else:
             start_date = (datetime.now() - timedelta(days=30)).date()
-            
+
         if end_date:
             end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
         else:
             end_date = datetime.now().date()
-        
+
+        # Get orders with order_date field
         orders = Order.objects.filter(
-            created_at__date__gte=start_date,
-            created_at__date__lte=end_date
-        )
-        
+            order_date__gte=start_date,
+            order_date__lte=end_date
+        ).exclude(status__iexact="cancelled")
+
         if school_id and school_type:
             if school_type == 'primary':
                 orders = orders.filter(primary_school_id=school_id)
             else:
                 orders = orders.filter(secondary_school_id=school_id)
-        
-        # Group by date
+
+        # Group by order date
         orders_by_date = {}
         current_date = start_date
         while current_date <= end_date:
             orders_by_date[current_date.strftime('%Y-%m-%d')] = 0
             current_date += timedelta(days=1)
-        
+
         for order in orders:
-            order_date = order.created_at.date().strftime('%Y-%m-%d')
-            if order_date in orders_by_date:
-                orders_by_date[order_date] += 1
-        
+            if order.order_date:
+                order_date_str = order.order_date.strftime('%Y-%m-%d')
+                if order_date_str in orders_by_date:
+                    orders_by_date[order_date_str] += 1
+
         # Convert to list format for chart
         chart_data = [
             {'date': date, 'count': count}
             for date, count in sorted(orders_by_date.items())
         ]
-        
+
         return Response({'orders_over_time': chart_data}, status=status.HTTP_200_OK)
         
     except Exception as e:
