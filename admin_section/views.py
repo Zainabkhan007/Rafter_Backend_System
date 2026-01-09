@@ -5294,13 +5294,13 @@ def get_dashboard_analytics(request):
             
         # Build base query for orders
         orders_query = Order.objects.all()
-        
+
         if start_date and end_date:
             orders_query = orders_query.filter(
-                created_at__date__gte=start_date,
-                created_at__date__lte=end_date
+                order_date__date__gte=start_date,
+                order_date__date__lte=end_date
             )
-        
+
         if school_id and school_type:
             if school_type == 'primary':
                 orders_query = orders_query.filter(primary_school_id=school_id)
@@ -5372,11 +5372,11 @@ def get_school_analytics(request):
         # Primary schools
         for school in PrimarySchool.objects.all():
             orders = Order.objects.filter(primary_school=school)
-            
+
             if start_date and end_date:
                 orders = orders.filter(
-                    created_at__date__gte=start_date,
-                    created_at__date__lte=end_date
+                    order_date__date__gte=start_date,
+                    order_date__date__lte=end_date
                 )
             
             total_orders = orders.count()
@@ -5405,11 +5405,11 @@ def get_school_analytics(request):
         # Secondary schools
         for school in SecondarySchool.objects.all():
             orders = Order.objects.filter(secondary_school=school)
-            
+
             if start_date and end_date:
                 orders = orders.filter(
-                    created_at__date__gte=start_date,
-                    created_at__date__lte=end_date
+                    order_date__date__gte=start_date,
+                    order_date__date__lte=end_date
                 )
             
             total_orders = orders.count()
@@ -5459,13 +5459,13 @@ def get_top_items(request):
         
         # Get orders with filtering
         orders = Order.objects.all()
-        
+
         if start_date and end_date:
             orders = orders.filter(
-                created_at__date__gte=start_date,
-                created_at__date__lte=end_date
+                order_date__date__gte=start_date,
+                order_date__date__lte=end_date
             )
-        
+
         if school_id and school_type:
             if school_type == 'primary':
                 orders = orders.filter(primary_school_id=school_id)
@@ -5518,13 +5518,13 @@ def get_least_favorite_items(request):
             end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
         
         orders = Order.objects.all()
-        
+
         if start_date and end_date:
             orders = orders.filter(
-                created_at__date__gte=start_date,
-                created_at__date__lte=end_date
+                order_date__date__gte=start_date,
+                order_date__date__lte=end_date
             )
-        
+
         if school_id and school_type:
             if school_type == 'primary':
                 orders = orders.filter(primary_school_id=school_id)
@@ -5580,8 +5580,8 @@ def get_orders_over_time(request):
 
         # Get orders with order_date field
         orders = Order.objects.filter(
-            order_date__gte=start_date,
-            order_date__lte=end_date
+            order_date__date__gte=start_date,
+            order_date__date__lte=end_date
         ).exclude(status__iexact="cancelled")
 
         if school_id and school_type:
