@@ -3988,6 +3988,91 @@ def download_all_primary_schools_combined(request):
 
             apply_data_styling(sheet, 3)
 
+        # Generate weekly total sheets (only if no specific day filter)
+        if not day_filter:
+            # Weekly Total Sheet (aggregated across all days)
+            sheet = workbook.create_sheet(title="Weekly Total")
+            sheet.sheet_properties.tabColor = "00B050"  # Green color for weekly view
+            apply_header_styling(sheet, "Combined Primary Schools - Weekly Total", ["Menu Item", "Total Quantity"])
+
+            weekly_menu_totals = defaultdict(int)
+            row_num = 3
+            weekly_grand_total = 0
+
+            # Aggregate all menu items across all days
+            for day in days_to_generate:
+                if combined_day_totals.get(day):
+                    for menu_name, qty in combined_day_totals[day].items():
+                        weekly_menu_totals[menu_name] += qty
+
+            # Write weekly totals
+            if weekly_menu_totals:
+                for menu_name, qty in sorted(weekly_menu_totals.items()):
+                    sheet.cell(row=row_num, column=1, value=menu_name)
+                    sheet.cell(row=row_num, column=2, value=qty)
+                    weekly_grand_total += qty
+                    row_num += 1
+
+                # Add grand total row
+                sheet.cell(row=row_num, column=1, value="Grand Total")
+                cell = sheet.cell(row=row_num, column=2, value=weekly_grand_total)
+                cell.font = Font(bold=True)
+                cell.fill = total_fill
+            else:
+                sheet.cell(row=3, column=1, value="No orders")
+                sheet.merge_cells(start_row=3, end_row=3, start_column=1, end_column=2)
+
+            apply_data_styling(sheet, 3)
+
+            # Weekly Total By School Sheet
+            sheet = workbook.create_sheet(title="Weekly Total By School")
+            sheet.sheet_properties.tabColor = "92D050"  # Light green for weekly by school
+            apply_header_styling(sheet, "Combined Primary Schools - Weekly Total By School", ["School Name", "Menu Item", "Total Quantity"])
+
+            weekly_school_totals = defaultdict(lambda: defaultdict(int))
+            row_num = 3
+            weekly_school_grand_total = 0
+
+            # Aggregate all menu items by school across all days
+            for day in days_to_generate:
+                if combined_school_totals.get(day):
+                    for school_name, items in combined_school_totals[day].items():
+                        for menu_name, qty in items.items():
+                            weekly_school_totals[school_name][menu_name] += qty
+
+            # Write weekly totals by school
+            if weekly_school_totals:
+                for school_name, items in sorted(weekly_school_totals.items()):
+                    school_subtotal = 0
+                    for menu_name, qty in sorted(items.items()):
+                        sheet.cell(row=row_num, column=1, value=school_name)
+                        sheet.cell(row=row_num, column=2, value=menu_name)
+                        sheet.cell(row=row_num, column=3, value=qty)
+                        school_subtotal += qty
+                        weekly_school_grand_total += qty
+                        row_num += 1
+
+                    # Add school subtotal
+                    sheet.cell(row=row_num, column=1, value=f"Total for {school_name}")
+                    sheet.merge_cells(start_row=row_num, end_row=row_num, start_column=1, end_column=2)
+                    total_cell = sheet.cell(row=row_num, column=3, value=school_subtotal)
+                    total_cell.font = Font(bold=True)
+                    total_cell.fill = total_fill
+                    row_num += 1
+
+                # Add grand total
+                row_num += 1
+                sheet.cell(row=row_num, column=1, value="Grand Total (All Schools)")
+                sheet.merge_cells(start_row=row_num, end_row=row_num, start_column=1, end_column=2)
+                cell = sheet.cell(row=row_num, column=3, value=weekly_school_grand_total)
+                cell.font = Font(bold=True)
+                cell.fill = total_fill
+            else:
+                sheet.cell(row=3, column=1, value="No data available")
+                sheet.merge_cells(start_row=3, end_row=3, start_column=1, end_column=3)
+
+            apply_data_styling(sheet, 3)
+
         # Save file
         day_part = day_filter if day_filter else "weekly"
         filename = f"combined_primary_schools_chef_{day_part}.xlsx"
