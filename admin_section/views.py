@@ -5358,169 +5358,268 @@ def export_worker_document_status(request):
 # ADMIN DASHBOARD ANALYTICS ENDPOINTS
 # ============================================================================
 
-@api_view(['POST'])
+@api_view(['GET'])
 def get_dashboard_analytics(request):
     """
     Comprehensive admin dashboard analytics endpoint
-    Accepts date range filtering via start_date and end_date
-    Returns: totals, school-wise data, top items, least favorite items
+    Changed to GET request
+    Returns: totals including children count registered by parents
     """
     try:
-        start_date = request.data.get('start_date')
-        end_date = request.data.get('end_date')
-        school_id = request.data.get('school_id')
-        school_type = request.data.get('school_type')
-        
-        # Parse dates if provided
-        if start_date:
-            start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
-        if end_date:
-            end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
-            
-        # Build base query for orders
-        orders_query = Order.objects.all()
-
-        if start_date and end_date:
-            orders_query = orders_query.filter(
-                order_date__date__gte=start_date,
-                order_date__date__lte=end_date
-            )
-
-        if school_id and school_type:
-            if school_type == 'primary':
-                orders_query = orders_query.filter(primary_school_id=school_id)
-            else:
-                orders_query = orders_query.filter(secondary_school_id=school_id)
-        
         # Calculate totals
+        orders_query = Order.objects.all()
         total_orders = orders_query.count()
         pending_orders = orders_query.filter(status='pending').count()
         collected_orders = orders_query.filter(status='collected').count()
         cancelled_orders = orders_query.filter(status='cancelled').count()
-        
-        # Total revenue
-        total_revenue = sum(float(order.total_price) for order in orders_query)
-        
+
         # User counts
-        total_users = (
-            ParentRegisteration.objects.count() +
-            StaffRegisteration.objects.count() +
-            SecondaryStudent.objects.count() +
-            PrimaryStudentsRegister.objects.count()
-        )
-        
         parent_count = ParentRegisteration.objects.count()
         staff_count = StaffRegisteration.objects.count()
-        student_count = SecondaryStudent.objects.count() + PrimaryStudentsRegister.objects.count()
-        
+
+        # Primary students (children registered by parents AND staff)
+        primary_students_count = PrimaryStudentsRegister.objects.count()
+
+        # Secondary students (students registered through student modal)
+        secondary_students_count = SecondaryStudent.objects.count()
+
+        # Children count = ONLY primary students (children added by staff or parent)
+        children_count = primary_students_count
+
+        # Student count = ONLY secondary students (students registered from student modal)
+        student_count = secondary_students_count
+
+        # Total users = parents + staff + primary students + secondary students
+        total_users = parent_count + staff_count + primary_students_count + secondary_students_count
+
         # School count
         total_schools = PrimarySchool.objects.count() + SecondarySchool.objects.count()
-        
+
         response_data = {
             'totals': {
                 'total_orders': total_orders,
                 'pending_orders': pending_orders,
                 'collected_orders': collected_orders,
                 'cancelled_orders': cancelled_orders,
-                'total_revenue': round(total_revenue, 2),
                 'total_users': total_users,
                 'parent_count': parent_count,
                 'staff_count': staff_count,
                 'student_count': student_count,
+                'primary_students_count': primary_students_count,
+                'secondary_students_count': secondary_students_count,
+                'children_count': children_count,  # Total children registered by both parents and staff
                 'total_schools': total_schools,
             }
         }
-        
+
         return Response(response_data, status=status.HTTP_200_OK)
-        
+
     except Exception as e:
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-@api_view(['POST'])
+@api_view(['GET'])
 def get_school_analytics(request):
     """
-    Get analytics for each school with date range filtering
-    Returns order counts, revenue, and popular items per school
+    Get analytics for all schools (NO filtering - overall stats)
+    Returns order counts, revenue, student counts, and children counts per school
+    Changed from POST to GET and added children_count field
+    Optimized with Django ORM aggregations instead of Python loops
     """
     try:
-        start_date = request.data.get('start_date')
-        end_date = request.data.get('end_date')
-        
-        if start_date:
-            start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
-        if end_date:
-            end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
-            
-        schools_data = []
-        
-        # Primary schools
-        for school in PrimarySchool.objects.all():
-            orders = Order.objects.filter(primary_school=school)
+        from django.db.models import Count, Sum, Q, Prefetch
 
-            if start_date and end_date:
-                orders = orders.filter(
-                    order_date__date__gte=start_date,
-                    order_date__date__lte=end_date
-                )
-            
-            total_orders = orders.count()
-            pending = orders.filter(status='pending').count()
-            collected = orders.filter(status='collected').count()
-            cancelled = orders.filter(status='cancelled').count()
-            revenue = sum(float(o.total_price) for o in orders)
-            
-            # Student count for this school
-            student_count = PrimaryStudentsRegister.objects.filter(school=school).count()
-            
+        schools_data = []
+
+        # Primary schools - Use database aggregations
+        primary_schools = PrimarySchool.objects.annotate(
+            total_orders_count=Count('order', distinct=True),
+            pending_orders_count=Count('order', filter=Q(order__status='pending'), distinct=True),
+            collected_orders_count=Count('order', filter=Q(order__status='collected'), distinct=True),
+            cancelled_orders_count=Count('order', filter=Q(order__status='cancelled'), distinct=True),
+            student_count_total=Count('student', distinct=True),
+            children_count_total=Count('student', filter=Q(student__parent__isnull=False), distinct=True)
+        ).prefetch_related(
+            Prefetch('menus', queryset=Menu.objects.filter(is_active=True))
+        )
+
+        # Calculate 4 weeks: last 2 weeks + current week + next week
+        today = datetime.now().date()
+        # Start from 2 weeks ago (beginning of week)
+        start_of_current_week = today - timedelta(days=today.weekday())
+        start_date = start_of_current_week - timedelta(weeks=2)
+        # End 1 week from now (end of next week)
+        end_date = start_of_current_week + timedelta(weeks=2, days=6)
+
+        for school in primary_schools:
+            # Get orders_over_time for 4 weeks for this school
+            school_orders = Order.objects.filter(
+                primary_school_id=school.id,
+                order_date__date__gte=start_date,
+                order_date__date__lte=end_date
+            ).exclude(status__iexact="cancelled")
+
+            # Group by order date
+            orders_by_date = {}
+            current_date = start_date
+            while current_date <= end_date:
+                orders_by_date[current_date.strftime('%Y-%m-%d')] = 0
+                current_date += timedelta(days=1)
+
+            for order in school_orders:
+                if order.order_date:
+                    order_date_str = order.order_date.strftime('%Y-%m-%d')
+                    if order_date_str in orders_by_date:
+                        orders_by_date[order_date_str] += 1
+
+            # Convert to list format for chart
+            orders_over_time = [
+                {'date': date, 'count': count}
+                for date, count in sorted(orders_by_date.items())
+            ]
+
+            # Calculate weekly counts for 4 weeks
+            current_week = today.isocalendar()[1]
+            week_1_start = start_date
+            week_1_end = week_1_start + timedelta(days=6)
+            week_2_start = week_1_end + timedelta(days=1)
+            week_2_end = week_2_start + timedelta(days=6)
+            week_3_start = week_2_end + timedelta(days=1)
+            week_3_end = week_3_start + timedelta(days=6)
+            week_4_start = week_3_end + timedelta(days=1)
+            week_4_end = week_4_start + timedelta(days=6)
+
+            week_1_count = Order.objects.filter(
+                primary_school_id=school.id,
+                order_date__date__gte=week_1_start,
+                order_date__date__lte=week_1_end
+            ).exclude(status__iexact="cancelled").count()
+
+            week_2_count = Order.objects.filter(
+                primary_school_id=school.id,
+                order_date__date__gte=week_2_start,
+                order_date__date__lte=week_2_end
+            ).exclude(status__iexact="cancelled").count()
+
+            week_3_count = Order.objects.filter(
+                primary_school_id=school.id,
+                order_date__date__gte=week_3_start,
+                order_date__date__lte=week_3_end
+            ).exclude(status__iexact="cancelled").count()
+
+            week_4_count = Order.objects.filter(
+                primary_school_id=school.id,
+                order_date__date__gte=week_4_start,
+                order_date__date__lte=week_4_end
+            ).exclude(status__iexact="cancelled").count()
+
             schools_data.append({
                 'school_id': school.id,
                 'school_name': school.school_name,
                 'school_type': 'primary',
                 'school_eircode': school.school_eircode,
-                'is_active': Menu.objects.filter(primary_schools=school, is_active=True).exists(),
-                'total_orders': total_orders,
-                'pending_orders': pending,
-                'collected_orders': collected,
-                'cancelled_orders': cancelled,
-                'revenue': round(revenue, 2),
-                'student_count': student_count,
+                'is_active': school.menus.exists(),
+                'total_orders': school.total_orders_count or 0,
+                'pending_orders': school.pending_orders_count or 0,
+                'collected_orders': school.collected_orders_count or 0,
+                'cancelled_orders': school.cancelled_orders_count or 0,
+                'student_count': school.student_count_total or 0,
+                'children_count': school.children_count_total or 0,
+                'orders_over_time': orders_over_time,
+                'weekly_orders': {
+                    'week_1': {'count': week_1_count, 'start': week_1_start.isoformat(), 'end': week_1_end.isoformat()},
+                    'week_2': {'count': week_2_count, 'start': week_2_start.isoformat(), 'end': week_2_end.isoformat()},
+                    'week_3': {'count': week_3_count, 'start': week_3_start.isoformat(), 'end': week_3_end.isoformat()},
+                    'week_4': {'count': week_4_count, 'start': week_4_start.isoformat(), 'end': week_4_end.isoformat()},
+                }
             })
-        
-        # Secondary schools
-        for school in SecondarySchool.objects.all():
-            orders = Order.objects.filter(secondary_school=school)
 
-            if start_date and end_date:
-                orders = orders.filter(
-                    order_date__date__gte=start_date,
-                    order_date__date__lte=end_date
-                )
-            
-            total_orders = orders.count()
-            pending = orders.filter(status='pending').count()
-            collected = orders.filter(status='collected').count()
-            cancelled = orders.filter(status='cancelled').count()
-            revenue = sum(float(o.total_price) for o in orders)
-            
-            student_count = SecondaryStudent.objects.filter(school=school).count()
-            
+        # Secondary schools - Use database aggregations
+        secondary_schools = SecondarySchool.objects.annotate(
+            total_orders_count=Count('order', distinct=True),
+            pending_orders_count=Count('order', filter=Q(order__status='pending'), distinct=True),
+            collected_orders_count=Count('order', filter=Q(order__status='collected'), distinct=True),
+            cancelled_orders_count=Count('order', filter=Q(order__status='cancelled'), distinct=True),
+            student_count_total=Count('student', distinct=True)
+        ).prefetch_related(
+            Prefetch('menus', queryset=Menu.objects.filter(is_active=True))
+        )
+
+        for school in secondary_schools:
+            # Get orders_over_time for 4 weeks for this school
+            school_orders = Order.objects.filter(
+                secondary_school_id=school.id,
+                order_date__date__gte=start_date,
+                order_date__date__lte=end_date
+            ).exclude(status__iexact="cancelled")
+
+            # Group by order date
+            orders_by_date = {}
+            current_date = start_date
+            while current_date <= end_date:
+                orders_by_date[current_date.strftime('%Y-%m-%d')] = 0
+                current_date += timedelta(days=1)
+
+            for order in school_orders:
+                if order.order_date:
+                    order_date_str = order.order_date.strftime('%Y-%m-%d')
+                    if order_date_str in orders_by_date:
+                        orders_by_date[order_date_str] += 1
+
+            # Convert to list format for chart
+            orders_over_time = [
+                {'date': date, 'count': count}
+                for date, count in sorted(orders_by_date.items())
+            ]
+
+            # Calculate weekly counts for 4 weeks (using same dates as primary)
+            week_1_count = Order.objects.filter(
+                secondary_school_id=school.id,
+                order_date__date__gte=week_1_start,
+                order_date__date__lte=week_1_end
+            ).exclude(status__iexact="cancelled").count()
+
+            week_2_count = Order.objects.filter(
+                secondary_school_id=school.id,
+                order_date__date__gte=week_2_start,
+                order_date__date__lte=week_2_end
+            ).exclude(status__iexact="cancelled").count()
+
+            week_3_count = Order.objects.filter(
+                secondary_school_id=school.id,
+                order_date__date__gte=week_3_start,
+                order_date__date__lte=week_3_end
+            ).exclude(status__iexact="cancelled").count()
+
+            week_4_count = Order.objects.filter(
+                secondary_school_id=school.id,
+                order_date__date__gte=week_4_start,
+                order_date__date__lte=week_4_end
+            ).exclude(status__iexact="cancelled").count()
+
             schools_data.append({
                 'school_id': school.id,
                 'school_name': school.secondary_school_name,
                 'school_type': 'secondary',
                 'school_eircode': school.secondary_school_eircode,
-                'is_active': Menu.objects.filter(secondary_schools=school, is_active=True).exists(),
-                'total_orders': total_orders,
-                'pending_orders': pending,
-                'collected_orders': collected,
-                'cancelled_orders': cancelled,
-                'revenue': round(revenue, 2),
-                'student_count': student_count,
+                'is_active': school.menus.exists(),
+                'total_orders': school.total_orders_count or 0,
+                'pending_orders': school.pending_orders_count or 0,
+                'collected_orders': school.collected_orders_count or 0,
+                'cancelled_orders': school.cancelled_orders_count or 0,
+                'student_count': school.student_count_total or 0,
+                'children_count': school.student_count_total or 0,  # Same as student_count for secondary
+                'orders_over_time': orders_over_time,
+                'weekly_orders': {
+                    'week_1': {'count': week_1_count, 'start': week_1_start.isoformat(), 'end': week_1_end.isoformat()},
+                    'week_2': {'count': week_2_count, 'start': week_2_start.isoformat(), 'end': week_2_end.isoformat()},
+                    'week_3': {'count': week_3_count, 'start': week_3_start.isoformat(), 'end': week_3_end.isoformat()},
+                    'week_4': {'count': week_4_count, 'start': week_4_start.isoformat(), 'end': week_4_end.isoformat()},
+                }
             })
-        
+
         return Response({'schools': schools_data}, status=status.HTTP_200_OK)
-        
+
     except Exception as e:
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 

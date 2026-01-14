@@ -1,5 +1,5 @@
 from django.urls import path,include
-from . import views
+from . import views, analytics_views
 # from .views import StudentSearchView
 urlpatterns = [
    # For registration
@@ -127,7 +127,10 @@ urlpatterns = [
 
     # Admin Dashboard Analytics
     path('dashboard/analytics/', views.get_dashboard_analytics, name='dashboard_analytics'),
-    path('dashboard/schools/', views.get_school_analytics, name='school_analytics'),
+    path('dashboard/schools/', views.get_school_analytics, name='school_analytics'),  # Changed to GET
+    path('dashboard/school/<int:school_id>/', analytics_views.get_school_summary, name='school_summary'),
+    path('dashboard/school/<int:school_id>/filter-options/', analytics_views.get_filter_options, name='filter_options'),
+    path('dashboard/school/<int:school_id>/generate-report/', analytics_views.generate_school_report, name='generate_report'),
     path('dashboard/top-items/', views.get_top_items, name='top_items'),
     path('dashboard/least-favorite/', views.get_least_favorite_items, name='least_favorite_items'),
     path('dashboard/orders-over-time/', views.get_orders_over_time, name='orders_over_time'),
