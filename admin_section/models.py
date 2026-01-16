@@ -45,6 +45,7 @@ class ParentRegisteration(models.Model):
     allergies = models.ManyToManyField(Allergens, blank=True)
     credits = models.FloatField(default=0.0)
     created_at = models.DateTimeField(auto_now_add=True, null=True, blank=True)
+    platform_type = models.CharField(max_length=10, choices=[('ios', 'iOS'), ('android', 'Android'), ('web', 'Web')], null=True, blank=True)
     android_version = models.CharField(max_length=20, blank=True, null=True)
     ios_version = models.CharField(max_length=20, blank=True, null=True)
 
@@ -71,6 +72,7 @@ class StaffRegisteration(models.Model):
     secondary_school = models.ForeignKey(SecondarySchool, on_delete=models.CASCADE, null=True, blank=True)
     credits = models.FloatField(default=0.0)
     created_at = models.DateTimeField(auto_now_add=True, null=True, blank=True)
+    platform_type = models.CharField(max_length=10, choices=[('ios', 'iOS'), ('android', 'Android'), ('web', 'Web')], null=True, blank=True)
     android_version = models.CharField(max_length=20, blank=True, null=True)
     ios_version = models.CharField(max_length=20, blank=True, null=True)
 
@@ -127,6 +129,7 @@ class SecondaryStudent(models.Model):
     school = models.ForeignKey(SecondarySchool, on_delete=models.CASCADE, related_name='student', null=True, blank=True)
     credits = models.FloatField(default=0.0)
     created_at = models.DateTimeField(auto_now_add=True, null=True, blank=True)
+    platform_type = models.CharField(max_length=10, choices=[('ios', 'iOS'), ('android', 'Android'), ('web', 'Web')], null=True, blank=True)
     android_version = models.CharField(max_length=20, blank=True, null=True)
     ios_version = models.CharField(max_length=20, blank=True, null=True)
 
@@ -146,13 +149,16 @@ class SecondaryStudent(models.Model):
 class PrimaryStudentsRegister(models.Model):
     first_name = models.CharField(max_length=30)
     last_name = models.CharField(max_length=30)
-    username = models.CharField(max_length=60, blank=True, null=True) 
+    username = models.CharField(max_length=60, blank=True, null=True)
     class_year = models.CharField(max_length=30)
     school = models.ForeignKey(PrimarySchool, on_delete=models.CASCADE, related_name='student')
     teacher = models.ForeignKey(Teacher, on_delete=models.CASCADE, related_name='student_teacher', null=True, blank=True)
     allergies = models.ManyToManyField(Allergens, blank=True)
     parent = models.ForeignKey(ParentRegisteration, on_delete=models.CASCADE, related_name='student_parent', null=True, blank=True)
     staff = models.ForeignKey(StaffRegisteration, on_delete=models.CASCADE, related_name='student_staff', null=True, blank=True)
+    platform_type = models.CharField(max_length=10, choices=[('ios', 'iOS'), ('android', 'Android'), ('web', 'Web')], null=True, blank=True)
+    android_version = models.CharField(max_length=20, blank=True, null=True)
+    ios_version = models.CharField(max_length=20, blank=True, null=True)
 
     def __str__(self):
         return f"{self.first_name} - {self.id}"

@@ -42,3 +42,23 @@ backups/
 .idea/
 *.swp
 .DS_Store
+
+# Documentation and Summary files
+PROFESSIONAL_PDF_SUMMARY.md
+MANAGER_ORDERS_UPDATE.md
+test_professional_pdf.md
+test_api_examples.md
+CRON_JOBS_SETUP.md
+
+# Dummy data command files
+admin_section/management/commands/create_week3_dummy_data.py
+admin_section/management/commands/create_secondary_dummy_data.py
+admin_section/management/commands/create_week3_secondary_dummy_data.py
+admin_section/management/commands/create_manager_dummy_orders.py
+admin_section/management/commands/populate_platform_data.py
+
+# Generated menu files (Excel workbooks)
+menu_files/
+*.xlsx
+*.xls
+*.zip

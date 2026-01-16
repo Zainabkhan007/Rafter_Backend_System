@@ -156,7 +156,13 @@ REST_FRAMEWORK = {
     ],
 }
 CRONJOBS = [
+    # Auto-complete orders every day at 9 PM (21:00)
     ('00 21 * * *', 'admin_section.cron.auto_complete_orders'),
+
+    # Deactivate menu cycles every Friday at 9 AM
+    # Cron format: minute hour day month day-of-week
+    # 5 = Friday (0 = Sunday, 1 = Monday, ..., 5 = Friday, 6 = Saturday)
+    ('00 09 * * 5', 'admin_section.cron.deactivate_menu_cycles'),
 ]
 
 

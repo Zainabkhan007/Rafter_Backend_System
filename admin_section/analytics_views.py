@@ -507,7 +507,10 @@ def generate_school_report(request, school_id):
         # Auto-detect weekly report
         # Priority 1: Explicit week_number and year from request
         # Priority 2: date_range preset is "this_week" or "last_week"
-        # Priority 3: DEFAULT - use current week if no specific date range given
+        # Priority 3: Custom date range (start_date/end_date) - calculate week from date range
+        # Priority 4: DEFAULT - use current week if no specific date range given
+        use_old_generator = False
+
         if not week_number:
             if date_range_preset in ['this_week', 'last_week']:
                 # Use preset
@@ -519,13 +522,33 @@ def generate_school_report(request, school_id):
 
                 year = target_date.year
                 week_number = target_date.isocalendar()[1]
-            elif not date_range_preset and not start_date and not end_date:
+            elif start_date and end_date:
+                # Custom date range provided - check if it's too long for weekly report
+                try:
+                    from datetime import datetime as dt
+                    start_dt = dt.strptime(start_date, '%Y-%m-%d')
+                    end_dt = dt.strptime(end_date, '%Y-%m-%d')
+                    date_diff = (end_dt - start_dt).days
+
+                    # If date range is more than 60 days, use old generator for multi-week analysis
+                    if date_diff > 60:
+                        use_old_generator = True
+                    else:
+                        # Use the end date to determine the week (most recent week in range)
+                        year = end_dt.year
+                        week_number = end_dt.isocalendar()[1]
+                except (ValueError, TypeError):
+                    # If date parsing fails, use current week
+                    today = datetime.now()
+                    year = today.year
+                    week_number = today.isocalendar()[1]
+            else:
                 # DEFAULT: No parameters provided, use current week
                 today = datetime.now()
                 year = today.year
                 week_number = today.isocalendar()[1]
 
-        if week_number and year:
+        if week_number and year and not use_old_generator:
             # Use new professional PDF generator for weekly reports
             from .professional_pdf_generator import ProfessionalPDFGenerator
             generator = ProfessionalPDFGenerator(

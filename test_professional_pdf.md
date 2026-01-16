@@ -44,7 +44,7 @@ A completely redesigned PDF report generator with professional styling, brand co
 
 **URL:** `POST /admin_details/dashboard/school/{school_id}/generate-report/`
 
-**⚡ IMPORTANT: Empty requests now generate professional PDF for current week!**
+**⚡ IMPORTANT: Professional PDF is now the DEFAULT for all requests!**
 
 **Request Body Options:**
 
@@ -74,6 +74,18 @@ or
   "date_range": "last_week"
 }
 ```
+
+**4. Custom Date Range (NEW - Auto-detects Week):**
+```json
+{
+  "start_date": "2025-12-17",
+  "end_date": "2026-01-14",
+  "include_detailed_lists": true
+}
+```
+**Result:** Professional PDF using the week number from the end date!
+- Date ranges ≤60 days automatically use professional PDF
+- Date ranges >60 days use old flexible generator for multi-week analysis
 
 **Example using cURL:**
 ```bash

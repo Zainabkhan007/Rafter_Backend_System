@@ -11,3 +11,12 @@ def auto_complete_orders():
     This function is called by the cron job defined in settings.py
     """
     call_command('auto_complete_orders')
+
+
+def deactivate_menu_cycles():
+    """
+    Deactivate all active menu cycles every Friday at 9 AM.
+    This ensures menus are reset weekly and admins activate new cycles.
+    This function is called by the cron job defined in settings.py
+    """
+    call_command('deactivate_menu_cycles')

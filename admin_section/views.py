@@ -4126,38 +4126,23 @@ def fetch_manager_orders(target_day=None):
     )
 
 
-@api_view(['GET']) 
+@api_view(['GET'])
 def download_manager_orders(request):
     try:
         day_filter = request.GET.get('day')
-        zip_buffer = BytesIO()
-        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
 
-            days_to_process = [day_filter] if day_filter else WEEK_DAYS
-
-            for day in days_to_process:
-                workbook = generate_manager_workbook(day)
-                
-                day_part = day if day else 'weekly'
-                filename = f"manager_orders_{day_part}.xlsx"
-
-                with BytesIO() as excel_buffer:
-                    workbook.save(excel_buffer)
-                    excel_buffer.seek(0)
-                    zip_file.writestr(filename, excel_buffer.getvalue())
-
-        zip_buffer.seek(0)
+        # Generate ONE workbook with all days as separate sheets
+        workbook = generate_combined_manager_workbook(day_filter)
 
         # Save to disk and return download link
         menu_files_directory = settings.MENU_FILES_ROOT
         os.makedirs(menu_files_directory, exist_ok=True)
 
         day_part = day_filter if day_filter else 'weekly'
-        filename = f"manager_orders_{day_part}.zip"
+        filename = f"manager_orders_{day_part}.xlsx"
         file_path = os.path.join(menu_files_directory, filename)
-        
-        with open(file_path, 'wb') as f:
-            f.write(zip_buffer.getvalue())
+
+        workbook.save(file_path)
 
         return Response({
             'message': 'Manager orders file generated successfully!',
@@ -4285,6 +4270,114 @@ def generate_manager_workbook(target_day):
     apply_data_styling(total_sheet, 3)
 
     return workbook
+
+
+def generate_combined_manager_workbook(day_filter=None):
+    """
+    Generate ONE Excel workbook with each day as a separate sheet
+    Instead of separate Excel files in a zip
+    """
+    workbook = Workbook()
+    workbook.remove(workbook.active)
+
+    # Styles (same as generate_manager_workbook)
+    header_font = Font(bold=True, size=12, color="FFFFFF")
+    header_fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
+    title_font = Font(bold=True, size=14, color="000000")
+    title_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
+    border = Border(left=Side(style="thin"), right=Side(style="thin"), top=Side(style="thin"), bottom=Side(style="thin"))
+    center_align = Alignment(horizontal="center", vertical="center")
+    left_align = Alignment(horizontal="left", vertical="center")
+
+    def apply_header_styling(sheet, title_text, columns):
+        sheet.merge_cells(start_row=1, end_row=1, start_column=1, end_column=len(columns))
+        title_cell = sheet.cell(row=1, column=1, value=title_text)
+        title_cell.font = title_font
+        title_cell.fill = title_fill
+        title_cell.alignment = center_align
+
+        for col_num, column_title in enumerate(columns, 1):
+            cell = sheet.cell(row=2, column=col_num, value=column_title)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.border = border
+            cell.alignment = center_align
+            sheet.column_dimensions[get_column_letter(col_num)].width = 20
+
+    def apply_data_styling(sheet, start_row):
+        for row in sheet.iter_rows(min_row=start_row):
+            for cell in row:
+                cell.border = border
+                cell.alignment = left_align if cell.column in [1, 2, 4] else center_align
+
+    # Process each day
+    days_to_process = [day_filter] if day_filter else WEEK_DAYS
+
+    for day in days_to_process:
+        # Fetch manager orders for this day
+        manager_orders = fetch_manager_orders(target_day=day)
+
+        # Group orders by school for this day
+        orders_by_school = defaultdict(list)
+        day_totals = []
+
+        for order in manager_orders.prefetch_related('items', 'manager'):
+            school = None
+            school_name = "Unknown School"
+
+            # Determine school
+            if hasattr(order.manager, 'primary_school') and order.manager.primary_school:
+                school = order.manager.primary_school
+                school_name = school.school_name
+            elif hasattr(order.manager, 'secondary_school') and order.manager.secondary_school:
+                school = order.manager.secondary_school
+                school_name = school.secondary_school_name
+
+            # Process order items
+            for item in order.items.all():
+                order_data = {
+                    'manager_name': order.manager.username,
+                    'item_name': item.item,
+                    'quantity': item.quantity,
+                    'remarks': item.remarks or "",
+                    'production_price': float(item.production_price or 0),
+                    'total_price': float(item.quantity) * float(item.production_price or 0),
+                    'order_id': order.id,
+                    'school_name': school_name
+                }
+                orders_by_school[school_name].append(order_data)
+                day_totals.append(order_data)
+
+        # Create a sheet for this day with all schools combined
+        sheet_name = f"{day}"[:31]  # Excel sheet name limit
+        sheet = workbook.create_sheet(title=sheet_name)
+
+        # Title and headers
+        title = f"Manager Orders - {day}"
+        columns = ["School", "Manager", "Item", "Quantity", "Remarks", "Production Price", "Total Price"]
+        apply_header_styling(sheet, title, columns)
+
+        row_num = 3
+        if not day_totals:
+            sheet.cell(row=3, column=1, value="No manager orders for this day")
+            sheet.merge_cells(start_row=3, end_row=3, start_column=1, end_column=7)
+        else:
+            # Add all orders for this day
+            for order_data in day_totals:
+                sheet.cell(row=row_num, column=1, value=order_data['school_name'])
+                sheet.cell(row=row_num, column=2, value=order_data['manager_name'])
+                sheet.cell(row=row_num, column=3, value=order_data['item_name'])
+                sheet.cell(row=row_num, column=4, value=order_data['quantity'])
+                sheet.cell(row=row_num, column=5, value=order_data['remarks'])
+                sheet.cell(row=row_num, column=6, value=order_data['production_price'])
+                sheet.cell(row=row_num, column=7, value=order_data['total_price'])
+                row_num += 1
+
+        apply_data_styling(sheet, 3)
+
+    return workbook
+
+
 @api_view(["GET"])
 def get_user_count(request):
     try:

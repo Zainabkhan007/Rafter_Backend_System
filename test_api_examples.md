@@ -8,7 +8,8 @@ The API endpoint `POST /admin_details/dashboard/school/13/generate-report/` now 
 2. **date_range: "this_week"** - Uses current week
 3. **date_range: "last_week"** - Uses previous week
 4. **Explicit week_number + year** - Uses specified week
-5. **Custom date range** - Falls back to old flexible PDF
+5. **Custom date range (≤60 days)** - **NEW!** Uses professional PDF with week from end date
+6. **Custom date range (>60 days)** - Falls back to old flexible PDF for multi-week analysis
 
 ## Test Cases
 
@@ -65,19 +66,36 @@ curl -X POST http://127.0.0.1:8000/admin_details/dashboard/school/13/generate-re
 
 ---
 
-### 5. Custom Date Range (Old PDF)
-For custom date ranges that don't fit a single week, the old flexible PDF is used:
+### 5. Custom Date Range - Short (NEW - Professional PDF)
+For custom date ranges ≤60 days, the professional PDF is automatically used:
+
+```bash
+curl -X POST http://127.0.0.1:8000/admin_details/dashboard/school/13/generate-report/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "start_date": "2025-12-17",
+    "end_date": "2026-01-14",
+    "include_detailed_lists": true
+  }'
+```
+
+**Result:** Professional PDF for Week 3, 2026 (using end date to determine week)
+
+---
+
+### 6. Custom Date Range - Long (Old PDF)
+For custom date ranges >60 days, the old flexible PDF is used for multi-week analysis:
 
 ```bash
 curl -X POST http://127.0.0.1:8000/admin_details/dashboard/school/13/generate-report/ \
   -H "Content-Type: application/json" \
   -d '{
     "start_date": "2026-01-01",
-    "end_date": "2026-01-31"
+    "end_date": "2026-03-31"
   }'
 ```
 
-**Result:** Old flexible date range PDF (for multi-week analysis)
+**Result:** Old flexible date range PDF (for multi-week analysis spanning 90 days)
 
 ---
 

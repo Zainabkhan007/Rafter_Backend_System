@@ -93,11 +93,18 @@ curl -X POST http://127.0.0.1:8000/admin_details/dashboard/school/13/generate-re
 ```
 **Result:** Professional PDF for Week 3, 2026
 
-#### Scenario 5: Custom Date Range (Old PDF)
+#### Scenario 5: Custom Date Range - Short (NEW!)
 ```json
-{"start_date": "2026-01-01", "end_date": "2026-01-31"}
+{"start_date": "2025-12-17", "end_date": "2026-01-14", "include_detailed_lists": true}
 ```
-**Result:** Old flexible PDF (for multi-week/custom analysis)
+**Result:** ✨ Professional PDF for Week 3, 2026 (using end date)
+- **NEW FEATURE:** Date ranges ≤60 days automatically use professional PDF!
+
+#### Scenario 6: Custom Date Range - Long (Old PDF)
+```json
+{"start_date": "2026-01-01", "end_date": "2026-03-31"}
+```
+**Result:** Old flexible PDF (for multi-week analysis >60 days)
 
 ## 🎨 Brand Colors Used
 
