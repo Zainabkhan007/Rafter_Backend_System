@@ -1427,19 +1427,21 @@ class ProfessionalPDFGenerator:
         revenue_change_class = 'positive' if data['revenue_change'] >= 0 else 'negative'
         revenue_arrow = '↑' if data['revenue_change'] >= 0 else '↓'
 
-        # Get Stripe revenue by user type for the table
+        # Get Stripe revenue by user type for the table (only positive amounts)
         orders = data['orders']
         from .models import Transaction
         student_stripe = Transaction.objects.filter(
             order__in=orders.filter(user_type='student'),
             payment_method='stripe',
-            transaction_type='payment'
+            transaction_type='payment',
+            amount__gte=0  # Only positive amounts
         ).aggregate(Sum('amount'))['amount__sum'] or 0
 
         staff_stripe = Transaction.objects.filter(
             order__in=orders.filter(user_type='staff'),
             payment_method='stripe',
-            transaction_type='payment'
+            transaction_type='payment',
+            amount__gte=0  # Only positive amounts
         ).aggregate(Sum('amount'))['amount__sum'] or 0
 
         student_orders = orders.filter(user_type='student').count()
@@ -1672,18 +1674,20 @@ class ProfessionalPDFGenerator:
             staff_count = self.safe_int(staff_stats['count'])
             total_orders = student_count + staff_count
 
-            # Get Stripe revenue
+            # Get Stripe revenue (only positive amounts)
             from .models import Transaction
             student_stripe = Transaction.objects.filter(
                 order__in=orders.filter(user_type='student'),
                 payment_method='stripe',
-                transaction_type='payment'
+                transaction_type='payment',
+                amount__gte=0  # Only positive amounts
             ).aggregate(Sum('amount'))['amount__sum'] or 0
 
             staff_stripe = Transaction.objects.filter(
                 order__in=orders.filter(user_type='staff'),
                 payment_method='stripe',
-                transaction_type='payment'
+                transaction_type='payment',
+                amount__gte=0  # Only positive amounts
             ).aggregate(Sum('amount'))['amount__sum'] or 0
 
             total_stripe = self.safe_float(student_stripe) + self.safe_float(staff_stripe)
@@ -2716,7 +2720,8 @@ class ProfessionalPDFGenerator:
         week_n_plus_1_transactions = Transaction.objects.filter(
             order__in=week_n_plus_1_orders,
             payment_method='stripe',
-            transaction_type='payment'
+            transaction_type='payment',
+            amount__gte=0  # Only positive amounts
         )
         week_n_plus_1_revenue = self.safe_float(week_n_plus_1_transactions.aggregate(Sum('amount'))['amount__sum'])
 
