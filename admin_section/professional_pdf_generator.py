@@ -3099,14 +3099,30 @@ class ProfessionalPDFGenerator:
         if not data:
             return None
 
-        fig, ax = plt.subplots(figsize=(8, 4))  # Wider for horizontal bars
+        # Validate and sanitize data to prevent matplotlib errors
+        valid_data = []
+        for item in data:
+            label = str(item.get('label', 'Unknown'))
+            value = self.safe_float(item.get('value', 0))
+            # Ensure value is not NaN, infinite, or excessively large
+            if value is not None and not math.isnan(value) and not math.isinf(value) and abs(value) < 1000000000:
+                valid_data.append({'label': label, 'value': max(0, value)})  # Ensure non-negative
+
+        if not valid_data:
+            return None
+
+        # Calculate appropriate figure height based on number of items
+        num_items = len(valid_data)
+        fig_height = max(3, min(num_items * 0.8, 10))  # Between 3 and 10 inches
+
+        fig, ax = plt.subplots(figsize=(8, fig_height))  # Wider for horizontal bars
 
         # Set background to pale mint for modern look
         fig.patch.set_facecolor(self.COLORS['pale_mint'])
         ax.set_facecolor(self.COLORS['pale_mint'])
 
-        labels = [item['label'] for item in data]
-        values = [item['value'] for item in data]
+        labels = [item['label'] for item in valid_data]
+        values = [item['value'] for item in valid_data]
 
         bar_color = color or self.COLORS['sage_green']
         y_pos = range(len(labels))
@@ -3116,11 +3132,12 @@ class ProfessionalPDFGenerator:
                       edgecolor=self.COLORS['dark_forest'], linewidth=0.5)
 
         # Add value labels at end of bars
-        if show_values:
+        max_value = max(values) if values else 1
+        if show_values and max_value > 0:
             for i, (bar, val) in enumerate(zip(bars, values)):
                 width = bar.get_width()
                 label_text = f'{int(val)}' if isinstance(val, (int, float)) and val == int(val) else f'€{val:,.2f}'
-                ax.text(width + max(values) * 0.02, bar.get_y() + bar.get_height()/2,
+                ax.text(width + max_value * 0.02, bar.get_y() + bar.get_height()/2,
                        label_text, ha='left', va='center', fontsize=10, fontweight='bold',
                        color=self.COLORS['dark_forest'])
 
@@ -3135,7 +3152,7 @@ class ProfessionalPDFGenerator:
         ax.tick_params(labelsize=9, colors=self.COLORS['dark_forest'])
 
         # Add some padding to x-axis for value labels
-        ax.set_xlim(0, max(values) * 1.15 if values else 1)
+        ax.set_xlim(0, max_value * 1.15 if max_value > 0 else 1)
 
         plt.tight_layout()
 

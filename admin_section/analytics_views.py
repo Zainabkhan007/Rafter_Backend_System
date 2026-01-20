@@ -235,20 +235,69 @@ def get_school_summary(request, school_id):
 
         orders_data = []
         for order in all_orders:
-            # Get child name - simpler structure like old modal
+            # Get child name - handle all relationship types
             child_name = None
             parent_staff_name = None
 
-            if order.primary_student:
-                child_name = f"{order.primary_student.first_name} {order.primary_student.last_name}"
-                # Get parent name if exists
-                if order.primary_student.parent:
-                    parent_staff_name = f"{order.primary_student.parent.first_name} {order.primary_student.parent.last_name}"
-            elif order.student:
-                child_name = f"{order.student.first_name} {order.student.last_name}"
-            elif order.staff:
-                child_name = f"{order.staff.first_name} {order.staff.last_name}"
-                parent_staff_name = "Staff Member"
+            # Primary school logic
+            if school_type == 'primary':
+                # Check primary_student ForeignKey first
+                if order.primary_student:
+                    child_name = f"{order.primary_student.first_name} {order.primary_student.last_name}"
+                    # Get parent name if exists
+                    if order.primary_student.parent:
+                        parent_staff_name = f"{order.primary_student.parent.first_name} {order.primary_student.parent.last_name}"
+                # If no primary_student FK, check child_id (for parent orders)
+                elif order.child_id:
+                    try:
+                        from .models import PrimaryStudentsRegister, ParentRegisteration
+                        child = PrimaryStudentsRegister.objects.get(id=order.child_id)
+                        child_name = f"{child.first_name} {child.last_name}"
+                        # Get parent name from user_id if user_type is parent
+                        if order.user_type == 'parent' and order.user_id:
+                            try:
+                                parent = ParentRegisteration.objects.get(id=order.user_id)
+                                parent_staff_name = f"{parent.first_name} {parent.last_name}"
+                            except ParentRegisteration.DoesNotExist:
+                                pass
+                    except:
+                        pass
+                # Check if it's a staff order
+                elif order.staff:
+                    child_name = f"{order.staff.first_name} {order.staff.last_name}"
+                    parent_staff_name = "Staff Member"
+                # Fallback: check user_type and user_id
+                elif order.user_type == 'staff' and order.user_id:
+                    try:
+                        from .models import StaffRegisteration
+                        staff = StaffRegisteration.objects.get(id=order.user_id)
+                        child_name = f"{staff.first_name} {staff.last_name}"
+                        parent_staff_name = "Staff Member"
+                    except:
+                        pass
+            # Secondary school logic
+            else:
+                if order.student:
+                    child_name = f"{order.student.first_name} {order.student.last_name}"
+                elif order.staff:
+                    child_name = f"{order.staff.first_name} {order.staff.last_name}"
+                    parent_staff_name = "Staff Member"
+                # Fallback: check user_id
+                elif order.user_type == 'student' and order.user_id:
+                    try:
+                        from .models import SecondaryStudent
+                        student = SecondaryStudent.objects.get(id=order.user_id)
+                        child_name = f"{student.first_name} {student.last_name}"
+                    except:
+                        pass
+                elif order.user_type == 'staff' and order.user_id:
+                    try:
+                        from .models import StaffRegisteration
+                        staff = StaffRegisteration.objects.get(id=order.user_id)
+                        child_name = f"{staff.first_name} {staff.last_name}"
+                        parent_staff_name = "Staff Member"
+                    except:
+                        pass
 
             # Build order data
             order_dict = {
