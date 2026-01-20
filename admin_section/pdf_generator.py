@@ -1635,7 +1635,7 @@ class SchoolReportGenerator:
                                 <th>User ID</th>
                                 <th>Name</th>
                                 <th>Weeks Missed</th>
-                                <th>Last Order</th>
+                                <th>Last Collection</th>
                                 <th>Order ID</th>
                                 <th>Weeks Since Last Order</th>
                             </tr>
