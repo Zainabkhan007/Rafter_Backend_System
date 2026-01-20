@@ -192,11 +192,12 @@ class ProfessionalPDFGenerator:
         # Calculate metrics
         total_orders = orders.count()
 
-        # Revenue calculation: ONLY count Stripe payments from Transaction model
+        # Revenue calculation: ONLY count Stripe payments from Transaction model (positive amounts only)
         stripe_transactions = Transaction.objects.filter(
             order__in=orders,
             payment_method='stripe',
-            transaction_type='payment'
+            transaction_type='payment',
+            amount__gte=0  # Only positive amounts
         )
         total_revenue = self.safe_float(stripe_transactions.aggregate(Sum('amount'))['amount__sum'])
         avg_order_value = self.safe_float(total_revenue / total_orders) if total_orders > 0 else 0
@@ -205,7 +206,8 @@ class ProfessionalPDFGenerator:
         prev_stripe_transactions = Transaction.objects.filter(
             order__in=prev_orders,
             payment_method='stripe',
-            transaction_type='payment'
+            transaction_type='payment',
+            amount__gte=0  # Only positive amounts
         )
         prev_total_revenue = self.safe_float(prev_stripe_transactions.aggregate(Sum('amount'))['amount__sum'])
 
@@ -214,7 +216,8 @@ class ProfessionalPDFGenerator:
         week_n2_stripe_transactions = Transaction.objects.filter(
             order__in=week_n2_orders,
             payment_method='stripe',
-            transaction_type='payment'
+            transaction_type='payment',
+            amount__gte=0  # Only positive amounts
         )
         week_n2_total_revenue = self.safe_float(week_n2_stripe_transactions.aggregate(Sum('amount'))['amount__sum'])
 
@@ -598,7 +601,8 @@ class ProfessionalPDFGenerator:
                 stripe_transactions = Transaction.objects.filter(
                     order__in=day_orders,
                     payment_method='stripe',
-                    transaction_type='payment'
+                    transaction_type='payment',
+                    amount__gte=0  # Only positive amounts
                 )
                 day_revenue = self.safe_float(stripe_transactions.aggregate(Sum('amount'))['amount__sum'])
 
@@ -706,23 +710,34 @@ class ProfessionalPDFGenerator:
             all_users = list(students) + list(staff)
 
         # Count platforms and versions
+        # Check both platform_type AND ios_version/android_version fields
+        # Production data may have version fields set without platform_type
         for user in all_users:
+            ios_version = getattr(user, 'ios_version', None)
+            android_version = getattr(user, 'android_version', None)
             platform = getattr(user, 'platform_type', None)
-            if platform:
-                platform_stats[platform] += 1
-                platform_stats['total'] += 1
+
+            # Determine platform: Check version fields first (more reliable), then platform_type
+            detected_platform = None
+            if ios_version and ios_version.strip():  # Has iOS version
+                detected_platform = 'ios'
+            elif android_version and android_version.strip():  # Has Android version
+                detected_platform = 'android'
+            elif platform:  # Fallback to platform_type field
+                detected_platform = platform
+
+            if detected_platform:
+                if detected_platform in platform_stats:
+                    platform_stats[detected_platform] += 1
+                    platform_stats['total'] += 1
 
                 # Track versions
-                if platform == 'ios':
-                    ios_version = getattr(user, 'ios_version', None)
-                    if ios_version:
-                        platform_stats['versions']['ios'][ios_version] = \
-                            platform_stats['versions']['ios'].get(ios_version, 0) + 1
-                elif platform == 'android':
-                    android_version = getattr(user, 'android_version', None)
-                    if android_version:
-                        platform_stats['versions']['android'][android_version] = \
-                            platform_stats['versions']['android'].get(android_version, 0) + 1
+                if detected_platform == 'ios' and ios_version and ios_version.strip():
+                    platform_stats['versions']['ios'][ios_version] = \
+                        platform_stats['versions']['ios'].get(ios_version, 0) + 1
+                elif detected_platform == 'android' and android_version and android_version.strip():
+                    platform_stats['versions']['android'][android_version] = \
+                        platform_stats['versions']['android'].get(android_version, 0) + 1
 
         # Calculate percentages
         if platform_stats['total'] > 0:
