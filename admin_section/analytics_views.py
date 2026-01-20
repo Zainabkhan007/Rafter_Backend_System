@@ -105,9 +105,10 @@ def get_school_summary(request, school_id):
             current_week_stats['total_orders']
         )
 
-        # Get all-time stats
+        # Get all-time stats (exclude negative prices - likely refunds or errors)
         all_time_stats = Order.objects.filter(
-            **{f'{school_type}_school_id': school_id}
+            **{f'{school_type}_school_id': school_id},
+            total_price__gte=0  # Only count positive prices
         ).aggregate(
             total_orders=Count('id'),
             total_revenue=Sum('total_price')
@@ -121,20 +122,41 @@ def get_school_summary(request, school_id):
                 parent__isnull=False
             ).count()
 
-            # Students who ordered in last 30 days
-            actively_ordering = Order.objects.filter(
+            # Students who ordered in current week - check both primary_student FK and child_id
+            orders_current_week = Order.objects.filter(
                 primary_school_id=school_id,
-                created_at__gte=now - timedelta(days=30)
-            ).values('primary_student_id').distinct().count()
+                week_number=current_week,
+                year=current_year
+            )
+
+            # Collect unique child IDs from both primary_student and child_id fields
+            active_children_ids = set()
+
+            # Get IDs from primary_student ForeignKey
+            primary_student_ids = orders_current_week.exclude(
+                primary_student_id__isnull=True
+            ).values_list('primary_student_id', flat=True).distinct()
+            active_children_ids.update(primary_student_ids)
+
+            # Get IDs from child_id field (used by parent orders)
+            child_ids = orders_current_week.exclude(
+                child_id__isnull=True
+            ).values_list('child_id', flat=True).distinct()
+            active_children_ids.update(child_ids)
+
+            actively_ordering = len(active_children_ids)
 
         else:
             total_registered = SecondaryStudent.objects.filter(school_id=school_id).count()
             children_count = total_registered
 
+            # Students who ordered in current week - use user_id where user_type='student'
             actively_ordering = Order.objects.filter(
                 secondary_school_id=school_id,
-                created_at__gte=now - timedelta(days=30)
-            ).values('student_id').distinct().count()
+                week_number=current_week,
+                year=current_year,
+                user_type='student'
+            ).values('user_id').distinct().count()
 
         active_percentage = round((actively_ordering / total_registered * 100) if total_registered > 0 else 0, 1)
         inactive_count = total_registered - actively_ordering
@@ -156,28 +178,28 @@ def get_school_summary(request, school_id):
             total_quantity=Sum('quantity')
         ).order_by('-total_quantity').first()
 
-        # Platform overview (iOS vs Android)
+        # Platform overview (iOS vs Android) - exclude NULL and empty strings
         if school_type == 'primary':
             ios_count = ParentRegisteration.objects.filter(
                 student_parent__school_id=school_id,
                 ios_version__isnull=False
-            ).distinct().count()
+            ).exclude(ios_version='').distinct().count()
 
             android_count = ParentRegisteration.objects.filter(
                 student_parent__school_id=school_id,
                 android_version__isnull=False
-            ).distinct().count()
+            ).exclude(android_version='').distinct().count()
 
             # Also count staff
             ios_staff = StaffRegisteration.objects.filter(
                 primary_school_id=school_id,
                 ios_version__isnull=False
-            ).count()
+            ).exclude(ios_version='').count()
 
             android_staff = StaffRegisteration.objects.filter(
                 primary_school_id=school_id,
                 android_version__isnull=False
-            ).count()
+            ).exclude(android_version='').count()
 
             ios_count += ios_staff
             android_count += android_staff
@@ -186,12 +208,26 @@ def get_school_summary(request, school_id):
             ios_count = SecondaryStudent.objects.filter(
                 school_id=school_id,
                 ios_version__isnull=False
-            ).count()
+            ).exclude(ios_version='').count()
 
             android_count = SecondaryStudent.objects.filter(
                 school_id=school_id,
                 android_version__isnull=False
-            ).count()
+            ).exclude(android_version='').count()
+
+            # Also count staff for secondary schools
+            ios_staff = StaffRegisteration.objects.filter(
+                secondary_school_id=school_id,
+                ios_version__isnull=False
+            ).exclude(ios_version='').count()
+
+            android_staff = StaffRegisteration.objects.filter(
+                secondary_school_id=school_id,
+                android_version__isnull=False
+            ).exclude(android_version='').count()
+
+            ios_count += ios_staff
+            android_count += android_staff
 
         total_app_users = ios_count + android_count
         ios_percentage = round((ios_count / total_app_users * 100) if total_app_users > 0 else 0, 1)
