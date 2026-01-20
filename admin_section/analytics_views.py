@@ -504,58 +504,57 @@ def generate_school_report(request, school_id):
         week_number = request.data.get('week_number')
         year = request.data.get('year')
 
-        # Auto-detect weekly report
+        # ALWAYS use ProfessionalPDFGenerator for consistent PDF format
+        # Auto-detect week from date range preset or custom dates
         # Priority 1: Explicit week_number and year from request
-        # Priority 2: date_range preset is "this_week" or "last_week"
-        # Priority 3: Custom date range (start_date/end_date) - calculate week from date range
-        # Priority 4: DEFAULT - use current week if no specific date range given
-        use_old_generator = False
+        # Priority 2: Calculate week from date_range_preset
+        # Priority 3: Custom date range - use end date's week
+        # Priority 4: DEFAULT - use current week
 
         if not week_number:
-            if date_range_preset in ['this_week', 'last_week']:
-                # Use preset
-                today = datetime.now()
-                if date_range_preset == 'this_week':
-                    target_date = today
-                else:  # last_week
-                    target_date = today - timedelta(weeks=1)
+            today = datetime.now()
 
-                year = target_date.year
-                week_number = target_date.isocalendar()[1]
+            if date_range_preset == 'this_week':
+                target_date = today
+            elif date_range_preset == 'last_week':
+                target_date = today - timedelta(weeks=1)
+            elif date_range_preset == 'last_4_weeks':
+                # Use most recent complete week (last week)
+                target_date = today - timedelta(weeks=1)
+            elif date_range_preset == 'this_month':
+                target_date = today
+            elif date_range_preset == 'last_month':
+                # Use middle of last month to get a week from last month
+                first_of_this_month = today.replace(day=1)
+                target_date = first_of_this_month - timedelta(days=15)
+            elif date_range_preset == 'last_3_months':
+                # Use most recent complete week
+                target_date = today - timedelta(weeks=1)
             elif start_date and end_date:
-                # Custom date range provided - check if it's too long for weekly report
+                # Custom date range - use end date's week
                 try:
                     from datetime import datetime as dt
-                    start_dt = dt.strptime(start_date, '%Y-%m-%d')
                     end_dt = dt.strptime(end_date, '%Y-%m-%d')
-                    date_diff = (end_dt - start_dt).days
-
-                    # If date range is more than 60 days, use old generator for multi-week analysis
-                    if date_diff > 60:
-                        use_old_generator = True
-                    else:
-                        # Use the end date to determine the week (most recent week in range)
-                        year = end_dt.year
-                        week_number = end_dt.isocalendar()[1]
+                    target_date = end_dt
                 except (ValueError, TypeError):
-                    # If date parsing fails, use current week
-                    today = datetime.now()
-                    year = today.year
-                    week_number = today.isocalendar()[1]
+                    target_date = today
             else:
                 # DEFAULT: No parameters provided, use current week
-                today = datetime.now()
-                year = today.year
-                week_number = today.isocalendar()[1]
+                target_date = today
 
-        if week_number and year and not use_old_generator:
+            year = target_date.year
+            week_number = target_date.isocalendar()[1]
+
+        # Always use ProfessionalPDFGenerator for consistent PDF format
+        if week_number and year:
             # Use new professional PDF generator for weekly reports
             from .professional_pdf_generator import ProfessionalPDFGenerator
             generator = ProfessionalPDFGenerator(
                 school=school,
                 week_number=int(week_number),
                 year=int(year),
-                school_type=school_type
+                school_type=school_type,
+                filters=filters  # Pass filters to the generator
             )
             pdf_buffer = generator.generate()
 
@@ -572,10 +571,32 @@ def generate_school_report(request, school_id):
             with open(pdf_path, 'wb') as f:
                 f.write(pdf_buffer.getvalue())
         else:
-            # Use old flexible date range generator
-            from .pdf_generator import SchoolReportGenerator
-            generator = SchoolReportGenerator(school, school_type, filters)
-            pdf_path = generator.generate()
+            # Fallback: This should never happen now since we always calculate week_number
+            # But keep as safety net - use current week
+            today = datetime.now()
+            week_number = today.isocalendar()[1]
+            year = today.year
+
+            from .professional_pdf_generator import ProfessionalPDFGenerator
+            generator = ProfessionalPDFGenerator(
+                school=school,
+                week_number=int(week_number),
+                year=int(year),
+                school_type=school_type
+            )
+            pdf_buffer = generator.generate()
+
+            import os
+            from django.conf import settings
+            reports_dir = os.path.join(settings.MEDIA_ROOT, 'reports')
+            os.makedirs(reports_dir, exist_ok=True)
+
+            school_name = school.school_name if school_type == 'primary' else school.secondary_school_name
+            filename = f"{school_name.replace(' ', '_')}_Week{week_number}_{year}_Report.pdf"
+            pdf_path = os.path.join(reports_dir, filename)
+
+            with open(pdf_path, 'wb') as f:
+                f.write(pdf_buffer.getvalue())
 
         # Get file info
         file_size = os.path.getsize(pdf_path)
@@ -613,3 +634,158 @@ def generate_school_report(request, school_id):
             'status': 'error',
             'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ============================================================================
+# PDF PREVIEW - Web preview for CSS/Design iteration
+# ============================================================================
+
+from django.http import HttpResponse
+from django.views.decorators.csrf import csrf_exempt
+
+
+@csrf_exempt
+def preview_school_report(request):
+    """
+    Web preview for PDF report - renders HTML for easy CSS iteration
+
+    GET Parameters:
+    - school_id: ID of the school (required)
+    - school_type: 'primary' or 'secondary' (optional, auto-detected if not provided)
+    - week_number: Week number (optional, defaults to current week)
+    - year: Year (optional, defaults to current year)
+
+    Example: /admin_details/dashboard/preview-report/?school_id=1&week_number=3&year=2026
+    """
+    try:
+        # Get parameters
+        school_id = request.GET.get('school_id')
+        school_type = request.GET.get('school_type')
+        week_number = request.GET.get('week_number')
+        year = request.GET.get('year')
+
+        if not school_id:
+            return HttpResponse("""
+            <html>
+            <head>
+                <title>PDF Preview - Select Parameters</title>
+                <style>
+                    body { font-family: Arial, sans-serif; padding: 40px; background: #f5f5f5; }
+                    .container { max-width: 600px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+                    h1 { color: #053F34; }
+                    .form-group { margin-bottom: 20px; }
+                    label { display: block; margin-bottom: 5px; font-weight: bold; color: #333; }
+                    input, select { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; }
+                    button { background: #009C5B; color: white; padding: 12px 30px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
+                    button:hover { background: #053F34; }
+                    .info { background: #f0f8ff; padding: 15px; border-radius: 4px; margin-bottom: 20px; }
+                    .info code { background: #e0e0e0; padding: 2px 6px; border-radius: 3px; }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <h1>PDF Report Preview</h1>
+                    <div class="info">
+                        <strong>How to use:</strong><br>
+                        Select a school and week to preview the PDF report in your browser.
+                        This allows you to iterate on CSS/design without generating actual PDFs.
+                    </div>
+                    <form method="GET">
+                        <div class="form-group">
+                            <label>School ID *</label>
+                            <input type="number" name="school_id" required placeholder="Enter school ID">
+                        </div>
+                        <div class="form-group">
+                            <label>School Type</label>
+                            <select name="school_type">
+                                <option value="">Auto-detect</option>
+                                <option value="primary">Primary</option>
+                                <option value="secondary">Secondary</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Week Number</label>
+                            <input type="number" name="week_number" placeholder="Current week if empty" min="1" max="53">
+                        </div>
+                        <div class="form-group">
+                            <label>Year</label>
+                            <input type="number" name="year" placeholder="Current year if empty" min="2020" max="2030">
+                        </div>
+                        <button type="submit">Preview Report</button>
+                    </form>
+                </div>
+            </body>
+            </html>
+            """, content_type='text/html')
+
+        # Get school
+        school = None
+        if school_type == 'primary':
+            try:
+                school = PrimarySchool.objects.get(id=school_id)
+            except PrimarySchool.DoesNotExist:
+                return HttpResponse(f"<h1>Error</h1><p>Primary school with ID {school_id} not found</p>", status=404)
+        elif school_type == 'secondary':
+            try:
+                school = SecondarySchool.objects.get(id=school_id)
+            except SecondarySchool.DoesNotExist:
+                return HttpResponse(f"<h1>Error</h1><p>Secondary school with ID {school_id} not found</p>", status=404)
+        else:
+            # Auto-detect
+            school, school_type = get_school_and_type(int(school_id))
+            if not school:
+                return HttpResponse(f"<h1>Error</h1><p>School with ID {school_id} not found</p>", status=404)
+
+        # Default to current week/year if not provided
+        today = datetime.now()
+        if not week_number:
+            week_number = today.isocalendar()[1]
+        if not year:
+            year = today.year
+
+        # Generate HTML preview
+        from .professional_pdf_generator import ProfessionalPDFGenerator
+        generator = ProfessionalPDFGenerator(
+            school=school,
+            week_number=int(week_number),
+            year=int(year),
+            school_type=school_type
+        )
+
+        html_content = generator.generate_html_preview()
+
+        # Add navigation bar at top for easy parameter changes
+        school_name = school.school_name if school_type == 'primary' else school.secondary_school_name
+        nav_bar = f"""
+        <div style="position: fixed; top: 0; left: 0; right: 0; background: #053F34; color: white; padding: 10px 20px; z-index: 9999; display: flex; align-items: center; justify-content: space-between; font-family: Arial, sans-serif;">
+            <div>
+                <strong>Preview:</strong> {school_name} | Week {week_number}, {year} | Type: {school_type.title()}
+            </div>
+            <div>
+                <a href="?school_id={school_id}&school_type={school_type}&week_number={int(week_number)-1}&year={year}" style="color: #CAFEC7; margin-right: 15px;">← Prev Week</a>
+                <a href="?school_id={school_id}&school_type={school_type}&week_number={int(week_number)+1}&year={year}" style="color: #CAFEC7; margin-right: 15px;">Next Week →</a>
+                <a href="?" style="color: #FCCB5E;">Change School</a>
+            </div>
+        </div>
+        <div style="height: 50px;"></div>
+        """
+
+        # Insert nav bar after body tag
+        html_content = html_content.replace('<body>', '<body>' + nav_bar)
+
+        return HttpResponse(html_content, content_type='text/html')
+
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        return HttpResponse(f"""
+        <html>
+        <head><title>Error</title></head>
+        <body style="font-family: Arial; padding: 40px;">
+            <h1 style="color: red;">Error Generating Preview</h1>
+            <p><strong>Error:</strong> {str(e)}</p>
+            <pre style="background: #f0f0f0; padding: 20px; overflow: auto;">{error_details}</pre>
+            <a href="?">← Back to form</a>
+        </body>
+        </html>
+        """, status=500)

@@ -131,6 +131,7 @@ urlpatterns = [
     path('dashboard/school/<int:school_id>/', analytics_views.get_school_summary, name='school_summary'),
     path('dashboard/school/<int:school_id>/filter-options/', analytics_views.get_filter_options, name='filter_options'),
     path('dashboard/school/<int:school_id>/generate-report/', analytics_views.generate_school_report, name='generate_report'),
+    path('dashboard/preview-report/', analytics_views.preview_school_report, name='preview_report'),
     path('dashboard/top-items/', views.get_top_items, name='top_items'),
     path('dashboard/least-favorite/', views.get_least_favorite_items, name='least_favorite_items'),
     path('dashboard/orders-over-time/', views.get_orders_over_time, name='orders_over_time'),
