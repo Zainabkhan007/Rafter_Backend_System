@@ -11,7 +11,7 @@ from weasyprint import HTML, CSS
 from .utils.chart_generators import ChartGenerator
 from .models import (
     Order, OrderItem, PrimaryStudentsRegister, StaffRegisteration,
-    ParentRegisteration, Menu, Transaction
+    ParentRegisteration, Menu, Transaction, SecondaryStudent
 )
 from django.db.models import Sum, Count, Avg, F, Q
 
@@ -192,33 +192,111 @@ class ProfessionalPDFGenerator:
         # Calculate metrics
         total_orders = orders.count()
 
-        # Revenue calculation: ONLY count Stripe payments from Transaction model (positive amounts only)
-        stripe_transactions = Transaction.objects.filter(
-            order__in=orders,
-            payment_method='stripe',
-            transaction_type='payment',
-            amount__gte=0  # Only positive amounts
-        )
+        # Revenue calculation: Get Stripe payments for users of this school
+        # First try via order link, then fallback to user-based query
+        if self.school_type == 'secondary':
+            # Get all student IDs from this school
+            school_student_ids = list(SecondaryStudent.objects.filter(
+                school=self.school
+            ).values_list('id', flat=True))
+
+            # Get all staff IDs from this school
+            school_staff_ids = list(StaffRegisteration.objects.filter(
+                secondary_school=self.school
+            ).values_list('id', flat=True))
+
+            # Query transactions by student ForeignKey OR by user_id within date range
+            # Use case-insensitive matching for user_type
+            stripe_transactions = Transaction.objects.filter(
+                Q(student_id__in=school_student_ids) |
+                Q(staff_id__in=school_staff_ids) |
+                Q(user_type__iexact='student', user_id__in=school_student_ids) |
+                Q(user_type__iexact='staff', user_id__in=school_staff_ids),
+                payment_method='stripe',
+                transaction_type='payment',
+                amount__gt=0,  # Only positive amounts
+                created_at__date__gte=self.week_start,
+                created_at__date__lte=self.week_end
+            )
+        else:
+            # Primary school - get parent and staff IDs
+            school_parent_ids = list(ParentRegisteration.objects.filter(
+                id__in=PrimaryStudentsRegister.objects.filter(school=self.school).values_list('parent_id', flat=True)
+            ).values_list('id', flat=True))
+
+            school_staff_ids = list(StaffRegisteration.objects.filter(
+                primary_school=self.school
+            ).values_list('id', flat=True))
+
+            stripe_transactions = Transaction.objects.filter(
+                Q(parent_id__in=school_parent_ids) |
+                Q(staff_id__in=school_staff_ids) |
+                Q(user_type__iexact='parent', user_id__in=school_parent_ids) |
+                Q(user_type__iexact='staff', user_id__in=school_staff_ids),
+                payment_method='stripe',
+                transaction_type='payment',
+                amount__gt=0,  # Only positive amounts
+                created_at__date__gte=self.week_start,
+                created_at__date__lte=self.week_end
+            )
+
         total_revenue = self.safe_float(stripe_transactions.aggregate(Sum('amount'))['amount__sum'])
         avg_order_value = self.safe_float(total_revenue / total_orders) if total_orders > 0 else 0
 
+        # Previous week revenue
         prev_total_orders = prev_orders.count()
-        prev_stripe_transactions = Transaction.objects.filter(
-            order__in=prev_orders,
-            payment_method='stripe',
-            transaction_type='payment',
-            amount__gte=0  # Only positive amounts
-        )
+        if self.school_type == 'secondary':
+            prev_stripe_transactions = Transaction.objects.filter(
+                Q(student_id__in=school_student_ids) |
+                Q(staff_id__in=school_staff_ids) |
+                Q(user_type__iexact='student', user_id__in=school_student_ids) |
+                Q(user_type__iexact='staff', user_id__in=school_staff_ids),
+                payment_method='stripe',
+                transaction_type='payment',
+                amount__gt=0,
+                created_at__date__gte=prev_week_start,
+                created_at__date__lte=prev_week_end
+            )
+        else:
+            prev_stripe_transactions = Transaction.objects.filter(
+                Q(parent_id__in=school_parent_ids) |
+                Q(staff_id__in=school_staff_ids) |
+                Q(user_type__iexact='parent', user_id__in=school_parent_ids) |
+                Q(user_type__iexact='staff', user_id__in=school_staff_ids),
+                payment_method='stripe',
+                transaction_type='payment',
+                amount__gt=0,
+                created_at__date__gte=prev_week_start,
+                created_at__date__lte=prev_week_end
+            )
         prev_total_revenue = self.safe_float(prev_stripe_transactions.aggregate(Sum('amount'))['amount__sum'])
 
         # Week N-2 data
         week_n2_total_orders = week_n2_orders.count()
-        week_n2_stripe_transactions = Transaction.objects.filter(
-            order__in=week_n2_orders,
-            payment_method='stripe',
-            transaction_type='payment',
-            amount__gte=0  # Only positive amounts
-        )
+        if self.school_type == 'secondary':
+            week_n2_stripe_transactions = Transaction.objects.filter(
+                Q(student_id__in=school_student_ids) |
+                Q(staff_id__in=school_staff_ids) |
+                Q(user_type__iexact='student', user_id__in=school_student_ids) |
+                Q(user_type__iexact='staff', user_id__in=school_staff_ids),
+                payment_method='stripe',
+                transaction_type='payment',
+                amount__gt=0,
+                created_at__date__gte=week_n2_start,
+                created_at__date__lte=week_n2_end
+            )
+        else:
+            week_n2_stripe_transactions = Transaction.objects.filter(
+                Q(parent_id__in=school_parent_ids) |
+                Q(staff_id__in=school_staff_ids) |
+                Q(user_type__iexact='parent', user_id__in=school_parent_ids) |
+                Q(user_type__iexact='staff', user_id__in=school_staff_ids),
+                payment_method='stripe',
+                transaction_type='payment',
+                amount__gt=0,
+                created_at__date__gte=week_n2_start,
+                created_at__date__lte=week_n2_end
+            )
         week_n2_total_revenue = self.safe_float(week_n2_stripe_transactions.aggregate(Sum('amount'))['amount__sum'])
 
         # Calculate changes
@@ -251,7 +329,6 @@ class ProfessionalPDFGenerator:
             active_staff = orders.filter(user_type='staff').values('user_id').distinct().count()
         else:
             # Secondary school logic - students order directly
-            from .models import SecondaryStudent
             total_students = SecondaryStudent.objects.filter(school=self.school).count()
             total_parents = 0  # No parents in secondary
             total_staff = StaffRegisteration.objects.filter(secondary_school=self.school).count()
@@ -264,6 +341,37 @@ class ProfessionalPDFGenerator:
         student_engagement = self.safe_round((active_students / total_students * 100) if total_students > 0 else 0)
         parent_engagement = self.safe_round((active_parents / total_parents * 100) if total_parents > 0 else 0)
         staff_engagement = self.safe_round((active_staff / total_staff * 100) if total_staff > 0 else 0)
+
+        # New signups this week (users created within the report period)
+        if self.school_type == 'primary':
+            new_students = PrimaryStudentsRegister.objects.filter(
+                school=self.school,
+                created_at__date__gte=self.week_start,
+                created_at__date__lte=self.week_end
+            ).count() if hasattr(PrimaryStudentsRegister, 'created_at') else 0
+            new_staff = StaffRegisteration.objects.filter(
+                primary_school=self.school,
+                created_at__date__gte=self.week_start,
+                created_at__date__lte=self.week_end
+            ).count()
+            new_parents = ParentRegisteration.objects.filter(
+                id__in=PrimaryStudentsRegister.objects.filter(school=self.school).values_list('parent_id', flat=True),
+                created_at__date__gte=self.week_start,
+                created_at__date__lte=self.week_end
+            ).count()
+            new_signups = new_students + new_staff + new_parents
+        else:
+            new_students = SecondaryStudent.objects.filter(
+                school=self.school,
+                created_at__date__gte=self.week_start,
+                created_at__date__lte=self.week_end
+            ).count()
+            new_staff = StaffRegisteration.objects.filter(
+                secondary_school=self.school,
+                created_at__date__gte=self.week_start,
+                created_at__date__lte=self.week_end
+            ).count()
+            new_signups = new_students + new_staff
 
         return {
             'orders': orders,
@@ -282,6 +390,7 @@ class ProfessionalPDFGenerator:
             'student_engagement': student_engagement,
             'parent_engagement': parent_engagement,
             'staff_engagement': staff_engagement,
+            'new_signups': new_signups,
             # Week data for trend analysis
             'week_n2_orders': week_n2_total_orders,
             'week_n2_revenue': week_n2_total_revenue,
@@ -367,8 +476,9 @@ class ProfessionalPDFGenerator:
             if self.filters.get('teacher_id'):
                 all_children = all_children.filter(teacher_id=self.filters['teacher_id'])
 
-            # Find inactive children (those NOT in active_children_ids)
+            # Find inactive children and never ordered children (those NOT in active_children_ids)
             inactive_children = []
+            never_ordered_children = []
             for child in all_children:
                 if child.id not in active_children_ids:
                     # Find last order for this child (check both fields)
@@ -400,14 +510,20 @@ class ProfessionalPDFGenerator:
                     parent_name = f"{parent.first_name} {parent.last_name}" if parent else 'N/A'
                     parent_email = parent.email if parent else 'N/A'
 
-                    inactive_children.append({
+                    user_data = {
                         'child_id': child.id,
                         'child_name': f"{child.first_name} {child.last_name}",
                         'parent_name': parent_name,
                         'parent_email': parent_email,
                         'last_order_date': last_order.order_date.strftime('%d %b %Y') if last_order and last_order.order_date else 'Never',
                         'last_order_id': last_order.id if last_order else 'N/A',
-                    })
+                    }
+
+                    # Separate never ordered from inactive
+                    if last_order is None:
+                        never_ordered_children.append(user_data)
+                    else:
+                        inactive_children.append(user_data)
 
             # Get inactive staff - query directly
             all_staff = StaffRegisteration.objects.filter(primary_school=self.school)
@@ -416,6 +532,7 @@ class ProfessionalPDFGenerator:
             )
 
             inactive_staff = []
+            never_ordered_staff = []
             for staff in all_staff:
                 if staff.id not in ordered_staff_ids:
                     last_order = Order.objects.filter(
@@ -439,23 +556,29 @@ class ProfessionalPDFGenerator:
                             if last_order.week_number == self.week_number and last_order.year == self.year:
                                 continue
 
-                    inactive_staff.append({
+                    staff_data = {
                         'id': staff.id,
                         'name': f"{staff.first_name} {staff.last_name}",
                         'email': staff.email,
                         'last_order_date': last_order.order_date.strftime('%d %b %Y') if last_order else 'Never',
                         'last_order_id': last_order.id if last_order else 'N/A',
-                    })
+                    }
+
+                    # Separate never ordered from inactive
+                    if last_order is None:
+                        never_ordered_staff.append(staff_data)
+                    else:
+                        inactive_staff.append(staff_data)
 
             return {
                 'children': inactive_children,
+                'never_ordered_children': never_ordered_children,
                 'staff': inactive_staff,
+                'never_ordered_staff': never_ordered_staff,
             }
 
         else:
             # For secondary schools: Only show students and staff (no parents)
-            from .models import SecondaryStudent
-
             # Build filter for orders within the report period (respects custom date ranges)
             order_filter = {'secondary_school': self.school}
 
@@ -497,6 +620,7 @@ class ProfessionalPDFGenerator:
             )
 
             inactive_students = []
+            never_ordered_students = []
             for student in all_students:
                 if student.id not in ordered_student_ids:
                     last_order = Order.objects.filter(
@@ -520,13 +644,19 @@ class ProfessionalPDFGenerator:
                             if last_order.week_number == self.week_number and last_order.year == self.year:
                                 continue
 
-                    inactive_students.append({
+                    student_data = {
                         'id': student.id,
                         'name': f"{student.first_name} {student.last_name}",
                         'email': student.email if hasattr(student, 'email') else 'N/A',
                         'last_order_date': last_order.order_date.strftime('%d %b %Y') if last_order else 'Never',
                         'last_order_id': last_order.id if last_order else 'N/A',
-                    })
+                    }
+
+                    # Separate never ordered from inactive
+                    if last_order is None:
+                        never_ordered_students.append(student_data)
+                    else:
+                        inactive_students.append(student_data)
 
             # Get inactive staff
             all_staff = StaffRegisteration.objects.filter(secondary_school=self.school)
@@ -535,6 +665,7 @@ class ProfessionalPDFGenerator:
             )
 
             inactive_staff = []
+            never_ordered_staff = []
             for staff in all_staff:
                 if staff.id not in ordered_staff_ids:
                     last_order = Order.objects.filter(
@@ -558,17 +689,25 @@ class ProfessionalPDFGenerator:
                             if last_order.week_number == self.week_number and last_order.year == self.year:
                                 continue
 
-                    inactive_staff.append({
+                    staff_data = {
                         'id': staff.id,
                         'name': f"{staff.first_name} {staff.last_name}",
                         'email': staff.email,
                         'last_order_date': last_order.order_date.strftime('%d %b %Y') if last_order else 'Never',
                         'last_order_id': last_order.id if last_order else 'N/A',
-                    })
+                    }
+
+                    # Separate never ordered from inactive
+                    if last_order is None:
+                        never_ordered_staff.append(staff_data)
+                    else:
+                        inactive_staff.append(staff_data)
 
             return {
                 'students': inactive_students,
+                'never_ordered_students': never_ordered_students,
                 'staff': inactive_staff,
+                'never_ordered_staff': never_ordered_staff,
             }
 
     def get_day_wise_analysis(self):
@@ -597,14 +736,33 @@ class ProfessionalPDFGenerator:
             # For secondary schools, get Stripe revenue for this day
             day_revenue = 0.0
             if self.school_type == 'secondary':
-                day_orders = self.data['orders'].filter(selected_day=day)
-                stripe_transactions = Transaction.objects.filter(
-                    order__in=day_orders,
-                    payment_method='stripe',
-                    transaction_type='payment',
-                    amount__gte=0  # Only positive amounts
-                )
-                day_revenue = self.safe_float(stripe_transactions.aggregate(Sum('amount'))['amount__sum'])
+                # Get the date for this day of the week within the report period
+                from datetime import timedelta
+                day_map = {'Monday': 0, 'Tuesday': 1, 'Wednesday': 2, 'Thursday': 3, 'Friday': 4}
+                if day in day_map:
+                    day_offset = day_map[day]
+                    day_date = self.week_start + timedelta(days=day_offset)
+
+                    # Get transactions for school users on this specific day
+                    school_student_ids = list(SecondaryStudent.objects.filter(
+                        school=self.school
+                    ).values_list('id', flat=True))
+
+                    school_staff_ids = list(StaffRegisteration.objects.filter(
+                        secondary_school=self.school
+                    ).values_list('id', flat=True))
+
+                    stripe_transactions = Transaction.objects.filter(
+                        Q(student_id__in=school_student_ids) |
+                        Q(staff_id__in=school_staff_ids) |
+                        Q(user_type__iexact='student', user_id__in=school_student_ids) |
+                        Q(user_type__iexact='staff', user_id__in=school_staff_ids),
+                        payment_method='stripe',
+                        transaction_type='payment',
+                        amount__gt=0,
+                        created_at__date=day_date
+                    )
+                    day_revenue = self.safe_float(stripe_transactions.aggregate(Sum('amount'))['amount__sum'])
 
             result.append({
                 'day': day,
@@ -851,9 +1009,9 @@ class ProfessionalPDFGenerator:
         # For secondary schools: combine Executive Summary + Revenue Analysis on same page
         # For primary schools: keep Executive Summary separate
         if self.school_type == 'secondary':
-            executive_section = self.generate_executive_summary_with_revenue(charts)
+            executive_section = self.generate_executive_summary_with_revenue(charts, inactive_users)
         else:
-            executive_section = self.generate_executive_summary(charts)
+            executive_section = self.generate_executive_summary(charts, inactive_users)
 
         # Staff breakdown only for primary schools
         staff_breakdown_section = self.generate_staff_breakdown_section(staff_breakdown) if self.school_type == 'primary' else ''
@@ -1323,13 +1481,20 @@ class ProfessionalPDFGenerator:
         </div>
         """
 
-    def generate_executive_summary(self, charts):
+    def generate_executive_summary(self, charts, inactive_users=None):
         """Generate executive summary section with KPIs"""
         data = self.data
+        inactive_users = inactive_users or {}
 
         # Use appropriate terminology based on school type
         student_label = "Child" if self.school_type == 'primary' else "Student"
         students_label = "Children" if self.school_type == 'primary' else "Students"
+
+        # Calculate never ordered count
+        if self.school_type == 'primary':
+            never_ordered_count = len(inactive_users.get('never_ordered_children', [])) + len(inactive_users.get('never_ordered_staff', []))
+        else:
+            never_ordered_count = len(inactive_users.get('never_ordered_students', [])) + len(inactive_users.get('never_ordered_staff', []))
 
         order_change_class = 'positive' if data['order_change'] >= 0 else 'negative'
         order_arrow = '↑' if data['order_change'] >= 0 else '↓'
@@ -1413,35 +1578,57 @@ class ProfessionalPDFGenerator:
                 <p>• Week Period: {self.format_week_dates()}</p>
                 <p>• Total Users: {data['total_students'] + data['total_parents'] + data['total_staff']:,}</p>
                 <p>• Active Users: {data['active_students'] + data['active_parents'] + data['active_staff']:,}</p>
+                <p>• New Signups This Week: {data.get('new_signups', 0):,}</p>
+                <p>• Never Ordered: {never_ordered_count:,}</p>
                 <p>• Overall Engagement: {self.safe_round((data['active_students'] + data['active_parents'] + data['active_staff']) / (data['total_students'] + data['total_parents'] + data['total_staff']) * 100) if (data['total_students'] + data['total_parents'] + data['total_staff']) > 0 else 0}%</p>
             </div>
         </div>
         """
 
-    def generate_executive_summary_with_revenue(self, charts):
+    def generate_executive_summary_with_revenue(self, charts, inactive_users=None):
         """Generate combined Executive Summary + Revenue Analysis for secondary schools (one page)"""
         data = self.data
+        inactive_users = inactive_users or {}
+
+        # Calculate never ordered count for secondary schools
+        never_ordered_count = len(inactive_users.get('never_ordered_students', [])) + len(inactive_users.get('never_ordered_staff', []))
 
         order_change_class = 'positive' if data['order_change'] >= 0 else 'negative'
         order_arrow = '↑' if data['order_change'] >= 0 else '↓'
         revenue_change_class = 'positive' if data['revenue_change'] >= 0 else 'negative'
         revenue_arrow = '↑' if data['revenue_change'] >= 0 else '↓'
 
-        # Get Stripe revenue by user type for the table (only positive amounts)
+        # Get Stripe revenue by user type for the table
         orders = data['orders']
-        from .models import Transaction
+
+        # Get school user IDs for secondary school
+        school_student_ids = list(SecondaryStudent.objects.filter(
+            school=self.school
+        ).values_list('id', flat=True))
+
+        school_staff_ids = list(StaffRegisteration.objects.filter(
+            secondary_school=self.school
+        ).values_list('id', flat=True))
+
+        # Query transactions by user within date range (case-insensitive user_type)
         student_stripe = Transaction.objects.filter(
-            order__in=orders.filter(user_type='student'),
+            Q(student_id__in=school_student_ids) |
+            Q(user_type__iexact='student', user_id__in=school_student_ids),
             payment_method='stripe',
             transaction_type='payment',
-            amount__gte=0  # Only positive amounts
+            amount__gt=0,
+            created_at__date__gte=self.week_start,
+            created_at__date__lte=self.week_end
         ).aggregate(Sum('amount'))['amount__sum'] or 0
 
         staff_stripe = Transaction.objects.filter(
-            order__in=orders.filter(user_type='staff'),
+            Q(staff_id__in=school_staff_ids) |
+            Q(user_type__iexact='staff', user_id__in=school_staff_ids),
             payment_method='stripe',
             transaction_type='payment',
-            amount__gte=0  # Only positive amounts
+            amount__gt=0,
+            created_at__date__gte=self.week_start,
+            created_at__date__lte=self.week_end
         ).aggregate(Sum('amount'))['amount__sum'] or 0
 
         student_orders = orders.filter(user_type='student').count()
@@ -1529,9 +1716,11 @@ class ProfessionalPDFGenerator:
                     <div style="flex: 1; min-width: 200px; padding: 5px 15px;">
                         <p style="margin: 5px 0;"><strong>Week Period:</strong> {self.format_week_dates()}</p>
                         <p style="margin: 5px 0;"><strong>Total Users:</strong> {data['total_students'] + data['total_staff']:,}</p>
+                        <p style="margin: 5px 0;"><strong>New Signups:</strong> {data.get('new_signups', 0):,}</p>
                     </div>
                     <div style="flex: 1; min-width: 200px; padding: 5px 15px;">
                         <p style="margin: 5px 0;"><strong>Active Users:</strong> {data['active_students'] + data['active_staff']:,}</p>
+                        <p style="margin: 5px 0;"><strong>Never Ordered:</strong> {never_ordered_count:,}</p>
                         <p style="margin: 5px 0;"><strong>Overall Engagement:</strong> {self.safe_round((data['active_students'] + data['active_staff']) / (data['total_students'] + data['total_staff']) * 100) if (data['total_students'] + data['total_staff']) > 0 else 0}%</p>
                     </div>
                 </div>
@@ -1674,20 +1863,33 @@ class ProfessionalPDFGenerator:
             staff_count = self.safe_int(staff_stats['count'])
             total_orders = student_count + staff_count
 
-            # Get Stripe revenue (only positive amounts)
-            from .models import Transaction
+            # Get Stripe revenue by user type within date range
+            school_student_ids = list(SecondaryStudent.objects.filter(
+                school=self.school
+            ).values_list('id', flat=True))
+
+            school_staff_ids = list(StaffRegisteration.objects.filter(
+                secondary_school=self.school
+            ).values_list('id', flat=True))
+
             student_stripe = Transaction.objects.filter(
-                order__in=orders.filter(user_type='student'),
+                Q(student_id__in=school_student_ids) |
+                Q(user_type__iexact='student', user_id__in=school_student_ids),
                 payment_method='stripe',
                 transaction_type='payment',
-                amount__gte=0  # Only positive amounts
+                amount__gt=0,
+                created_at__date__gte=self.week_start,
+                created_at__date__lte=self.week_end
             ).aggregate(Sum('amount'))['amount__sum'] or 0
 
             staff_stripe = Transaction.objects.filter(
-                order__in=orders.filter(user_type='staff'),
+                Q(staff_id__in=school_staff_ids) |
+                Q(user_type__iexact='staff', user_id__in=school_staff_ids),
                 payment_method='stripe',
                 transaction_type='payment',
-                amount__gte=0  # Only positive amounts
+                amount__gt=0,
+                created_at__date__gte=self.week_start,
+                created_at__date__lte=self.week_end
             ).aggregate(Sum('amount'))['amount__sum'] or 0
 
             total_stripe = self.safe_float(student_stripe) + self.safe_float(staff_stripe)
@@ -2717,12 +2919,46 @@ class ProfessionalPDFGenerator:
             order_date__date__lte=week_n_plus_1_end
         )
         week_n_plus_1_count = week_n_plus_1_orders.count()
-        week_n_plus_1_transactions = Transaction.objects.filter(
-            order__in=week_n_plus_1_orders,
-            payment_method='stripe',
-            transaction_type='payment',
-            amount__gte=0  # Only positive amounts
-        )
+
+        # Get Week N+1 revenue by user IDs
+        if self.school_type == 'secondary':
+            school_student_ids = list(SecondaryStudent.objects.filter(
+                school=self.school
+            ).values_list('id', flat=True))
+            school_staff_ids = list(StaffRegisteration.objects.filter(
+                secondary_school=self.school
+            ).values_list('id', flat=True))
+
+            week_n_plus_1_transactions = Transaction.objects.filter(
+                Q(student_id__in=school_student_ids) |
+                Q(staff_id__in=school_staff_ids) |
+                Q(user_type__iexact='student', user_id__in=school_student_ids) |
+                Q(user_type__iexact='staff', user_id__in=school_staff_ids),
+                payment_method='stripe',
+                transaction_type='payment',
+                amount__gt=0,
+                created_at__date__gte=week_n_plus_1_start,
+                created_at__date__lte=week_n_plus_1_end
+            )
+        else:
+            school_parent_ids = list(ParentRegisteration.objects.filter(
+                id__in=PrimaryStudentsRegister.objects.filter(school=self.school).values_list('parent_id', flat=True)
+            ).values_list('id', flat=True))
+            school_staff_ids = list(StaffRegisteration.objects.filter(
+                primary_school=self.school
+            ).values_list('id', flat=True))
+
+            week_n_plus_1_transactions = Transaction.objects.filter(
+                Q(parent_id__in=school_parent_ids) |
+                Q(staff_id__in=school_staff_ids) |
+                Q(user_type__iexact='parent', user_id__in=school_parent_ids) |
+                Q(user_type__iexact='staff', user_id__in=school_staff_ids),
+                payment_method='stripe',
+                transaction_type='payment',
+                amount__gt=0,
+                created_at__date__gte=week_n_plus_1_start,
+                created_at__date__lte=week_n_plus_1_end
+            )
         week_n_plus_1_revenue = self.safe_float(week_n_plus_1_transactions.aggregate(Sum('amount'))['amount__sum'])
 
         # Only show revenue for secondary schools
@@ -2984,75 +3220,239 @@ class ProfessionalPDFGenerator:
 
         return html
 
+    def generate_user_activity_pie_chart(self, active_count, inactive_count, never_ordered_count):
+        """Generate pie chart for active vs inactive vs never ordered users"""
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        import base64
+        from io import BytesIO
+
+        # Only include categories with values > 0
+        labels = []
+        sizes = []
+        colors = []
+
+        if active_count > 0:
+            labels.append(f'Active ({active_count})')
+            sizes.append(active_count)
+            colors.append(self.COLORS['sage_green'])
+
+        if inactive_count > 0:
+            labels.append(f'Inactive ({inactive_count})')
+            sizes.append(inactive_count)
+            colors.append(self.COLORS['rose_pink'])
+
+        if never_ordered_count > 0:
+            labels.append(f'Never Ordered ({never_ordered_count})')
+            sizes.append(never_ordered_count)
+            colors.append(self.COLORS['dark_gray'])
+
+        if not sizes:
+            return None
+
+        fig, ax = plt.subplots(figsize=(5, 4))
+        fig.patch.set_facecolor(self.COLORS['pale_mint'])
+
+        wedges, texts, autotexts = ax.pie(
+            sizes,
+            labels=labels,
+            colors=colors,
+            autopct='%1.1f%%',
+            startangle=90,
+            textprops={'fontsize': 8}
+        )
+
+        # Style the percentage text
+        for autotext in autotexts:
+            autotext.set_color('white')
+            autotext.set_fontweight('bold')
+
+        ax.set_title('User Activity Breakdown', fontsize=10, fontweight='bold',
+                    color=self.COLORS['dark_forest'], pad=10)
+
+        plt.tight_layout()
+
+        # Convert to base64
+        buffer = BytesIO()
+        fig.savefig(buffer, format='png', dpi=150, bbox_inches='tight',
+                   facecolor=self.COLORS['pale_mint'], edgecolor='none')
+        buffer.seek(0)
+        image_base64 = base64.b64encode(buffer.read()).decode()
+        plt.close(fig)
+
+        return f"data:image/png;base64,{image_base64}"
+
     def generate_inactive_users_section(self, inactive_users):
-        """Generate inactive users section - 45 rows per page"""
+        """Generate inactive users section with separate never ordered list - 45 rows per page"""
         students_label = "Children" if self.school_type == 'primary' else "Students"
         students_label_lower = students_label.lower()
         ROWS_PER_PAGE = 45
 
+        # Calculate counts for pie chart
+        if self.school_type == 'primary':
+            active_count = self.data['active_students'] + self.data['active_staff']
+            inactive_count = len(inactive_users.get('children', [])) + len(inactive_users.get('staff', []))
+            never_ordered_count = len(inactive_users.get('never_ordered_children', [])) + len(inactive_users.get('never_ordered_staff', []))
+        else:
+            active_count = self.data['active_students'] + self.data['active_staff']
+            inactive_count = len(inactive_users.get('students', [])) + len(inactive_users.get('staff', []))
+            never_ordered_count = len(inactive_users.get('never_ordered_students', [])) + len(inactive_users.get('never_ordered_staff', []))
+
+        # Generate pie chart
+        pie_chart = self.generate_user_activity_pie_chart(active_count, inactive_count, never_ordered_count)
+
         html = f"""
         <div class="page">
-            <h1>Inactive Users</h1>
-            <p>Users who did not receive/place orders during Week {self.week_number} ({self.format_week_dates()}).</p>
+            <h1>User Activity Analysis</h1>
+            <p>User activity breakdown for Week {self.week_number} ({self.format_week_dates()}).</p>
+
+            <div style="display: flex; gap: 20px; margin-bottom: 20px;">
+                <div style="flex: 1;">
+                    <h2>Summary</h2>
+                    <div class="info-box" style="padding: 15px;">
+                        <p style="margin: 8px 0;"><strong>Active Users:</strong> {active_count:,}</p>
+                        <p style="margin: 8px 0;"><strong>Inactive Users:</strong> {inactive_count:,} <span style="font-size: 8pt; color: {self.COLORS['dark_gray']};">(ordered before but not this week)</span></p>
+                        <p style="margin: 8px 0;"><strong>Never Ordered:</strong> {never_ordered_count:,} <span style="font-size: 8pt; color: {self.COLORS['dark_gray']};">(never placed any order)</span></p>
+                    </div>
+                </div>
+        """
+
+        if pie_chart:
+            html += f"""
+                <div style="flex: 1; text-align: center;">
+                    <img src="{pie_chart}" alt="User Activity Breakdown" style="max-width: 100%; max-height: 200px;" />
+                </div>
+            """
+
+        html += """
+            </div>
+        """
+
+        # Inactive Users Section
+        html += f"""
+            <h2 style="margin-top: 15px;">Inactive Users</h2>
+            <p style="font-size: 9pt; color: {self.COLORS['dark_gray']};">Users who have ordered before but did not order this week.</p>
         """
 
         if self.school_type == 'primary':
             if inactive_users.get('children'):
                 children_list = inactive_users['children']
                 total = len(children_list)
-                html += f"""<h2>Inactive {students_label} ({total})</h2>"""
+                html += f"""<h3>Inactive {students_label} ({total})</h3>"""
 
-                # All pages: 45 rows each
                 for chunk_start in range(0, total, ROWS_PER_PAGE):
                     chunk_end = min(chunk_start + ROWS_PER_PAGE, total)
 
                     if chunk_start > 0:
-                        html += f"""</div><div class="page" style="padding-top: 20mm;"><h2>Inactive {students_label} (continued)</h2>"""
+                        html += f"""</div><div class="page" style="padding-top: 20mm;"><h3>Inactive {students_label} (continued)</h3>"""
 
-                    html += """<table style="width:100%;font-size:8pt;"><thead><tr><th>ID</th><th>Child Name</th><th>Parent Name</th><th>Email</th><th>Last Order</th><th>Order ID</th></tr></thead><tbody>"""
+                    html += """<table style="width:100%;font-size:8pt;"><thead><tr><th>ID</th><th>Child Name</th><th>Parent Name</th><th>Email</th><th>Last Collection Date</th><th>Order ID</th></tr></thead><tbody>"""
                     for child in children_list[chunk_start:chunk_end]:
                         html += f"""<tr><td>{child['child_id']}</td><td>{child['child_name']}</td><td>{child['parent_name']}</td><td style="font-size:7pt;">{child['parent_email']}</td><td>{child['last_order_date']}</td><td>{child['last_order_id']}</td></tr>"""
                     html += """</tbody></table>"""
             else:
-                html += f"<p>✓ All {students_label_lower} received orders this week!</p>"
+                html += f"<p>✓ All {students_label_lower} who previously ordered are active this week!</p>"
         else:
             if inactive_users.get('students'):
                 students_list = inactive_users['students']
                 total = len(students_list)
-                html += f"""<h2>Inactive {students_label} ({total})</h2>"""
+                html += f"""<h3>Inactive {students_label} ({total})</h3>"""
 
-                # All pages: 45 rows each
                 for chunk_start in range(0, total, ROWS_PER_PAGE):
                     chunk_end = min(chunk_start + ROWS_PER_PAGE, total)
 
                     if chunk_start > 0:
-                        html += f"""</div><div class="page" style="padding-top: 20mm;"><h2>Inactive {students_label} (continued)</h2>"""
+                        html += f"""</div><div class="page" style="padding-top: 20mm;"><h3>Inactive {students_label} (continued)</h3>"""
 
-                    html += """<table style="width:100%;font-size:8pt;"><thead><tr><th>ID</th><th>Name</th><th>Email</th><th>Last Order</th><th>Order ID</th></tr></thead><tbody>"""
+                    html += """<table style="width:100%;font-size:8pt;"><thead><tr><th>ID</th><th>Name</th><th>Email</th><th>Last Collection Date</th><th>Order ID</th></tr></thead><tbody>"""
                     for student in students_list[chunk_start:chunk_end]:
                         html += f"""<tr><td>{student['id']}</td><td>{student['name']}</td><td style="font-size:7pt;">{student['email']}</td><td>{student['last_order_date']}</td><td>{student['last_order_id']}</td></tr>"""
                     html += """</tbody></table>"""
             else:
-                html += f"<p>✓ All {students_label_lower} placed orders this week!</p>"
+                html += f"<p>✓ All {students_label_lower} who previously ordered are active this week!</p>"
 
         if inactive_users.get('staff'):
             staff_list = inactive_users['staff']
             total = len(staff_list)
-            html += f"""<h2 style="margin-top:20px;">Inactive Staff ({total})</h2>"""
+            html += f"""<h3 style="margin-top:20px;">Inactive Staff ({total})</h3>"""
 
-            # All pages: 45 rows each
             for chunk_start in range(0, total, ROWS_PER_PAGE):
                 chunk_end = min(chunk_start + ROWS_PER_PAGE, total)
 
                 if chunk_start > 0:
-                    html += """</div><div class="page" style="padding-top: 20mm;"><h2>Inactive Staff (continued)</h2>"""
+                    html += """</div><div class="page" style="padding-top: 20mm;"><h3>Inactive Staff (continued)</h3>"""
 
-                html += """<table style="width:100%;font-size:8pt;"><thead><tr><th>ID</th><th>Name</th><th>Email</th><th>Last Order</th><th>Order ID</th></tr></thead><tbody>"""
+                html += """<table style="width:100%;font-size:8pt;"><thead><tr><th>ID</th><th>Name</th><th>Email</th><th>Last Collection Date</th><th>Order ID</th></tr></thead><tbody>"""
                 for staff in staff_list[chunk_start:chunk_end]:
                     html += f"""<tr><td>{staff['id']}</td><td>{staff['name']}</td><td style="font-size:7pt;">{staff['email']}</td><td>{staff['last_order_date']}</td><td>{staff['last_order_id']}</td></tr>"""
                 html += """</tbody></table>"""
         else:
-            html += "<p>✓ All staff placed orders this week!</p>"
+            html += "<p>✓ All staff who previously ordered are active this week!</p>"
+
+        # Never Ordered Users Section
+        html += f"""
+        </div>
+        <div class="page">
+            <h1>Never Ordered Users</h1>
+            <p style="font-size: 9pt; color: {self.COLORS['dark_gray']};">Users who have never placed any order.</p>
+        """
+
+        if self.school_type == 'primary':
+            if inactive_users.get('never_ordered_children'):
+                children_list = inactive_users['never_ordered_children']
+                total = len(children_list)
+                html += f"""<h3>Never Ordered {students_label} ({total})</h3>"""
+
+                for chunk_start in range(0, total, ROWS_PER_PAGE):
+                    chunk_end = min(chunk_start + ROWS_PER_PAGE, total)
+
+                    if chunk_start > 0:
+                        html += f"""</div><div class="page" style="padding-top: 20mm;"><h3>Never Ordered {students_label} (continued)</h3>"""
+
+                    html += """<table style="width:100%;font-size:8pt;"><thead><tr><th>ID</th><th>Child Name</th><th>Parent Name</th><th>Email</th></tr></thead><tbody>"""
+                    for child in children_list[chunk_start:chunk_end]:
+                        html += f"""<tr><td>{child['child_id']}</td><td>{child['child_name']}</td><td>{child['parent_name']}</td><td style="font-size:7pt;">{child['parent_email']}</td></tr>"""
+                    html += """</tbody></table>"""
+            else:
+                html += f"<p>✓ All {students_label_lower} have ordered at least once!</p>"
+        else:
+            if inactive_users.get('never_ordered_students'):
+                students_list = inactive_users['never_ordered_students']
+                total = len(students_list)
+                html += f"""<h3>Never Ordered {students_label} ({total})</h3>"""
+
+                for chunk_start in range(0, total, ROWS_PER_PAGE):
+                    chunk_end = min(chunk_start + ROWS_PER_PAGE, total)
+
+                    if chunk_start > 0:
+                        html += f"""</div><div class="page" style="padding-top: 20mm;"><h3>Never Ordered {students_label} (continued)</h3>"""
+
+                    html += """<table style="width:100%;font-size:8pt;"><thead><tr><th>ID</th><th>Name</th><th>Email</th></tr></thead><tbody>"""
+                    for student in students_list[chunk_start:chunk_end]:
+                        html += f"""<tr><td>{student['id']}</td><td>{student['name']}</td><td style="font-size:7pt;">{student['email']}</td></tr>"""
+                    html += """</tbody></table>"""
+            else:
+                html += f"<p>✓ All {students_label_lower} have ordered at least once!</p>"
+
+        # Never ordered staff
+        if inactive_users.get('never_ordered_staff'):
+            staff_list = inactive_users['never_ordered_staff']
+            total = len(staff_list)
+            html += f"""<h3 style="margin-top:20px;">Never Ordered Staff ({total})</h3>"""
+
+            for chunk_start in range(0, total, ROWS_PER_PAGE):
+                chunk_end = min(chunk_start + ROWS_PER_PAGE, total)
+
+                if chunk_start > 0:
+                    html += """</div><div class="page" style="padding-top: 20mm;"><h3>Never Ordered Staff (continued)</h3>"""
+
+                html += """<table style="width:100%;font-size:8pt;"><thead><tr><th>ID</th><th>Name</th><th>Email</th></tr></thead><tbody>"""
+                for staff in staff_list[chunk_start:chunk_end]:
+                    html += f"""<tr><td>{staff['id']}</td><td>{staff['name']}</td><td style="font-size:7pt;">{staff['email']}</td></tr>"""
+                html += """</tbody></table>"""
+        else:
+            html += "<p>✓ All staff have ordered at least once!</p>"
 
         html += "</div>"
         return html
