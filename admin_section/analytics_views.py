@@ -250,7 +250,6 @@ def get_school_summary(request, school_id):
                 # If no primary_student FK, check child_id (for parent orders)
                 elif order.child_id:
                     try:
-                        from .models import PrimaryStudentsRegister, ParentRegisteration
                         child = PrimaryStudentsRegister.objects.get(id=order.child_id)
                         child_name = f"{child.first_name} {child.last_name}"
                         # Get parent name from user_id if user_type is parent
@@ -260,7 +259,7 @@ def get_school_summary(request, school_id):
                                 parent_staff_name = f"{parent.first_name} {parent.last_name}"
                             except ParentRegisteration.DoesNotExist:
                                 pass
-                    except:
+                    except PrimaryStudentsRegister.DoesNotExist:
                         pass
                 # Check if it's a staff order
                 elif order.staff:
@@ -269,11 +268,10 @@ def get_school_summary(request, school_id):
                 # Fallback: check user_type and user_id
                 elif order.user_type == 'staff' and order.user_id:
                     try:
-                        from .models import StaffRegisteration
                         staff = StaffRegisteration.objects.get(id=order.user_id)
                         child_name = f"{staff.first_name} {staff.last_name}"
                         parent_staff_name = "Staff Member"
-                    except:
+                    except StaffRegisteration.DoesNotExist:
                         pass
             # Secondary school logic
             else:
@@ -285,18 +283,16 @@ def get_school_summary(request, school_id):
                 # Fallback: check user_id
                 elif order.user_type == 'student' and order.user_id:
                     try:
-                        from .models import SecondaryStudent
                         student = SecondaryStudent.objects.get(id=order.user_id)
                         child_name = f"{student.first_name} {student.last_name}"
-                    except:
+                    except SecondaryStudent.DoesNotExist:
                         pass
                 elif order.user_type == 'staff' and order.user_id:
                     try:
-                        from .models import StaffRegisteration
                         staff = StaffRegisteration.objects.get(id=order.user_id)
                         child_name = f"{staff.first_name} {staff.last_name}"
                         parent_staff_name = "Staff Member"
-                    except:
+                    except StaffRegisteration.DoesNotExist:
                         pass
 
             # Build order data
