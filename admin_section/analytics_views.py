@@ -237,22 +237,34 @@ def get_school_summary(request, school_id):
         for order in all_orders:
             # Get child name - simpler structure like old modal
             child_name = None
+            parent_staff_name = None
 
             if order.primary_student:
                 child_name = f"{order.primary_student.first_name} {order.primary_student.last_name}"
+                # Get parent name if exists
+                if order.primary_student.parent:
+                    parent_staff_name = f"{order.primary_student.parent.first_name} {order.primary_student.parent.last_name}"
             elif order.student:
                 child_name = f"{order.student.first_name} {order.student.last_name}"
             elif order.staff:
                 child_name = f"{order.staff.first_name} {order.staff.last_name}"
+                parent_staff_name = "Staff Member"
 
-            orders_data.append({
+            # Build order data
+            order_dict = {
                 'order_id': order.id,
                 'child_name': child_name or "N/A",
                 'selected_day': order.selected_day,
                 'status': order.status,
                 'total_amount': float(order.total_price),
                 'created_at': order.created_at.isoformat()
-            })
+            }
+
+            # Add parent/staff name only for primary schools
+            if school_type == 'primary' and parent_staff_name:
+                order_dict['parent_staff_name'] = parent_staff_name
+
+            orders_data.append(order_dict)
 
         # Build response
         response_data = {
