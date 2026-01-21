@@ -3466,9 +3466,9 @@ class ProfessionalPDFGenerator:
                     if chunk_start > 0:
                         html += f"""</div><div class="page" style="padding-top: 20mm;"><h3>Inactive {students_label} (continued)</h3>"""
 
-                    html += """<table style="width:100%;font-size:8pt;"><thead><tr><th>ID</th><th>Child Name</th><th>Parent Name</th><th>Email</th><th>Last Collection Date</th><th>Order ID</th></tr></thead><tbody>"""
+                    html += """<table style="width:100%;font-size:8pt;"><thead><tr><th>ID</th><th>Child Name</th><th>Parent Name</th><th>Last Collection Date</th><th>Order ID</th></tr></thead><tbody>"""
                     for child in children_list[chunk_start:chunk_end]:
-                        html += f"""<tr><td>{child['child_id']}</td><td>{child['child_name']}</td><td>{child['parent_name']}</td><td style="font-size:7pt;">{child['parent_email']}</td><td>{child['last_order_date']}</td><td>{child['last_order_id']}</td></tr>"""
+                        html += f"""<tr><td>{child['child_id']}</td><td>{child['child_name']}</td><td>{child['parent_name']}</td><td>{child['last_order_date']}</td><td>{child['last_order_id']}</td></tr>"""
                     html += """</tbody></table>"""
             else:
                 html += f"<p>✓ All {students_label_lower} who previously ordered are active this week!</p>"
@@ -3484,9 +3484,9 @@ class ProfessionalPDFGenerator:
                     if chunk_start > 0:
                         html += f"""</div><div class="page" style="padding-top: 20mm;"><h3>Inactive {students_label} (continued)</h3>"""
 
-                    html += """<table style="width:100%;font-size:8pt;"><thead><tr><th>ID</th><th>Name</th><th>Email</th><th>Last Collection Date</th><th>Order ID</th></tr></thead><tbody>"""
+                    html += """<table style="width:100%;font-size:8pt;"><thead><tr><th>ID</th><th>Name</th><th>Last Collection Date</th><th>Order ID</th></tr></thead><tbody>"""
                     for student in students_list[chunk_start:chunk_end]:
-                        html += f"""<tr><td>{student['id']}</td><td>{student['name']}</td><td style="font-size:7pt;">{student['email']}</td><td>{student['last_order_date']}</td><td>{student['last_order_id']}</td></tr>"""
+                        html += f"""<tr><td>{student['id']}</td><td>{student['name']}</td><td>{student['last_order_date']}</td><td>{student['last_order_id']}</td></tr>"""
                     html += """</tbody></table>"""
             else:
                 html += f"<p>✓ All {students_label_lower} who previously ordered are active this week!</p>"
@@ -3502,9 +3502,9 @@ class ProfessionalPDFGenerator:
                 if chunk_start > 0:
                     html += """</div><div class="page" style="padding-top: 20mm;"><h3>Inactive Staff (continued)</h3>"""
 
-                html += """<table style="width:100%;font-size:8pt;"><thead><tr><th>ID</th><th>Name</th><th>Email</th><th>Last Collection Date</th><th>Order ID</th></tr></thead><tbody>"""
+                html += """<table style="width:100%;font-size:8pt;"><thead><tr><th>ID</th><th>Name</th><th>Last Collection Date</th><th>Order ID</th></tr></thead><tbody>"""
                 for staff in staff_list[chunk_start:chunk_end]:
-                    html += f"""<tr><td>{staff['id']}</td><td>{staff['name']}</td><td style="font-size:7pt;">{staff['email']}</td><td>{staff['last_order_date']}</td><td>{staff['last_order_id']}</td></tr>"""
+                    html += f"""<tr><td>{staff['id']}</td><td>{staff['name']}</td><td>{staff['last_order_date']}</td><td>{staff['last_order_id']}</td></tr>"""
                 html += """</tbody></table>"""
         else:
             html += "<p>✓ All staff who previously ordered are active this week!</p>"
@@ -3529,9 +3529,9 @@ class ProfessionalPDFGenerator:
                     if chunk_start > 0:
                         html += f"""</div><div class="page" style="padding-top: 20mm;"><h3>Never Ordered {students_label} (continued)</h3>"""
 
-                    html += """<table style="width:100%;font-size:8pt;"><thead><tr><th>ID</th><th>Child Name</th><th>Parent Name</th><th>Email</th></tr></thead><tbody>"""
+                    html += """<table style="width:100%;font-size:8pt;"><thead><tr><th>ID</th><th>Child Name</th><th>Parent Name</th></tr></thead><tbody>"""
                     for child in children_list[chunk_start:chunk_end]:
-                        html += f"""<tr><td>{child['child_id']}</td><td>{child['child_name']}</td><td>{child['parent_name']}</td><td style="font-size:7pt;">{child['parent_email']}</td></tr>"""
+                        html += f"""<tr><td>{child['child_id']}</td><td>{child['child_name']}</td><td>{child['parent_name']}</td></tr>"""
                     html += """</tbody></table>"""
             else:
                 html += f"<p>✓ All {students_label_lower} have ordered at least once!</p>"
@@ -3547,9 +3547,9 @@ class ProfessionalPDFGenerator:
                     if chunk_start > 0:
                         html += f"""</div><div class="page" style="padding-top: 20mm;"><h3>Never Ordered {students_label} (continued)</h3>"""
 
-                    html += """<table style="width:100%;font-size:8pt;"><thead><tr><th>ID</th><th>Name</th><th>Email</th></tr></thead><tbody>"""
+                    html += """<table style="width:100%;font-size:8pt;"><thead><tr><th>ID</th><th>Name</th></tr></thead><tbody>"""
                     for student in students_list[chunk_start:chunk_end]:
-                        html += f"""<tr><td>{student['id']}</td><td>{student['name']}</td><td style="font-size:7pt;">{student['email']}</td></tr>"""
+                        html += f"""<tr><td>{student['id']}</td><td>{student['name']}</td></tr>"""
                     html += """</tbody></table>"""
             else:
                 html += f"<p>✓ All {students_label_lower} have ordered at least once!</p>"
@@ -3566,9 +3566,9 @@ class ProfessionalPDFGenerator:
                 if chunk_start > 0:
                     html += """</div><div class="page" style="padding-top: 20mm;"><h3>Never Ordered Staff (continued)</h3>"""
 
-                html += """<table style="width:100%;font-size:8pt;"><thead><tr><th>ID</th><th>Name</th><th>Email</th></tr></thead><tbody>"""
+                html += """<table style="width:100%;font-size:8pt;"><thead><tr><th>ID</th><th>Name</th></tr></thead><tbody>"""
                 for staff in staff_list[chunk_start:chunk_end]:
-                    html += f"""<tr><td>{staff['id']}</td><td>{staff['name']}</td><td style="font-size:7pt;">{staff['email']}</td></tr>"""
+                    html += f"""<tr><td>{staff['id']}</td><td>{staff['name']}</td></tr>"""
                 html += """</tbody></table>"""
         else:
             html += "<p>✓ All staff have ordered at least once!</p>"
