@@ -205,19 +205,24 @@ class ProfessionalPDFGenerator:
                 secondary_school=self.school
             ).values_list('id', flat=True))
 
-            # Query transactions by student ForeignKey OR by user_id within date range
-            # Use case-insensitive matching for user_type
+            # Build user filter with proper OR grouping
+            user_filter = Q()
+            if school_student_ids:
+                user_filter |= Q(student_id__in=school_student_ids)
+                user_filter |= Q(user_type__iexact='student', user_id__in=school_student_ids)
+            if school_staff_ids:
+                user_filter |= Q(staff_id__in=school_staff_ids)
+                user_filter |= Q(user_type__iexact='staff', user_id__in=school_staff_ids)
+
+            # Query transactions with proper filter grouping
             stripe_transactions = Transaction.objects.filter(
-                Q(student_id__in=school_student_ids) |
-                Q(staff_id__in=school_staff_ids) |
-                Q(user_type__iexact='student', user_id__in=school_student_ids) |
-                Q(user_type__iexact='staff', user_id__in=school_staff_ids),
+                user_filter,
                 payment_method='stripe',
                 transaction_type='payment',
                 amount__gt=0,  # Only positive amounts
                 created_at__date__gte=self.week_start,
                 created_at__date__lte=self.week_end
-            )
+            ) if user_filter else Transaction.objects.none()
         else:
             # Primary school - get parent and staff IDs
             school_parent_ids = list(ParentRegisteration.objects.filter(
@@ -228,29 +233,32 @@ class ProfessionalPDFGenerator:
                 primary_school=self.school
             ).values_list('id', flat=True))
 
+            # Build user filter with proper OR grouping
+            user_filter = Q()
+            if school_parent_ids:
+                user_filter |= Q(parent_id__in=school_parent_ids)
+                user_filter |= Q(user_type__iexact='parent', user_id__in=school_parent_ids)
+            if school_staff_ids:
+                user_filter |= Q(staff_id__in=school_staff_ids)
+                user_filter |= Q(user_type__iexact='staff', user_id__in=school_staff_ids)
+
             stripe_transactions = Transaction.objects.filter(
-                Q(parent_id__in=school_parent_ids) |
-                Q(staff_id__in=school_staff_ids) |
-                Q(user_type__iexact='parent', user_id__in=school_parent_ids) |
-                Q(user_type__iexact='staff', user_id__in=school_staff_ids),
+                user_filter,
                 payment_method='stripe',
                 transaction_type='payment',
                 amount__gt=0,  # Only positive amounts
                 created_at__date__gte=self.week_start,
                 created_at__date__lte=self.week_end
-            )
+            ) if user_filter else Transaction.objects.none()
 
         total_revenue = self.safe_float(stripe_transactions.aggregate(Sum('amount'))['amount__sum'])
         avg_order_value = self.safe_float(total_revenue / total_orders) if total_orders > 0 else 0
 
-        # Previous week revenue
+        # Previous week revenue - reuse the user_filter built above
         prev_total_orders = prev_orders.count()
-        if self.school_type == 'secondary':
+        if user_filter:
             prev_stripe_transactions = Transaction.objects.filter(
-                Q(student_id__in=school_student_ids) |
-                Q(staff_id__in=school_staff_ids) |
-                Q(user_type__iexact='student', user_id__in=school_student_ids) |
-                Q(user_type__iexact='staff', user_id__in=school_staff_ids),
+                user_filter,
                 payment_method='stripe',
                 transaction_type='payment',
                 amount__gt=0,
@@ -258,27 +266,14 @@ class ProfessionalPDFGenerator:
                 created_at__date__lte=prev_week_end
             )
         else:
-            prev_stripe_transactions = Transaction.objects.filter(
-                Q(parent_id__in=school_parent_ids) |
-                Q(staff_id__in=school_staff_ids) |
-                Q(user_type__iexact='parent', user_id__in=school_parent_ids) |
-                Q(user_type__iexact='staff', user_id__in=school_staff_ids),
-                payment_method='stripe',
-                transaction_type='payment',
-                amount__gt=0,
-                created_at__date__gte=prev_week_start,
-                created_at__date__lte=prev_week_end
-            )
+            prev_stripe_transactions = Transaction.objects.none()
         prev_total_revenue = self.safe_float(prev_stripe_transactions.aggregate(Sum('amount'))['amount__sum'])
 
         # Week N-2 data
         week_n2_total_orders = week_n2_orders.count()
-        if self.school_type == 'secondary':
+        if user_filter:
             week_n2_stripe_transactions = Transaction.objects.filter(
-                Q(student_id__in=school_student_ids) |
-                Q(staff_id__in=school_staff_ids) |
-                Q(user_type__iexact='student', user_id__in=school_student_ids) |
-                Q(user_type__iexact='staff', user_id__in=school_staff_ids),
+                user_filter,
                 payment_method='stripe',
                 transaction_type='payment',
                 amount__gt=0,
@@ -286,17 +281,7 @@ class ProfessionalPDFGenerator:
                 created_at__date__lte=week_n2_end
             )
         else:
-            week_n2_stripe_transactions = Transaction.objects.filter(
-                Q(parent_id__in=school_parent_ids) |
-                Q(staff_id__in=school_staff_ids) |
-                Q(user_type__iexact='parent', user_id__in=school_parent_ids) |
-                Q(user_type__iexact='staff', user_id__in=school_staff_ids),
-                payment_method='stripe',
-                transaction_type='payment',
-                amount__gt=0,
-                created_at__date__gte=week_n2_start,
-                created_at__date__lte=week_n2_end
-            )
+            week_n2_stripe_transactions = Transaction.objects.none()
         week_n2_total_revenue = self.safe_float(week_n2_stripe_transactions.aggregate(Sum('amount'))['amount__sum'])
 
         # Calculate changes
@@ -752,17 +737,26 @@ class ProfessionalPDFGenerator:
                         secondary_school=self.school
                     ).values_list('id', flat=True))
 
-                    stripe_transactions = Transaction.objects.filter(
-                        Q(student_id__in=school_student_ids) |
-                        Q(staff_id__in=school_staff_ids) |
-                        Q(user_type__iexact='student', user_id__in=school_student_ids) |
-                        Q(user_type__iexact='staff', user_id__in=school_staff_ids),
-                        payment_method='stripe',
-                        transaction_type='payment',
-                        amount__gt=0,
-                        created_at__date=day_date
-                    )
-                    day_revenue = self.safe_float(stripe_transactions.aggregate(Sum('amount'))['amount__sum'])
+                    # Build user filter with proper OR grouping
+                    day_user_filter = Q()
+                    if school_student_ids:
+                        day_user_filter |= Q(student_id__in=school_student_ids)
+                        day_user_filter |= Q(user_type__iexact='student', user_id__in=school_student_ids)
+                    if school_staff_ids:
+                        day_user_filter |= Q(staff_id__in=school_staff_ids)
+                        day_user_filter |= Q(user_type__iexact='staff', user_id__in=school_staff_ids)
+
+                    if day_user_filter:
+                        stripe_transactions = Transaction.objects.filter(
+                            day_user_filter,
+                            payment_method='stripe',
+                            transaction_type='payment',
+                            amount__gt=0,
+                            created_at__date=day_date
+                        )
+                        day_revenue = self.safe_float(stripe_transactions.aggregate(Sum('amount'))['amount__sum'])
+                    else:
+                        day_revenue = 0
 
             result.append({
                 'day': day,
@@ -1165,31 +1159,35 @@ class ProfessionalPDFGenerator:
                 margin-bottom: 5px;
             }}
 
-            /* KPI Cards - Compact */
+            /* KPI Cards - Compact with rounded corners */
             .kpi-grid {{
                 display: grid;
                 grid-template-columns: repeat(3, 1fr);
-                gap: 8px;
-                margin: 10px 0;
+                gap: 10px;
+                margin: 12px 0;
             }}
 
             .kpi-card {{
                 background: {self.COLORS['light_gray']};
-                padding: 8px;
-                border-radius: 4px;
-                border-left: 3px solid {self.COLORS['sage_green']};
+                padding: 12px;
+                border-radius: 12px;
+                border-left: 4px solid {self.COLORS['sage_green']};
+                box-shadow: 0 2px 4px rgba(0,0,0,0.05);
             }}
 
             .kpi-card.revenue {{
                 border-left-color: {self.COLORS['mustard_yellow']};
+                background: linear-gradient(135deg, {self.COLORS['light_gray']} 0%, #FFF9E6 100%);
             }}
 
             .kpi-card.orders {{
                 border-left-color: {self.COLORS['soft_aqua']};
+                background: linear-gradient(135deg, {self.COLORS['light_gray']} 0%, #E8F6F8 100%);
             }}
 
             .kpi-card.engagement {{
                 border-left-color: {self.COLORS['rose_pink']};
+                background: linear-gradient(135deg, {self.COLORS['light_gray']} 0%, #FEF0F3 100%);
             }}
 
             .kpi-label {{
@@ -1220,18 +1218,22 @@ class ProfessionalPDFGenerator:
                 color: {self.COLORS['rose_pink']};
             }}
 
-            /* Tables - More compact */
+            /* Tables - Rounded corners */
             table {{
                 width: 100%;
-                border-collapse: collapse;
-                margin: 6px 0;
+                border-collapse: separate;
+                border-spacing: 0;
+                margin: 8px 0;
                 font-size: 7pt;
+                border-radius: 10px;
+                overflow: hidden;
+                box-shadow: 0 2px 6px rgba(0,0,0,0.08);
             }}
 
             th {{
                 background: {self.COLORS['dark_forest']};
                 color: {self.COLORS['white']};
-                padding: 4px 6px;
+                padding: 8px 10px;
                 text-align: left;
                 font-weight: bold;
                 text-transform: uppercase;
@@ -1239,8 +1241,16 @@ class ProfessionalPDFGenerator:
                 letter-spacing: 0.3px;
             }}
 
+            th:first-child {{
+                border-top-left-radius: 10px;
+            }}
+
+            th:last-child {{
+                border-top-right-radius: 10px;
+            }}
+
             td {{
-                padding: 3px 6px;
+                padding: 6px 10px;
                 border-bottom: 1px solid {self.COLORS['off_white']};
             }}
 
@@ -1248,15 +1258,32 @@ class ProfessionalPDFGenerator:
                 background: {self.COLORS['light_gray']};
             }}
 
-            /* Charts - Compact */
+            tr:last-child td:first-child {{
+                border-bottom-left-radius: 10px;
+            }}
+
+            tr:last-child td:last-child {{
+                border-bottom-right-radius: 10px;
+            }}
+
+            tr:last-child td {{
+                border-bottom: none;
+            }}
+
+            /* Charts - Rounded containers */
             .chart-container {{
-                margin: 8px 0;
+                margin: 12px 0;
                 text-align: center;
+                background: {self.COLORS['white']};
+                padding: 15px;
+                border-radius: 16px;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.06);
             }}
 
             .chart-container img {{
                 max-width: 100%;
                 height: auto;
+                border-radius: 12px;
             }}
 
             /* Two Column Layout */
@@ -1293,19 +1320,49 @@ class ProfessionalPDFGenerator:
                 color: {self.COLORS['white']};
             }}
 
-            /* Info Box - Compact */
+            /* Info Box - Rounded */
             .info-box {{
-                background: {self.COLORS['soft_aqua']};
-                padding: 8px;
-                border-radius: 4px;
-                margin: 6px 0;
-                border-left: 3px solid {self.COLORS['dark_forest']};
+                background: linear-gradient(135deg, {self.COLORS['soft_aqua']} 0%, {self.COLORS['pale_mint']} 100%);
+                padding: 14px 16px;
+                border-radius: 14px;
+                margin: 10px 0;
+                border-left: 4px solid {self.COLORS['dark_forest']};
+                box-shadow: 0 2px 6px rgba(0,0,0,0.06);
             }}
 
             .info-box p {{
-                margin: 2px 0;
-                font-size: 7pt;
-                line-height: 1.4;
+                margin: 4px 0;
+                font-size: 8pt;
+                line-height: 1.5;
+            }}
+
+            /* Summary cards */
+            .summary-card {{
+                background: {self.COLORS['white']};
+                border-radius: 14px;
+                padding: 14px;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+                margin: 8px 0;
+            }}
+
+            /* Rounded sections */
+            .rounded-section {{
+                background: {self.COLORS['light_gray']};
+                border-radius: 16px;
+                padding: 16px;
+                margin: 12px 0;
+            }}
+
+            /* Headers with rounded underline */
+            h1 {{
+                border-radius: 2px;
+            }}
+
+            h2 {{
+                background: linear-gradient(90deg, {self.COLORS['pale_mint']} 0%, transparent 100%);
+                padding: 6px 10px;
+                border-radius: 8px;
+                display: inline-block;
             }}
         </style>
         """
@@ -1611,25 +1668,41 @@ class ProfessionalPDFGenerator:
         ).values_list('id', flat=True))
 
         # Query transactions by user within date range (case-insensitive user_type)
-        student_stripe = Transaction.objects.filter(
-            Q(student_id__in=school_student_ids) |
-            Q(user_type__iexact='student', user_id__in=school_student_ids),
-            payment_method='stripe',
-            transaction_type='payment',
-            amount__gt=0,
-            created_at__date__gte=self.week_start,
-            created_at__date__lte=self.week_end
-        ).aggregate(Sum('amount'))['amount__sum'] or 0
+        # Build proper Q filters for students
+        student_filter = Q()
+        if school_student_ids:
+            student_filter |= Q(student_id__in=school_student_ids)
+            student_filter |= Q(user_type__iexact='student', user_id__in=school_student_ids)
 
-        staff_stripe = Transaction.objects.filter(
-            Q(staff_id__in=school_staff_ids) |
-            Q(user_type__iexact='staff', user_id__in=school_staff_ids),
-            payment_method='stripe',
-            transaction_type='payment',
-            amount__gt=0,
-            created_at__date__gte=self.week_start,
-            created_at__date__lte=self.week_end
-        ).aggregate(Sum('amount'))['amount__sum'] or 0
+        if student_filter:
+            student_stripe = Transaction.objects.filter(
+                student_filter,
+                payment_method='stripe',
+                transaction_type='payment',
+                amount__gt=0,
+                created_at__date__gte=self.week_start,
+                created_at__date__lte=self.week_end
+            ).aggregate(Sum('amount'))['amount__sum'] or 0
+        else:
+            student_stripe = 0
+
+        # Build proper Q filters for staff
+        staff_filter = Q()
+        if school_staff_ids:
+            staff_filter |= Q(staff_id__in=school_staff_ids)
+            staff_filter |= Q(user_type__iexact='staff', user_id__in=school_staff_ids)
+
+        if staff_filter:
+            staff_stripe = Transaction.objects.filter(
+                staff_filter,
+                payment_method='stripe',
+                transaction_type='payment',
+                amount__gt=0,
+                created_at__date__gte=self.week_start,
+                created_at__date__lte=self.week_end
+            ).aggregate(Sum('amount'))['amount__sum'] or 0
+        else:
+            staff_stripe = 0
 
         student_orders = orders.filter(user_type='student').count()
         staff_orders = orders.filter(user_type='staff').count()
@@ -1872,25 +1945,41 @@ class ProfessionalPDFGenerator:
                 secondary_school=self.school
             ).values_list('id', flat=True))
 
-            student_stripe = Transaction.objects.filter(
-                Q(student_id__in=school_student_ids) |
-                Q(user_type__iexact='student', user_id__in=school_student_ids),
-                payment_method='stripe',
-                transaction_type='payment',
-                amount__gt=0,
-                created_at__date__gte=self.week_start,
-                created_at__date__lte=self.week_end
-            ).aggregate(Sum('amount'))['amount__sum'] or 0
+            # Build proper Q filters for students
+            student_filter = Q()
+            if school_student_ids:
+                student_filter |= Q(student_id__in=school_student_ids)
+                student_filter |= Q(user_type__iexact='student', user_id__in=school_student_ids)
 
-            staff_stripe = Transaction.objects.filter(
-                Q(staff_id__in=school_staff_ids) |
-                Q(user_type__iexact='staff', user_id__in=school_staff_ids),
-                payment_method='stripe',
-                transaction_type='payment',
-                amount__gt=0,
-                created_at__date__gte=self.week_start,
-                created_at__date__lte=self.week_end
-            ).aggregate(Sum('amount'))['amount__sum'] or 0
+            if student_filter:
+                student_stripe = Transaction.objects.filter(
+                    student_filter,
+                    payment_method='stripe',
+                    transaction_type='payment',
+                    amount__gt=0,
+                    created_at__date__gte=self.week_start,
+                    created_at__date__lte=self.week_end
+                ).aggregate(Sum('amount'))['amount__sum'] or 0
+            else:
+                student_stripe = 0
+
+            # Build proper Q filters for staff
+            staff_filter = Q()
+            if school_staff_ids:
+                staff_filter |= Q(staff_id__in=school_staff_ids)
+                staff_filter |= Q(user_type__iexact='staff', user_id__in=school_staff_ids)
+
+            if staff_filter:
+                staff_stripe = Transaction.objects.filter(
+                    staff_filter,
+                    payment_method='stripe',
+                    transaction_type='payment',
+                    amount__gt=0,
+                    created_at__date__gte=self.week_start,
+                    created_at__date__lte=self.week_end
+                ).aggregate(Sum('amount'))['amount__sum'] or 0
+            else:
+                staff_stripe = 0
 
             total_stripe = self.safe_float(student_stripe) + self.safe_float(staff_stripe)
 
@@ -2929,17 +3018,26 @@ class ProfessionalPDFGenerator:
                 secondary_school=self.school
             ).values_list('id', flat=True))
 
-            week_n_plus_1_transactions = Transaction.objects.filter(
-                Q(student_id__in=school_student_ids) |
-                Q(staff_id__in=school_staff_ids) |
-                Q(user_type__iexact='student', user_id__in=school_student_ids) |
-                Q(user_type__iexact='staff', user_id__in=school_staff_ids),
-                payment_method='stripe',
-                transaction_type='payment',
-                amount__gt=0,
-                created_at__date__gte=week_n_plus_1_start,
-                created_at__date__lte=week_n_plus_1_end
-            )
+            # Build user filter with proper OR grouping
+            week_n1_user_filter = Q()
+            if school_student_ids:
+                week_n1_user_filter |= Q(student_id__in=school_student_ids)
+                week_n1_user_filter |= Q(user_type__iexact='student', user_id__in=school_student_ids)
+            if school_staff_ids:
+                week_n1_user_filter |= Q(staff_id__in=school_staff_ids)
+                week_n1_user_filter |= Q(user_type__iexact='staff', user_id__in=school_staff_ids)
+
+            if week_n1_user_filter:
+                week_n_plus_1_transactions = Transaction.objects.filter(
+                    week_n1_user_filter,
+                    payment_method='stripe',
+                    transaction_type='payment',
+                    amount__gt=0,
+                    created_at__date__gte=week_n_plus_1_start,
+                    created_at__date__lte=week_n_plus_1_end
+                )
+            else:
+                week_n_plus_1_transactions = Transaction.objects.none()
         else:
             school_parent_ids = list(ParentRegisteration.objects.filter(
                 id__in=PrimaryStudentsRegister.objects.filter(school=self.school).values_list('parent_id', flat=True)
@@ -2948,17 +3046,26 @@ class ProfessionalPDFGenerator:
                 primary_school=self.school
             ).values_list('id', flat=True))
 
-            week_n_plus_1_transactions = Transaction.objects.filter(
-                Q(parent_id__in=school_parent_ids) |
-                Q(staff_id__in=school_staff_ids) |
-                Q(user_type__iexact='parent', user_id__in=school_parent_ids) |
-                Q(user_type__iexact='staff', user_id__in=school_staff_ids),
-                payment_method='stripe',
-                transaction_type='payment',
-                amount__gt=0,
-                created_at__date__gte=week_n_plus_1_start,
-                created_at__date__lte=week_n_plus_1_end
-            )
+            # Build user filter with proper OR grouping
+            week_n1_user_filter = Q()
+            if school_parent_ids:
+                week_n1_user_filter |= Q(parent_id__in=school_parent_ids)
+                week_n1_user_filter |= Q(user_type__iexact='parent', user_id__in=school_parent_ids)
+            if school_staff_ids:
+                week_n1_user_filter |= Q(staff_id__in=school_staff_ids)
+                week_n1_user_filter |= Q(user_type__iexact='staff', user_id__in=school_staff_ids)
+
+            if week_n1_user_filter:
+                week_n_plus_1_transactions = Transaction.objects.filter(
+                    week_n1_user_filter,
+                    payment_method='stripe',
+                    transaction_type='payment',
+                    amount__gt=0,
+                    created_at__date__gte=week_n_plus_1_start,
+                    created_at__date__lte=week_n_plus_1_end
+                )
+            else:
+                week_n_plus_1_transactions = Transaction.objects.none()
         week_n_plus_1_revenue = self.safe_float(week_n_plus_1_transactions.aggregate(Sum('amount'))['amount__sum'])
 
         # Only show revenue for secondary schools
@@ -3140,11 +3247,11 @@ class ProfessionalPDFGenerator:
             """
             for idx, rec in enumerate(high_priority, 1):
                 html += f"""
-                <div style="background: {self.COLORS['rose_pink']}15; border-left: 4px solid {self.COLORS['rose_pink']};
-                     padding: 12px 15px; margin-bottom: 10px; border-radius: 4px;">
-                    <p style="margin: 0; font-size: 8pt;">
-                        <span style="background: {self.COLORS['rose_pink']}; color: white; padding: 2px 8px;
-                              border-radius: 10px; font-size: 7pt; font-weight: bold; margin-right: 8px;">{idx}</span>
+                <div style="background: linear-gradient(135deg, #FEF0F3 0%, #FFFFFF 100%); border-left: 4px solid {self.COLORS['rose_pink']};
+                     padding: 14px 18px; margin-bottom: 12px; border-radius: 12px; box-shadow: 0 2px 6px rgba(243,100,135,0.15);">
+                    <p style="margin: 0; font-size: 9pt;">
+                        <span style="background: {self.COLORS['rose_pink']}; color: white; padding: 3px 10px;
+                              border-radius: 12px; font-size: 7pt; font-weight: bold; margin-right: 10px;">{idx}</span>
                         <strong>{rec['category']}:</strong> {rec['message']}
                     </p>
                 </div>
@@ -3158,11 +3265,11 @@ class ProfessionalPDFGenerator:
             """
             for idx, rec in enumerate(medium_priority, 1):
                 html += f"""
-                <div style="background: {self.COLORS['mustard_yellow']}15; border-left: 4px solid {self.COLORS['mustard_yellow']};
-                     padding: 12px 15px; margin-bottom: 10px; border-radius: 4px;">
-                    <p style="margin: 0; font-size: 8pt;">
-                        <span style="background: {self.COLORS['mustard_yellow']}; color: {self.COLORS['dark_forest']}; padding: 2px 8px;
-                              border-radius: 10px; font-size: 7pt; font-weight: bold; margin-right: 8px;">{idx}</span>
+                <div style="background: linear-gradient(135deg, #FFF9E6 0%, #FFFFFF 100%); border-left: 4px solid {self.COLORS['mustard_yellow']};
+                     padding: 14px 18px; margin-bottom: 12px; border-radius: 12px; box-shadow: 0 2px 6px rgba(252,203,94,0.15);">
+                    <p style="margin: 0; font-size: 9pt;">
+                        <span style="background: {self.COLORS['mustard_yellow']}; color: {self.COLORS['dark_forest']}; padding: 3px 10px;
+                              border-radius: 12px; font-size: 7pt; font-weight: bold; margin-right: 10px;">{idx}</span>
                         <strong>{rec['category']}:</strong> {rec['message']}
                     </p>
                 </div>
@@ -3176,11 +3283,11 @@ class ProfessionalPDFGenerator:
             """
             for idx, rec in enumerate(low_priority, 1):
                 html += f"""
-                <div style="background: {self.COLORS['sage_green']}15; border-left: 4px solid {self.COLORS['sage_green']};
-                     padding: 12px 15px; margin-bottom: 10px; border-radius: 4px;">
-                    <p style="margin: 0; font-size: 8pt;">
-                        <span style="background: {self.COLORS['sage_green']}; color: white; padding: 2px 8px;
-                              border-radius: 10px; font-size: 7pt; font-weight: bold; margin-right: 8px;">{idx}</span>
+                <div style="background: linear-gradient(135deg, {self.COLORS['pale_mint']} 0%, #FFFFFF 100%); border-left: 4px solid {self.COLORS['sage_green']};
+                     padding: 14px 18px; margin-bottom: 12px; border-radius: 12px; box-shadow: 0 2px 6px rgba(0,156,91,0.1);">
+                    <p style="margin: 0; font-size: 9pt;">
+                        <span style="background: {self.COLORS['sage_green']}; color: white; padding: 3px 10px;
+                              border-radius: 12px; font-size: 7pt; font-weight: bold; margin-right: 10px;">{idx}</span>
                         <strong>{rec['category']}:</strong> {rec['message']}
                     </p>
                 </div>
@@ -3221,7 +3328,7 @@ class ProfessionalPDFGenerator:
         return html
 
     def generate_user_activity_pie_chart(self, active_count, inactive_count, never_ordered_count):
-        """Generate pie chart for active vs inactive vs never ordered users"""
+        """Generate modern donut chart for active vs inactive vs never ordered users"""
         import matplotlib
         matplotlib.use('Agg')
         import matplotlib.pyplot as plt
@@ -3234,49 +3341,61 @@ class ProfessionalPDFGenerator:
         colors = []
 
         if active_count > 0:
-            labels.append(f'Active ({active_count})')
+            labels.append(f'Active\n({active_count})')
             sizes.append(active_count)
             colors.append(self.COLORS['sage_green'])
 
         if inactive_count > 0:
-            labels.append(f'Inactive ({inactive_count})')
+            labels.append(f'Inactive\n({inactive_count})')
             sizes.append(inactive_count)
             colors.append(self.COLORS['rose_pink'])
 
         if never_ordered_count > 0:
-            labels.append(f'Never Ordered ({never_ordered_count})')
+            labels.append(f'Never Ordered\n({never_ordered_count})')
             sizes.append(never_ordered_count)
-            colors.append(self.COLORS['dark_gray'])
+            colors.append(self.COLORS['lavender'])
 
         if not sizes:
             return None
 
         fig, ax = plt.subplots(figsize=(5, 4))
-        fig.patch.set_facecolor(self.COLORS['pale_mint'])
+        fig.patch.set_facecolor('#FFFFFF')
 
+        # Create donut chart (pie with circle in center)
         wedges, texts, autotexts = ax.pie(
             sizes,
-            labels=labels,
             colors=colors,
             autopct='%1.1f%%',
             startangle=90,
-            textprops={'fontsize': 8}
+            textprops={'fontsize': 9, 'fontweight': 'bold'},
+            pctdistance=0.75,
+            wedgeprops=dict(width=0.5, edgecolor='white', linewidth=2)
         )
 
         # Style the percentage text
         for autotext in autotexts:
             autotext.set_color('white')
             autotext.set_fontweight('bold')
+            autotext.set_fontsize(10)
 
-        ax.set_title('User Activity Breakdown', fontsize=10, fontweight='bold',
-                    color=self.COLORS['dark_forest'], pad=10)
+        # Add legend instead of labels on slices for cleaner look
+        ax.legend(wedges, labels, loc='center left', bbox_to_anchor=(1, 0.5),
+                 fontsize=9, frameon=False)
+
+        # Add total in center
+        total = sum(sizes)
+        ax.text(0, 0, f'Total\n{total}', ha='center', va='center',
+               fontsize=14, fontweight='bold', color=self.COLORS['dark_forest'])
+
+        ax.set_title('User Activity Breakdown', fontsize=12, fontweight='bold',
+                    color=self.COLORS['dark_forest'], pad=15)
 
         plt.tight_layout()
 
         # Convert to base64
         buffer = BytesIO()
         fig.savefig(buffer, format='png', dpi=150, bbox_inches='tight',
-                   facecolor=self.COLORS['pale_mint'], edgecolor='none')
+                   facecolor='#FFFFFF', edgecolor='none')
         buffer.seek(0)
         image_base64 = base64.b64encode(buffer.read()).decode()
         plt.close(fig)
@@ -3458,50 +3577,73 @@ class ProfessionalPDFGenerator:
         return html
 
     def generate_compact_bar_chart(self, data, title, color=None):
-        """Generate compact bar chart with data labels for professional PDF - Mint/Green theme"""
+        """Generate compact bar chart with rounded bars for professional PDF - Mint/Green theme"""
         import matplotlib
         matplotlib.use('Agg')
         import matplotlib.pyplot as plt
+        from matplotlib.patches import FancyBboxPatch
+        import numpy as np
         import base64
         from io import BytesIO
 
         if not data:
             return None
 
-        fig, ax = plt.subplots(figsize=(7, 3.5))  # Smaller, more compact
+        fig, ax = plt.subplots(figsize=(7, 3.5))
 
-        # Set background to pale mint for modern look
-        fig.patch.set_facecolor(self.COLORS['pale_mint'])
-        ax.set_facecolor(self.COLORS['pale_mint'])
+        # Set background with rounded corners effect
+        fig.patch.set_facecolor('#FFFFFF')
+        ax.set_facecolor('#FAFFFE')
 
         labels = [item['label'] for item in data]
         values = [item['value'] for item in data]
 
         bar_color = color or self.COLORS['sage_green']
-        bars = ax.bar(labels, values, color=bar_color, width=0.6, edgecolor=self.COLORS['dark_forest'], linewidth=0.5)
 
-        # Add value labels on top of bars
-        for bar in bars:
-            height = bar.get_height()
-            ax.text(bar.get_x() + bar.get_width()/2., height,
-                   f'{int(height)}',
-                   ha='center', va='bottom', fontsize=8, fontweight='bold',
-                   color=self.COLORS['dark_forest'])
+        # Create bars with rounded corners
+        x = np.arange(len(labels))
+        bar_width = 0.6
 
-        ax.set_title(title, fontsize=10, fontweight='bold', pad=10,
+        for i, value in enumerate(values):
+            # Draw rounded rectangle for each bar
+            if value > 0:
+                # Create a rounded bar using FancyBboxPatch
+                bar_height = value
+                rounded_bar = FancyBboxPatch(
+                    (i - bar_width/2, 0), bar_width, bar_height,
+                    boxstyle="round,pad=0,rounding_size=0.15",
+                    facecolor=bar_color,
+                    edgecolor=self.COLORS['dark_forest'],
+                    linewidth=0.5,
+                    alpha=0.9
+                )
+                ax.add_patch(rounded_bar)
+
+                # Add value label on top
+                ax.text(i, bar_height + max(values)*0.02, f'{int(value)}',
+                       ha='center', va='bottom', fontsize=9, fontweight='bold',
+                       color=self.COLORS['dark_forest'])
+
+        ax.set_xlim(-0.5, len(labels) - 0.5)
+        ax.set_ylim(0, max(values) * 1.15 if values and max(values) > 0 else 1)
+        ax.set_xticks(x)
+        ax.set_xticklabels(labels)
+
+        ax.set_title(title, fontsize=11, fontweight='bold', pad=15,
                     color=self.COLORS['dark_forest'])
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
-        ax.spines['bottom'].set_color(self.COLORS['sage_green'])
-        ax.spines['left'].set_color(self.COLORS['sage_green'])
-        ax.tick_params(labelsize=7, colors=self.COLORS['dark_forest'])
+        ax.spines['bottom'].set_color('#E0E0E0')
+        ax.spines['left'].set_color('#E0E0E0')
+        ax.tick_params(labelsize=8, colors=self.COLORS['dark_forest'])
+        ax.grid(axis='y', linestyle='--', alpha=0.3, color='#CCCCCC')
         plt.xticks(rotation=0)
         plt.tight_layout()
 
         # Convert to base64
         buffer = BytesIO()
         fig.savefig(buffer, format='png', dpi=150, bbox_inches='tight',
-                   facecolor=self.COLORS['pale_mint'], edgecolor='none')
+                   facecolor='#FFFFFF', edgecolor='none')
         buffer.seek(0)
         image_base64 = base64.b64encode(buffer.read()).decode()
         plt.close(fig)
@@ -3509,10 +3651,11 @@ class ProfessionalPDFGenerator:
         return f"data:image/png;base64,{image_base64}"
 
     def generate_horizontal_bar_chart(self, data, title, color=None, show_values=True):
-        """Generate horizontal bar chart for day-wise analysis - larger and clearer"""
+        """Generate horizontal bar chart with rounded bars for day-wise analysis"""
         import matplotlib
         matplotlib.use('Agg')
         import matplotlib.pyplot as plt
+        from matplotlib.patches import FancyBboxPatch
         import base64
         from io import BytesIO
 
@@ -3533,53 +3676,62 @@ class ProfessionalPDFGenerator:
 
         # Calculate appropriate figure height based on number of items
         num_items = len(valid_data)
-        fig_height = max(3, min(num_items * 0.8, 10))  # Between 3 and 10 inches
+        fig_height = max(3, min(num_items * 0.9, 10))  # Between 3 and 10 inches
 
-        fig, ax = plt.subplots(figsize=(8, fig_height))  # Wider for horizontal bars
+        fig, ax = plt.subplots(figsize=(8, fig_height))
 
-        # Set background to pale mint for modern look
-        fig.patch.set_facecolor(self.COLORS['pale_mint'])
-        ax.set_facecolor(self.COLORS['pale_mint'])
+        # Set clean white background (no mint tint)
+        fig.patch.set_facecolor('#FFFFFF')
+        ax.set_facecolor('#FFFFFF')
 
         labels = [item['label'] for item in valid_data]
         values = [item['value'] for item in valid_data]
 
-        bar_color = color or self.COLORS['sage_green']
-        y_pos = range(len(labels))
-
-        # Create horizontal bars
-        bars = ax.barh(y_pos, values, color=bar_color, height=0.6,
-                      edgecolor=self.COLORS['dark_forest'], linewidth=0.5)
-
-        # Add value labels at end of bars
+        # Use bluish grey color instead of mint/sage green
+        bar_color = color or '#7FB3C8'
+        bar_height = 0.6
         max_value = max(values) if values else 1
-        if show_values and max_value > 0:
-            for i, (bar, val) in enumerate(zip(bars, values)):
-                width = bar.get_width()
-                label_text = f'{int(val)}' if isinstance(val, (int, float)) and val == int(val) else f'€{val:,.2f}'
-                ax.text(width + max_value * 0.02, bar.get_y() + bar.get_height()/2,
-                       label_text, ha='left', va='center', fontsize=10, fontweight='bold',
-                       color=self.COLORS['dark_forest'])
 
-        ax.set_yticks(y_pos)
+        # Create horizontal bars with rounded corners
+        for i, (label, value) in enumerate(zip(labels, values)):
+            if value > 0:
+                # Draw rounded rectangle for each bar
+                rounded_bar = FancyBboxPatch(
+                    (0, i - bar_height/2), value, bar_height,
+                    boxstyle="round,pad=0,rounding_size=0.12",
+                    facecolor=bar_color,
+                    edgecolor='#5A8A9E',  # Darker bluish grey edge
+                    linewidth=0.5,
+                    alpha=0.9
+                )
+                ax.add_patch(rounded_bar)
+
+                # Add value labels at end of bars
+                if show_values:
+                    label_text = f'{int(value)}' if isinstance(value, (int, float)) and value == int(value) else f'€{value:,.2f}'
+                    ax.text(value + max_value * 0.03, i,
+                           label_text, ha='left', va='center', fontsize=10, fontweight='bold',
+                           color=self.COLORS['dark_forest'])
+
+        ax.set_ylim(-0.5, len(labels) - 0.5)
+        ax.set_xlim(0, max_value * 1.2 if max_value > 0 else 1)
+        ax.set_yticks(range(len(labels)))
         ax.set_yticklabels(labels, fontsize=10, color=self.COLORS['dark_forest'])
-        ax.set_title(title, fontsize=12, fontweight='bold', pad=12,
+        ax.set_title(title, fontsize=12, fontweight='bold', pad=15,
                     color=self.COLORS['dark_forest'])
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
-        ax.spines['bottom'].set_color(self.COLORS['sage_green'])
-        ax.spines['left'].set_color(self.COLORS['sage_green'])
+        ax.spines['bottom'].set_color('#E0E0E0')
+        ax.spines['left'].set_color('#E0E0E0')
         ax.tick_params(labelsize=9, colors=self.COLORS['dark_forest'])
-
-        # Add some padding to x-axis for value labels
-        ax.set_xlim(0, max_value * 1.15 if max_value > 0 else 1)
+        ax.grid(axis='x', linestyle='--', alpha=0.3, color='#CCCCCC')
 
         plt.tight_layout()
 
         # Convert to base64
         buffer = BytesIO()
         fig.savefig(buffer, format='png', dpi=150, bbox_inches='tight',
-                   facecolor=self.COLORS['pale_mint'], edgecolor='none')
+                   facecolor='#FFFFFF', edgecolor='none')
         buffer.seek(0)
         image_base64 = base64.b64encode(buffer.read()).decode()
         plt.close(fig)
@@ -3587,7 +3739,7 @@ class ProfessionalPDFGenerator:
         return f"data:image/png;base64,{image_base64}"
 
     def generate_compact_pie_chart(self, data, title):
-        """Generate compact pie chart for professional PDF - Mint/Green theme"""
+        """Generate modern donut chart for professional PDF - clean white theme"""
         import matplotlib
         matplotlib.use('Agg')
         import matplotlib.pyplot as plt
@@ -3597,34 +3749,44 @@ class ProfessionalPDFGenerator:
         if not data or sum(item['value'] for item in data) == 0:
             return None
 
-        fig, ax = plt.subplots(figsize=(4, 4))  # Square for better pie visibility
+        fig, ax = plt.subplots(figsize=(5, 4))
 
-        # Set background to pale mint
-        fig.patch.set_facecolor(self.COLORS['pale_mint'])
-        ax.set_facecolor(self.COLORS['pale_mint'])
+        # Clean white background
+        fig.patch.set_facecolor('#FFFFFF')
 
-        labels = [item['label'] for item in data]
+        labels = [f"{item['label']}\n({item['value']})" for item in data]
         values = [item['value'] for item in data]
-        # Use green-mint gradient colors for pie chart
-        colors = [self.COLORS['sage_green'], self.COLORS['lavender'],
-                 self.COLORS['soft_aqua'], self.COLORS['mustard_yellow'],
-                 self.COLORS['rose_pink'], self.COLORS['pale_mint']]
 
+        # Modern color palette - bluish greys and accent colors
+        colors = ['#4A90A4', '#7FB3C8', '#B8D4E3', '#E8B86D', '#D4A5A5', '#A8D5BA']
+
+        # Create donut chart
         wedges, texts, autotexts = ax.pie(
             values,
-            labels=None,
             colors=colors[:len(data)],
-            autopct=lambda pct: f'{int(pct)}%' if pct > 3 else '',
+            autopct='%1.1f%%',
             startangle=90,
-            textprops={'fontsize': 9, 'fontweight': 'bold', 'color': self.COLORS['dark_forest']},
-            wedgeprops={'edgecolor': self.COLORS['dark_forest'], 'linewidth': 1}
+            textprops={'fontsize': 9, 'fontweight': 'bold'},
+            pctdistance=0.75,
+            wedgeprops=dict(width=0.5, edgecolor='white', linewidth=2)
         )
 
-        # Legend below the pie chart
-        ax.legend(labels, loc='upper center', bbox_to_anchor=(0.5, -0.05),
-                 fontsize=8, frameon=False, facecolor=self.COLORS['pale_mint'],
-                 labelcolor=self.COLORS['dark_forest'], ncol=len(labels))
-        ax.set_title(title, fontsize=11, fontweight='bold', pad=8,
+        # Style the percentage text
+        for autotext in autotexts:
+            autotext.set_color('white')
+            autotext.set_fontweight('bold')
+            autotext.set_fontsize(9)
+
+        # Add legend to the side
+        ax.legend(wedges, labels, loc='center left', bbox_to_anchor=(1, 0.5),
+                 fontsize=8, frameon=False)
+
+        # Add total in center
+        total = sum(values)
+        ax.text(0, 0, f'Total\n{total}', ha='center', va='center',
+               fontsize=12, fontweight='bold', color=self.COLORS['dark_forest'])
+
+        ax.set_title(title, fontsize=11, fontweight='bold', pad=12,
                     color=self.COLORS['dark_forest'])
 
         plt.tight_layout()
@@ -3632,7 +3794,7 @@ class ProfessionalPDFGenerator:
         # Convert to base64
         buffer = BytesIO()
         fig.savefig(buffer, format='png', dpi=150, bbox_inches='tight',
-                   facecolor=self.COLORS['pale_mint'], edgecolor='none')
+                   facecolor='#FFFFFF', edgecolor='none')
         buffer.seek(0)
         image_base64 = base64.b64encode(buffer.read()).decode()
         plt.close(fig)
@@ -3802,7 +3964,9 @@ class ProfessionalPDFGenerator:
             html_content = self.generate_html()
             pdf_buffer = BytesIO()
 
-            HTML(string=html_content).write_pdf(pdf_buffer)
+            # Use write_pdf with minimal options for compatibility with older pydyf versions
+            html_doc = HTML(string=html_content)
+            html_doc.write_pdf(target=pdf_buffer)
             pdf_buffer.seek(0)
 
             return pdf_buffer
