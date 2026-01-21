@@ -992,7 +992,6 @@ class ProfessionalPDFGenerator:
         menu_performance = self.get_menu_performance()
         staff_breakdown = self.get_staff_breakdown()
         platform_analytics = self.get_platform_analytics()
-        recommendations = self.get_recommendations()
 
         # Generate charts
         charts = self.generate_charts(day_wise_stats, menu_performance, platform_analytics)
@@ -1028,7 +1027,6 @@ class ProfessionalPDFGenerator:
             {self.generate_platform_analytics_section(platform_analytics, charts) if platform_analytics else ''}
             {self.generate_inactive_users_section(inactive_users)}
             {self.generate_trend_analysis_section()}
-            {self.generate_recommendations_section(recommendations)}
         </body>
         </html>
         """
@@ -1272,10 +1270,10 @@ class ProfessionalPDFGenerator:
 
             /* Charts - Rounded containers */
             .chart-container {{
-                margin: 12px 0;
+                margin: 6px 0;
                 text-align: center;
                 background: {self.COLORS['white']};
-                padding: 15px;
+                padding: 5px;
                 border-radius: 16px;
                 box-shadow: 0 2px 8px rgba(0,0,0,0.06);
             }}
@@ -1284,6 +1282,7 @@ class ProfessionalPDFGenerator:
                 max-width: 100%;
                 height: auto;
                 border-radius: 12px;
+                max-height:300px;
             }}
 
             /* Two Column Layout */
@@ -1547,11 +1546,15 @@ class ProfessionalPDFGenerator:
         student_label = "Child" if self.school_type == 'primary' else "Student"
         students_label = "Children" if self.school_type == 'primary' else "Students"
 
-        # Calculate never ordered count
+        # Calculate inactive and never ordered counts
         if self.school_type == 'primary':
+            inactive_count = len(inactive_users.get('children', [])) + len(inactive_users.get('staff', []))
             never_ordered_count = len(inactive_users.get('never_ordered_children', [])) + len(inactive_users.get('never_ordered_staff', []))
         else:
+            inactive_count = len(inactive_users.get('students', [])) + len(inactive_users.get('staff', []))
             never_ordered_count = len(inactive_users.get('never_ordered_students', [])) + len(inactive_users.get('never_ordered_staff', []))
+
+        active_count = data['active_students'] + data['active_parents'] + data['active_staff']
 
         order_change_class = 'positive' if data['order_change'] >= 0 else 'negative'
         order_arrow = '↑' if data['order_change'] >= 0 else '↓'
@@ -1596,6 +1599,17 @@ class ProfessionalPDFGenerator:
         elif self.school_type == 'primary':
             num_cards += 1  # Add parent engagement
 
+        # Generate user activity pie chart
+        pie_chart = self.generate_user_activity_pie_chart(active_count, inactive_count, never_ordered_count)
+
+        pie_chart_html = ""
+        if pie_chart:
+            pie_chart_html = f"""
+            <div style="text-align: center; margin-top: 20px;">
+                <img src="{pie_chart}" alt="User Activity Breakdown" style="max-width: 100%; max-height: 280px;" />
+            </div>
+            """
+
         return f"""
         <div class="page">
             <h1>Executive Summary</h1>
@@ -1629,16 +1643,19 @@ class ProfessionalPDFGenerator:
                     </div>
                 </div>
             </div>
-
+             {pie_chart_html}
             <h2>Key Highlights</h2>
             <div class="info-box">
                 <p>• Week Period: {self.format_week_dates()}</p>
                 <p>• Total Users: {data['total_students'] + data['total_parents'] + data['total_staff']:,}</p>
-                <p>• Active Users: {data['active_students'] + data['active_parents'] + data['active_staff']:,}</p>
+                <p>• Active Users: {active_count:,}</p>
+                <p>• Inactive Users: {inactive_count:,}</p>
                 <p>• New Signups This Week: {data.get('new_signups', 0):,}</p>
                 <p>• Never Ordered: {never_ordered_count:,}</p>
-                <p>• Overall Engagement: {self.safe_round((data['active_students'] + data['active_parents'] + data['active_staff']) / (data['total_students'] + data['total_parents'] + data['total_staff']) * 100) if (data['total_students'] + data['total_parents'] + data['total_staff']) > 0 else 0}%</p>
+                <p>• Overall Engagement: {self.safe_round(active_count / (data['total_students'] + data['total_parents'] + data['total_staff']) * 100) if (data['total_students'] + data['total_parents'] + data['total_staff']) > 0 else 0}%</p>
             </div>
+
+           
         </div>
         """
 
@@ -1647,8 +1664,10 @@ class ProfessionalPDFGenerator:
         data = self.data
         inactive_users = inactive_users or {}
 
-        # Calculate never ordered count for secondary schools
+        # Calculate inactive and never ordered counts for secondary schools
+        inactive_count = len(inactive_users.get('students', [])) + len(inactive_users.get('staff', []))
         never_ordered_count = len(inactive_users.get('never_ordered_students', [])) + len(inactive_users.get('never_ordered_staff', []))
+        active_count = data['active_students'] + data['active_staff']
 
         order_change_class = 'positive' if data['order_change'] >= 0 else 'negative'
         order_arrow = '↑' if data['order_change'] >= 0 else '↓'
@@ -1708,6 +1727,17 @@ class ProfessionalPDFGenerator:
         staff_orders = orders.filter(user_type='staff').count()
         total_stripe = self.safe_float(student_stripe) + self.safe_float(staff_stripe)
 
+        # Generate user activity pie chart
+        pie_chart = self.generate_user_activity_pie_chart(active_count, inactive_count, never_ordered_count)
+
+        pie_chart_html = ""
+        if pie_chart:
+            pie_chart_html = f"""
+            <div style="text-align: center; margin-top: 15px;">
+                <img src="{pie_chart}" alt="User Activity Breakdown" style="max-width: 100%; max-height: 220px;" />
+            </div>
+            """
+
         return f"""
         <div class="page">
             <h1>Executive Summary</h1>
@@ -1747,7 +1777,7 @@ class ProfessionalPDFGenerator:
             </div>
 
             <h2>Revenue Analysis (Stripe Payments)</h2>
-            <div style="display: flex; flex-direction: column ; gap: 25px; align-items: flex-start; margin-bottom: 20px;">
+            <div style="display: flex; flex-direction: column ; gap: 25px; align-items: flex-start; margin-bottom: 15px;">
                 <div style="width: 100%; ">
                     <table style="font-size: 9pt;">
                         <thead>
@@ -1780,9 +1810,9 @@ class ProfessionalPDFGenerator:
                         </tbody>
                     </table>
                 </div>
-               
-            </div>
 
+            </div>
+                {pie_chart_html}
             <h2>Key Highlights</h2>
             <div class="info-box" style="padding: 15px; background: {self.COLORS['light_gray']};">
                 <div style="display: flex; justify-content: space-between; flex-wrap: wrap;">
@@ -1792,12 +1822,15 @@ class ProfessionalPDFGenerator:
                         <p style="margin: 5px 0;"><strong>New Signups:</strong> {data.get('new_signups', 0):,}</p>
                     </div>
                     <div style="flex: 1; min-width: 200px; padding: 5px 15px;">
-                        <p style="margin: 5px 0;"><strong>Active Users:</strong> {data['active_students'] + data['active_staff']:,}</p>
+                        <p style="margin: 5px 0;"><strong>Active Users:</strong> {active_count:,}</p>
+                        <p style="margin: 5px 0;"><strong>Inactive Users:</strong> {inactive_count:,}</p>
                         <p style="margin: 5px 0;"><strong>Never Ordered:</strong> {never_ordered_count:,}</p>
-                        <p style="margin: 5px 0;"><strong>Overall Engagement:</strong> {self.safe_round((data['active_students'] + data['active_staff']) / (data['total_students'] + data['total_staff']) * 100) if (data['total_students'] + data['total_staff']) > 0 else 0}%</p>
+                        <p style="margin: 5px 0;"><strong>Overall Engagement:</strong> {self.safe_round(active_count / (data['total_students'] + data['total_staff']) * 100) if (data['total_students'] + data['total_staff']) > 0 else 0}%</p>
                     </div>
                 </div>
             </div>
+
+           
         </div>
         """
 
@@ -3406,174 +3439,162 @@ class ProfessionalPDFGenerator:
         """Generate inactive users section with separate never ordered list - 45 rows per page"""
         students_label = "Children" if self.school_type == 'primary' else "Students"
         students_label_lower = students_label.lower()
-        ROWS_PER_PAGE = 45
+        ROWS_PER_PAGE = 32
 
-        # Calculate counts for pie chart
-        if self.school_type == 'primary':
-            active_count = self.data['active_students'] + self.data['active_staff']
-            inactive_count = len(inactive_users.get('children', [])) + len(inactive_users.get('staff', []))
-            never_ordered_count = len(inactive_users.get('never_ordered_children', [])) + len(inactive_users.get('never_ordered_staff', []))
-        else:
-            active_count = self.data['active_students'] + self.data['active_staff']
-            inactive_count = len(inactive_users.get('students', [])) + len(inactive_users.get('staff', []))
-            never_ordered_count = len(inactive_users.get('never_ordered_students', [])) + len(inactive_users.get('never_ordered_staff', []))
-
-        # Generate pie chart
-        pie_chart = self.generate_user_activity_pie_chart(active_count, inactive_count, never_ordered_count)
-
-        html = f"""
-        <div class="page">
-            <h1>User Activity Analysis</h1>
-            <p>User activity breakdown for Week {self.week_number} ({self.format_week_dates()}).</p>
-
-            <div style="display: flex; gap: 20px; margin-bottom: 20px;">
-                <div style="flex: 1;">
-                    <h2>Summary</h2>
-                    <div class="info-box" style="padding: 15px;">
-                        <p style="margin: 8px 0;"><strong>Active Users:</strong> {active_count:,}</p>
-                        <p style="margin: 8px 0;"><strong>Inactive Users:</strong> {inactive_count:,} <span style="font-size: 8pt; color: {self.COLORS['dark_gray']};">(ordered before but not this week)</span></p>
-                        <p style="margin: 8px 0;"><strong>Never Ordered:</strong> {never_ordered_count:,} <span style="font-size: 8pt; color: {self.COLORS['dark_gray']};">(never placed any order)</span></p>
-                    </div>
-                </div>
-        """
-
-        if pie_chart:
-            html += f"""
-                <div style="flex: 1; text-align: center;">
-                    <img src="{pie_chart}" alt="User Activity Breakdown" style="max-width: 100%; max-height: 200px;" />
-                </div>
-            """
-
-        html += """
-            </div>
-        """
+        html = ""
 
         # Inactive Users Section
-        html += f"""
-            <h2 style="margin-top: 15px;">Inactive Users</h2>
-            <p style="font-size: 9pt; color: {self.COLORS['dark_gray']};">Users who have ordered before but did not order this week.</p>
-        """
-
         if self.school_type == 'primary':
             if inactive_users.get('children'):
                 children_list = inactive_users['children']
                 total = len(children_list)
-                html += f"""<h3>Inactive {students_label} ({total})</h3>"""
 
                 for chunk_start in range(0, total, ROWS_PER_PAGE):
                     chunk_end = min(chunk_start + ROWS_PER_PAGE, total)
+                    is_first_page = chunk_start == 0
 
-                    if chunk_start > 0:
-                        html += f"""</div><div class="page" style="padding-top: 20mm;"><h3>Inactive {students_label} (continued)</h3>"""
+                    html += f"""<div class="page">"""
+                    if is_first_page:
+                        html += f"""<h1>Inactive Users</h1>
+                        <p style="font-size: 9pt; color: {self.COLORS['dark_gray']}; margin-bottom: 15px;">Users who have ordered before but did not order this week.</p>
+                        <h3>Inactive {students_label} ({total})</h3>"""
+                    else:
+                        html += f"""<h3>Inactive {students_label} (continued)</h3>"""
 
                     html += """<table style="width:100%;font-size:8pt;"><thead><tr><th>ID</th><th>Child Name</th><th>Parent Name</th><th>Last Collection Date</th><th>Order ID</th></tr></thead><tbody>"""
                     for child in children_list[chunk_start:chunk_end]:
                         html += f"""<tr><td>{child['child_id']}</td><td>{child['child_name']}</td><td>{child['parent_name']}</td><td>{child['last_order_date']}</td><td>{child['last_order_id']}</td></tr>"""
-                    html += """</tbody></table>"""
+                    html += """</tbody></table></div>"""
             else:
-                html += f"<p>✓ All {students_label_lower} who previously ordered are active this week!</p>"
+                html += f"""<div class="page">
+                    <h1>Inactive Users</h1>
+                    <p style="font-size: 9pt; color: {self.COLORS['dark_gray']}; margin-bottom: 15px;">Users who have ordered before but did not order this week.</p>
+                    <p>✓ All {students_label_lower} who previously ordered are active this week!</p>
+                </div>"""
         else:
             if inactive_users.get('students'):
                 students_list = inactive_users['students']
                 total = len(students_list)
-                html += f"""<h3>Inactive {students_label} ({total})</h3>"""
 
                 for chunk_start in range(0, total, ROWS_PER_PAGE):
                     chunk_end = min(chunk_start + ROWS_PER_PAGE, total)
+                    is_first_page = chunk_start == 0
 
-                    if chunk_start > 0:
-                        html += f"""</div><div class="page" style="padding-top: 20mm;"><h3>Inactive {students_label} (continued)</h3>"""
+                    html += f"""<div class="page">"""
+                    if is_first_page:
+                        html += f"""<h1>Inactive Users</h1>
+                        <p style="font-size: 9pt; color: {self.COLORS['dark_gray']}; margin-bottom: 15px;">Users who have ordered before but did not order this week.</p>
+                        <h3>Inactive {students_label} ({total})</h3>"""
+                    else:
+                        html += f"""<h3>Inactive {students_label} (continued)</h3>"""
 
                     html += """<table style="width:100%;font-size:8pt;"><thead><tr><th>ID</th><th>Name</th><th>Last Collection Date</th><th>Order ID</th></tr></thead><tbody>"""
                     for student in students_list[chunk_start:chunk_end]:
                         html += f"""<tr><td>{student['id']}</td><td>{student['name']}</td><td>{student['last_order_date']}</td><td>{student['last_order_id']}</td></tr>"""
-                    html += """</tbody></table>"""
+                    html += """</tbody></table></div>"""
             else:
-                html += f"<p>✓ All {students_label_lower} who previously ordered are active this week!</p>"
+                html += f"""<div class="page">
+                    <h1>Inactive Users</h1>
+                    <p style="font-size: 9pt; color: {self.COLORS['dark_gray']}; margin-bottom: 15px;">Users who have ordered before but did not order this week.</p>
+                    <p>✓ All {students_label_lower} who previously ordered are active this week!</p>
+                </div>"""
 
+        # Inactive Staff Section
         if inactive_users.get('staff'):
             staff_list = inactive_users['staff']
             total = len(staff_list)
-            html += f"""<h3 style="margin-top:20px;">Inactive Staff ({total})</h3>"""
 
             for chunk_start in range(0, total, ROWS_PER_PAGE):
                 chunk_end = min(chunk_start + ROWS_PER_PAGE, total)
+                is_first_page = chunk_start == 0
 
-                if chunk_start > 0:
-                    html += """</div><div class="page" style="padding-top: 20mm;"><h3>Inactive Staff (continued)</h3>"""
+                html += f"""<div class="page">"""
+                if is_first_page:
+                    html += f"""<h3>Inactive Staff ({total})</h3>"""
+                else:
+                    html += """<h3>Inactive Staff (continued)</h3>"""
 
                 html += """<table style="width:100%;font-size:8pt;"><thead><tr><th>ID</th><th>Name</th><th>Last Collection Date</th><th>Order ID</th></tr></thead><tbody>"""
                 for staff in staff_list[chunk_start:chunk_end]:
                     html += f"""<tr><td>{staff['id']}</td><td>{staff['name']}</td><td>{staff['last_order_date']}</td><td>{staff['last_order_id']}</td></tr>"""
-                html += """</tbody></table>"""
-        else:
-            html += "<p>✓ All staff who previously ordered are active this week!</p>"
+                html += """</tbody></table></div>"""
 
         # Never Ordered Users Section
-        html += f"""
-        </div>
-        <div class="page">
-            <h1>Never Ordered Users</h1>
-            <p style="font-size: 9pt; color: {self.COLORS['dark_gray']};">Users who have never placed any order.</p>
-        """
-
         if self.school_type == 'primary':
             if inactive_users.get('never_ordered_children'):
                 children_list = inactive_users['never_ordered_children']
                 total = len(children_list)
-                html += f"""<h3>Never Ordered {students_label} ({total})</h3>"""
 
                 for chunk_start in range(0, total, ROWS_PER_PAGE):
                     chunk_end = min(chunk_start + ROWS_PER_PAGE, total)
+                    is_first_page = chunk_start == 0
 
-                    if chunk_start > 0:
-                        html += f"""</div><div class="page" style="padding-top: 20mm;"><h3>Never Ordered {students_label} (continued)</h3>"""
+                    html += f"""<div class="page">"""
+                    if is_first_page:
+                        html += f"""<h1>Never Ordered Users</h1>
+                        <p style="font-size: 9pt; color: {self.COLORS['dark_gray']}; margin-bottom: 15px;">Users who have never placed any order.</p>
+                        <h3>Never Ordered {students_label} ({total})</h3>"""
+                    else:
+                        html += f"""<h3>Never Ordered {students_label} (continued)</h3>"""
 
                     html += """<table style="width:100%;font-size:8pt;"><thead><tr><th>ID</th><th>Child Name</th><th>Parent Name</th></tr></thead><tbody>"""
                     for child in children_list[chunk_start:chunk_end]:
                         html += f"""<tr><td>{child['child_id']}</td><td>{child['child_name']}</td><td>{child['parent_name']}</td></tr>"""
-                    html += """</tbody></table>"""
+                    html += """</tbody></table></div>"""
             else:
-                html += f"<p>✓ All {students_label_lower} have ordered at least once!</p>"
+                html += f"""<div class="page">
+                    <h1>Never Ordered Users</h1>
+                    <p style="font-size: 9pt; color: {self.COLORS['dark_gray']}; margin-bottom: 15px;">Users who have never placed any order.</p>
+                    <p>✓ All {students_label_lower} have ordered at least once!</p>
+                </div>"""
         else:
             if inactive_users.get('never_ordered_students'):
                 students_list = inactive_users['never_ordered_students']
                 total = len(students_list)
-                html += f"""<h3>Never Ordered {students_label} ({total})</h3>"""
 
                 for chunk_start in range(0, total, ROWS_PER_PAGE):
                     chunk_end = min(chunk_start + ROWS_PER_PAGE, total)
+                    is_first_page = chunk_start == 0
 
-                    if chunk_start > 0:
-                        html += f"""</div><div class="page" style="padding-top: 20mm;"><h3>Never Ordered {students_label} (continued)</h3>"""
+                    html += f"""<div class="page">"""
+                    if is_first_page:
+                        html += f"""<h1>Never Ordered Users</h1>
+                        <p style="font-size: 9pt; color: {self.COLORS['dark_gray']}; margin-bottom: 15px;">Users who have never placed any order.</p>
+                        <h3>Never Ordered {students_label} ({total})</h3>"""
+                    else:
+                        html += f"""<h3>Never Ordered {students_label} (continued)</h3>"""
 
                     html += """<table style="width:100%;font-size:8pt;"><thead><tr><th>ID</th><th>Name</th></tr></thead><tbody>"""
                     for student in students_list[chunk_start:chunk_end]:
                         html += f"""<tr><td>{student['id']}</td><td>{student['name']}</td></tr>"""
-                    html += """</tbody></table>"""
+                    html += """</tbody></table></div>"""
             else:
-                html += f"<p>✓ All {students_label_lower} have ordered at least once!</p>"
+                html += f"""<div class="page">
+                    <h1>Never Ordered Users</h1>
+                    <p style="font-size: 9pt; color: {self.COLORS['dark_gray']}; margin-bottom: 15px;">Users who have never placed any order.</p>
+                    <p>✓ All {students_label_lower} have ordered at least once!</p>
+                </div>"""
 
         # Never ordered staff
         if inactive_users.get('never_ordered_staff'):
             staff_list = inactive_users['never_ordered_staff']
             total = len(staff_list)
-            html += f"""<h3 style="margin-top:20px;">Never Ordered Staff ({total})</h3>"""
 
             for chunk_start in range(0, total, ROWS_PER_PAGE):
                 chunk_end = min(chunk_start + ROWS_PER_PAGE, total)
+                is_first_page = chunk_start == 0
 
-                if chunk_start > 0:
-                    html += """</div><div class="page" style="padding-top: 20mm;"><h3>Never Ordered Staff (continued)</h3>"""
+                html += f"""<div class="page">"""
+                if is_first_page:
+                    html += f"""<h3>Never Ordered Staff ({total})</h3>"""
+                else:
+                    html += """<h3>Never Ordered Staff (continued)</h3>"""
 
                 html += """<table style="width:100%;font-size:8pt;"><thead><tr><th>ID</th><th>Name</th></tr></thead><tbody>"""
                 for staff in staff_list[chunk_start:chunk_end]:
                     html += f"""<tr><td>{staff['id']}</td><td>{staff['name']}</td></tr>"""
-                html += """</tbody></table>"""
-        else:
-            html += "<p>✓ All staff have ordered at least once!</p>"
+                html += """</tbody></table></div>"""
 
-        html += "</div>"
         return html
 
     def generate_compact_bar_chart(self, data, title, color=None):
@@ -3964,9 +3985,10 @@ class ProfessionalPDFGenerator:
             html_content = self.generate_html()
             pdf_buffer = BytesIO()
 
-            # Use write_pdf with minimal options for compatibility with older pydyf versions
+            # Use write_pdf and get bytes directly for maximum compatibility
             html_doc = HTML(string=html_content)
-            html_doc.write_pdf(target=pdf_buffer)
+            pdf_bytes = html_doc.write_pdf()
+            pdf_buffer.write(pdf_bytes)
             pdf_buffer.seek(0)
 
             return pdf_buffer
