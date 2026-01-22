@@ -332,13 +332,24 @@ def get_school_summary(request, school_id):
                         pass
 
             # Build order data
+            # Calculate day name from created_at
+            created_at_day = order.created_at.strftime('%A') if order.created_at else None
+
+            # Format order_date if available
+            order_date_formatted = None
+            if hasattr(order, 'order_date') and order.order_date:
+                if hasattr(order.order_date, 'strftime'):
+                    order_date_formatted = order.order_date.strftime('%d %b %Y')
+
             order_dict = {
                 'order_id': order.id,
                 'child_name': child_name or "N/A",
                 'selected_day': order.selected_day,
+                'order_date': order_date_formatted,
                 'status': order.status,
                 'total_amount': float(order.total_price),
-                'created_at': order.created_at.isoformat()
+                'created_at': order.created_at.isoformat(),
+                'created_at_day': created_at_day
             }
 
             # Add parent/staff name only for primary schools
