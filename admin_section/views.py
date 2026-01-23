@@ -3383,21 +3383,30 @@ DAY_COLORS = {
 CLASS_YEARS = ["1st", "2nd", "3rd", "4th", "5th", "6th"]
 
 def fetch_orders(school_id, school_type, target_day=None):
-    current_time = datetime.now()
+    import pytz
+
+    # Use Ireland timezone for cutoff calculation
+    ireland_tz = pytz.timezone('Europe/Dublin')
+    current_time = datetime.now(ireland_tz)
     current_week_number = current_time.isocalendar()[1]
     current_year = current_time.year
-    
-    cutoff_day = 4  
-    cutoff_hour = 2 
 
+    # Cutoff: Friday (weekday 4) at 2pm (14:00) Ireland time
+    cutoff_day = 4  # Friday (0=Monday, 4=Friday)
+    cutoff_hour = 14  # 2pm
+
+    # Check if we're past Friday 2pm Ireland time
     is_past_cutoff = (
         current_time.weekday() > cutoff_day or
         (current_time.weekday() == cutoff_day and current_time.hour >= cutoff_hour)
     )
 
+    # Before Friday 2pm: show current week orders
+    # After Friday 2pm: show next week orders
     target_week = current_week_number + 1 if is_past_cutoff else current_week_number
     target_year = current_year
-    
+
+    # Handle year rollover
     if target_week > 52:
         target_week = 1
         target_year += 1
