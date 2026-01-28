@@ -2828,6 +2828,44 @@ class CreateOrderAndPaymentAPIView(APIView):
             # Primary school STAFF ordering for themselves (no child_id) must pay
             is_primary_free = school_type == "primary" and child_id is not None
 
+            # ============================================================
+            # PRIMARY SCHOOL: Check if child already has order for this week
+            # One order per week per child limit for primary schools
+            # ============================================================
+            if school_type == "primary" and child_id is not None:
+                # Calculate the target week number based on the first selected day
+                today = datetime.now()
+                current_weekday = today.weekday()
+                days_map = {
+                    'monday': 0, 'tuesday': 1, 'wednesday': 2,
+                    'thursday': 3, 'friday': 4, 'saturday': 5, 'sunday': 6
+                }
+                first_day = selected_days[0].lower()
+                target_day_num = days_map.get(first_day, 0)
+                days_ahead = (target_day_num - current_weekday + 7) % 7
+                if days_ahead == 0:
+                    days_ahead = 7
+                order_date_check = today + timedelta(days=days_ahead)
+                target_week = order_date_check.isocalendar()[1]
+                target_year = order_date_check.year
+
+                # Check if child already has a non-cancelled order for this week
+                existing_order = Order.objects.filter(
+                    child_id=child_id,
+                    week_number=target_week,
+                    year=target_year,
+                    primary_school_id=school_id
+                ).exclude(status__iexact='cancelled').first()
+
+                if existing_order:
+                    return Response({
+                        'error': f'This child already has an order for week {target_week}. Primary students are allowed only 1 order per week.',
+                        'existing_order_id': existing_order.id,
+                        'existing_order_day': existing_order.selected_day,
+                        'week_number': target_week,
+                        'year': target_year
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
             # Transaction for atomicity
             with transaction.atomic():
                 created_orders = []
