@@ -5506,8 +5506,17 @@ def get_dashboard_analytics(request):
     Returns: totals including children count registered by parents
     """
     try:
-        # Calculate totals
+        # Date filtering on order_date
+        start_date = request.GET.get('start_date')
+        end_date = request.GET.get('end_date')
+
         orders_query = Order.objects.all()
+        if start_date:
+            orders_query = orders_query.filter(order_date__date__gte=start_date)
+        if end_date:
+            orders_query = orders_query.filter(order_date__date__lte=end_date)
+
+        # Calculate totals
         total_orders = orders_query.count()
         pending_orders = orders_query.filter(status='pending').count()
         collected_orders = orders_query.filter(status='collected').count()
@@ -5569,14 +5578,25 @@ def get_school_analytics(request):
     try:
         from django.db.models import Count, Sum, Q, Prefetch
 
+        # Date filtering from query params
+        filter_start = request.GET.get('start_date')
+        filter_end = request.GET.get('end_date')
+
+        # Build order date filter Q objects
+        order_date_q = Q()
+        if filter_start:
+            order_date_q &= Q(order__order_date__date__gte=filter_start)
+        if filter_end:
+            order_date_q &= Q(order__order_date__date__lte=filter_end)
+
         schools_data = []
 
         # Primary schools - Use database aggregations
         primary_schools = PrimarySchool.objects.annotate(
-            total_orders_count=Count('order', distinct=True),
-            pending_orders_count=Count('order', filter=Q(order__status='pending'), distinct=True),
-            collected_orders_count=Count('order', filter=Q(order__status='collected'), distinct=True),
-            cancelled_orders_count=Count('order', filter=Q(order__status='cancelled'), distinct=True),
+            total_orders_count=Count('order', filter=order_date_q, distinct=True),
+            pending_orders_count=Count('order', filter=Q(order__status='pending') & order_date_q, distinct=True),
+            collected_orders_count=Count('order', filter=Q(order__status='collected') & order_date_q, distinct=True),
+            cancelled_orders_count=Count('order', filter=Q(order__status='cancelled') & order_date_q, distinct=True),
             student_count_total=Count('student', distinct=True),
             children_count_total=Count('student', filter=Q(student__parent__isnull=False), distinct=True)
         ).prefetch_related(
@@ -5590,6 +5610,12 @@ def get_school_analytics(request):
         start_date = start_of_current_week - timedelta(weeks=2)
         # End 1 week from now (end of next week)
         end_date = start_of_current_week + timedelta(weeks=2, days=6)
+
+        # Override chart date range if filters provided
+        if filter_start:
+            start_date = datetime.strptime(filter_start, '%Y-%m-%d').date()
+        if filter_end:
+            end_date = datetime.strptime(filter_end, '%Y-%m-%d').date()
 
         for school in primary_schools:
             # Get orders_over_time for 4 weeks for this school
@@ -5676,10 +5702,10 @@ def get_school_analytics(request):
 
         # Secondary schools - Use database aggregations
         secondary_schools = SecondarySchool.objects.annotate(
-            total_orders_count=Count('order', distinct=True),
-            pending_orders_count=Count('order', filter=Q(order__status='pending'), distinct=True),
-            collected_orders_count=Count('order', filter=Q(order__status='collected'), distinct=True),
-            cancelled_orders_count=Count('order', filter=Q(order__status='cancelled'), distinct=True),
+            total_orders_count=Count('order', filter=order_date_q, distinct=True),
+            pending_orders_count=Count('order', filter=Q(order__status='pending') & order_date_q, distinct=True),
+            collected_orders_count=Count('order', filter=Q(order__status='collected') & order_date_q, distinct=True),
+            cancelled_orders_count=Count('order', filter=Q(order__status='cancelled') & order_date_q, distinct=True),
             student_count_total=Count('student', distinct=True)
         ).prefetch_related(
             Prefetch('menus', queryset=Menu.objects.filter(is_active=True))
