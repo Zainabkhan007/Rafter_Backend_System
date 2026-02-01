@@ -2829,11 +2829,10 @@ class CreateOrderAndPaymentAPIView(APIView):
             is_primary_free = school_type == "primary" and child_id is not None
 
             # ============================================================
-            # PRIMARY SCHOOL: Check if child already has order for this week
-            # One order per week per child limit for primary schools
+            # PRIMARY SCHOOL: 1 order per week per child
+            # If all existing orders for that week are cancelled, allow re-ordering
             # ============================================================
             if school_type == "primary" and child_id is not None:
-                # Calculate the target week number based on the first selected day
                 today = datetime.now()
                 current_weekday = today.weekday()
                 days_map = {
@@ -2849,21 +2848,17 @@ class CreateOrderAndPaymentAPIView(APIView):
                 target_week = order_date_check.isocalendar()[1]
                 target_year = order_date_check.year
 
-                # Check if child already has a non-cancelled order for this week
-                existing_order = Order.objects.filter(
+                # Check for any active (non-cancelled) order for this child this week
+                active_order_exists = Order.objects.filter(
                     child_id=child_id,
                     week_number=target_week,
                     year=target_year,
                     primary_school_id=school_id
-                ).exclude(status__iexact='cancelled').first()
+                ).exclude(status__iexact='cancelled').exists()
 
-                if existing_order:
+                if active_order_exists:
                     return Response({
-                        'error': f'This child already has an order for week {target_week}. Primary students are allowed only 1 order per week.',
-                        'existing_order_id': existing_order.id,
-                        'existing_order_day': existing_order.selected_day,
-                        'week_number': target_week,
-                        'year': target_year
+                        'error': 'This child already has an order for this week. Primary students are allowed 1 order per week. Cancel the existing order to place a new one.'
                     }, status=status.HTTP_400_BAD_REQUEST)
 
             # Transaction for atomicity
