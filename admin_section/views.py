@@ -2829,8 +2829,9 @@ class CreateOrderAndPaymentAPIView(APIView):
             is_primary_free = school_type == "primary" and child_id is not None
 
             # ============================================================
-            # PRIMARY SCHOOL: 1 order per week per child
-            # If all existing orders for that week are cancelled, allow re-ordering
+            # PRIMARY SCHOOL: 1 order per day per child per week
+            # A child can order once for each day (Mon, Tue, etc.) in a week.
+            # If cancelled, they can re-order for that same day.
             # ============================================================
             if school_type == "primary" and child_id is not None:
                 today = datetime.now()
@@ -2839,27 +2840,37 @@ class CreateOrderAndPaymentAPIView(APIView):
                     'monday': 0, 'tuesday': 1, 'wednesday': 2,
                     'thursday': 3, 'friday': 4, 'saturday': 5, 'sunday': 6
                 }
-                first_day = selected_days[0].lower()
-                target_day_num = days_map.get(first_day, 0)
-                days_ahead = (target_day_num - current_weekday + 7) % 7
-                if days_ahead == 0:
-                    days_ahead = 7
-                order_date_check = today + timedelta(days=days_ahead)
-                target_week = order_date_check.isocalendar()[1]
-                target_year = order_date_check.year
 
-                # Check for any active (non-cancelled) order for this child this week
-                active_order_exists = Order.objects.filter(
-                    child_id=child_id,
-                    week_number=target_week,
-                    year=target_year,
-                    primary_school_id=school_id
-                ).exclude(status__iexact='cancelled').exists()
+                for day in selected_days:
+                    target_day_num = days_map.get(day.lower(), 0)
+                    days_ahead = (target_day_num - current_weekday + 7) % 7
+                    if days_ahead == 0:
+                        days_ahead = 7
+                    order_date_check = today + timedelta(days=days_ahead)
+                    target_week = order_date_check.isocalendar()[1]
+                    target_year = order_date_check.year
 
-                if active_order_exists:
-                    return Response({
-                        'error': 'This child already has an order for this week. Primary students are allowed 1 order per week. Cancel the existing order to place a new one.'
-                    }, status=status.HTTP_400_BAD_REQUEST)
+                    print(f"[ORDER CHECK] child_id={child_id}, day={day}, "
+                          f"today={today.strftime('%A %Y-%m-%d')}, "
+                          f"target_week={target_week}, target_year={target_year}")
+
+                    # Check if child already has a non-cancelled order for this specific day
+                    active_order = Order.objects.filter(
+                        child_id=child_id,
+                        week_number=target_week,
+                        year=target_year,
+                        selected_day__iexact=day,
+                        primary_school_id=school_id
+                    ).exclude(status__iexact='cancelled').first()
+
+                    if active_order:
+                        print(f"  [BLOCKED] by order id={active_order.id}, "
+                              f"day={active_order.selected_day}, status='{active_order.status}'")
+                        return Response({
+                            'error': f'This child already has an order for {day} in week {target_week}. Cancel the existing order to place a new one.',
+                        }, status=status.HTTP_400_BAD_REQUEST)
+                    else:
+                        print(f"  [ALLOWED] No active order for {day} in week {target_week}")
 
             # Transaction for atomicity
             with transaction.atomic():
