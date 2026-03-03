@@ -3780,6 +3780,118 @@ def generate_workbook(school, student_orders, staff_orders, school_type, role='a
         sheet = workbook.create_sheet(title="No Data")
         sheet.cell(row=1, column=1, value="No orders found for the given filters.")
 
+    # === Week Total Sheet (always at the end) ===
+    if role in ["admin", "chef", "staff"]:
+        week_total_fill = PatternFill(start_color="1F4E79", end_color="1F4E79", fill_type="solid")
+        week_total_font = Font(bold=True, size=12, color="FFFFFF")
+        grand_total_fill = PatternFill(start_color="FF0000", end_color="FF0000", fill_type="solid")
+        grand_total_font = Font(bold=True, size=12, color="FFFFFF")
+        day_header_fill = PatternFill(start_color="2E75B6", end_color="2E75B6", fill_type="solid")
+        day_header_font = Font(bold=True, size=11, color="FFFFFF")
+
+        sheet = workbook.create_sheet(title="Week Total")
+        sheet.sheet_properties.tabColor = "1F4E79"
+
+        # Title
+        sheet.merge_cells(start_row=1, end_row=1, start_column=1, end_column=3)
+        title_cell = sheet.cell(row=1, column=1, value=f"Week Total — {school}")
+        title_cell.font = Font(bold=True, size=14, color="FFFFFF")
+        title_cell.fill = PatternFill(start_color="1F4E79", end_color="1F4E79", fill_type="solid")
+        title_cell.alignment = center_align
+
+        row_num = 2
+        week_grand_total = 0
+        # Aggregate across all days: menu_item -> total qty
+        week_totals_by_item = defaultdict(int)
+        # Per-day breakdown: day -> menu_item -> qty
+        week_totals_by_day = {}
+
+        for day in all_days:
+            if day_totals.get(day):
+                week_totals_by_day[day] = dict(day_totals[day])
+                for menu_name, qty in day_totals[day].items():
+                    week_totals_by_item[menu_name] += qty
+
+        # Section 1: Per-day breakdown
+        for day in all_days:
+            if not day_totals.get(day):
+                continue
+
+            # Day header
+            sheet.merge_cells(start_row=row_num, end_row=row_num, start_column=1, end_column=3)
+            day_cell = sheet.cell(row=row_num, column=1, value=day)
+            day_cell.font = day_header_font
+            day_cell.fill = day_header_fill
+            day_cell.alignment = center_align
+            row_num += 1
+
+            # Column headers
+            for col, heading in enumerate(["Menu Item", "Quantity"], 1):
+                cell = sheet.cell(row=row_num, column=col, value=heading)
+                cell.font = Font(bold=True, size=10, color="FFFFFF")
+                cell.fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
+                cell.border = border
+                cell.alignment = center_align
+            row_num += 1
+
+            day_subtotal = 0
+            for menu_name, qty in sorted(day_totals[day].items()):
+                sheet.cell(row=row_num, column=1, value=menu_name).border = border
+                qty_cell = sheet.cell(row=row_num, column=2, value=qty)
+                qty_cell.border = border
+                qty_cell.alignment = center_align
+                day_subtotal += qty
+                row_num += 1
+
+            # Day subtotal row
+            sheet.cell(row=row_num, column=1, value=f"Total for {day}").font = Font(bold=True)
+            sheet.cell(row=row_num, column=1).fill = total_fill
+            sheet.cell(row=row_num, column=1).border = border
+            subtotal_cell = sheet.cell(row=row_num, column=2, value=day_subtotal)
+            subtotal_cell.font = Font(bold=True)
+            subtotal_cell.fill = total_fill
+            subtotal_cell.border = border
+            subtotal_cell.alignment = center_align
+            week_grand_total += day_subtotal
+            row_num += 2  # blank row between days
+
+        # Section 2: Weekly summary by menu item
+        sheet.merge_cells(start_row=row_num, end_row=row_num, start_column=1, end_column=3)
+        summary_cell = sheet.cell(row=row_num, column=1, value="Weekly Summary (All Days Combined)")
+        summary_cell.font = week_total_font
+        summary_cell.fill = week_total_fill
+        summary_cell.alignment = center_align
+        row_num += 1
+
+        # Column headers
+        for col, heading in enumerate(["Menu Item", "Total Qty (Week)"], 1):
+            cell = sheet.cell(row=row_num, column=col, value=heading)
+            cell.font = Font(bold=True, size=10, color="FFFFFF")
+            cell.fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
+            cell.border = border
+            cell.alignment = center_align
+        row_num += 1
+
+        for menu_name, qty in sorted(week_totals_by_item.items()):
+            sheet.cell(row=row_num, column=1, value=menu_name).border = border
+            qty_cell = sheet.cell(row=row_num, column=2, value=qty)
+            qty_cell.border = border
+            qty_cell.alignment = center_align
+            row_num += 1
+
+        # Grand total
+        sheet.cell(row=row_num, column=1, value="GRAND TOTAL (Week)").font = grand_total_font
+        sheet.cell(row=row_num, column=1).fill = grand_total_fill
+        sheet.cell(row=row_num, column=1).border = border
+        grand_cell = sheet.cell(row=row_num, column=2, value=week_grand_total)
+        grand_cell.font = grand_total_font
+        grand_cell.fill = grand_total_fill
+        grand_cell.border = border
+        grand_cell.alignment = center_align
+
+        sheet.column_dimensions["A"].width = 35
+        sheet.column_dimensions["B"].width = 20
+
     return workbook
 
 
