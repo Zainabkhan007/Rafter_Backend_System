@@ -124,6 +124,7 @@ urlpatterns = [
     path('documents/detail/', views.get_document_detail),
     path('documents/mark-read/', views.mark_document_read),
     path('documents/report/', views.export_worker_document_status),
+    path('documents/pdf/<int:document_id>/', views.serve_document_pdf),
 
     # Admin Dashboard Analytics
     path('dashboard/analytics/', views.get_dashboard_analytics, name='dashboard_analytics'),

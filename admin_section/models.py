@@ -448,7 +448,7 @@ class Worker(models.Model):
 
 class Document(models.Model):
     title = models.CharField(max_length=255)
-    content = models.TextField()
+    pdf_file = models.FileField(upload_to='documents/', null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

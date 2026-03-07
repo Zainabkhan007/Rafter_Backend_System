@@ -22,7 +22,8 @@ from django.core.signing import TimestampSigner, BadSignature, SignatureExpired
 from django.core.mail import send_mail
 from django.core.files.storage import FileSystemStorage, default_storage
 from django.core.files.base import ContentFile
-from django.http import HttpResponse, JsonResponse
+from django.http import HttpResponse, JsonResponse, FileResponse, Http404
+from django.views.decorators.clickjacking import xframe_options_exempt
 from django.db import transaction
 from django.db.models import Count
 from django.utils.timezone import now, localtime, make_aware
@@ -5367,22 +5368,21 @@ class CreateManagerOrderAPIView(APIView):
 @api_view(['POST'])
 def create_document(request):
     title = request.data.get('title')
-    content = request.data.get('content')
+    pdf_file = request.FILES.get('pdf_file')
 
-    if not title or not content:
-        return Response({'error': 'Title and content are required.'}, status=status.HTTP_400_BAD_REQUEST)
-
+    if not title or not pdf_file:
+        return Response({'error': 'Title and PDF file are required.'}, status=status.HTTP_400_BAD_REQUEST)
 
     document = Document.objects.create(
         title=title,
-        content=content,
+        pdf_file=pdf_file,
     )
 
     return Response({
         'message': 'Document created successfully.',
         'document_id': document.id,
         'title': document.title,
-        'content': document.content,
+        'pdf_url': document.pdf_file.url if document.pdf_file else None,
     }, status=status.HTTP_201_CREATED)
 
 
@@ -5395,7 +5395,7 @@ def get_all_documents(request):
     data = [{
         'id': doc.id,
         'title': doc.title,
-        'content': doc.content,
+        'pdf_url': doc.pdf_file.url if doc.pdf_file else None,
         'created_at': doc.created_at,
         'updated_at': doc.updated_at
     } for doc in documents]
@@ -5409,7 +5409,7 @@ def get_all_documents(request):
 def edit_document(request):
     document_id = request.data.get('document_id')
     title = request.data.get('title')
-    content = request.data.get('content')
+    pdf_file = request.FILES.get('pdf_file')
 
     if not document_id:
         return Response({'error': 'document_id is required.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -5421,8 +5421,8 @@ def edit_document(request):
 
     if title:
         document.title = title
-    if content:
-        document.content = content
+    if pdf_file:
+        document.pdf_file = pdf_file
 
     document.save()
     return Response({'message': 'Document updated successfully.'}, status=status.HTTP_200_OK)
@@ -5469,6 +5469,7 @@ def get_worker_documents(request):
         data.append({
             'document_id': doc.id,
             'title': doc.title,
+            'pdf_url': doc.pdf_file.url if doc.pdf_file else None,
             'status': status_obj.status if status_obj else 'unread',
             'read_at': status_obj.read_at if status_obj else None
         })
@@ -5494,7 +5495,7 @@ def get_document_detail(request):
     return Response({
         'id': document.id,
         'title': document.title,
-        'content': document.content,
+        'pdf_url': document.pdf_file.url if document.pdf_file else None,
         'created_at': document.created_at,
         'updated_at': document.updated_at,
     }, status=status.HTTP_200_OK)
@@ -5531,6 +5532,23 @@ def mark_document_read(request):
         'read_at': obj.read_at
     }, status=status.HTTP_200_OK)
 
+
+# ------------------------------
+# Serve Document PDF (iframe-safe)
+# ------------------------------
+@xframe_options_exempt
+def serve_document_pdf(request, document_id):
+    try:
+        document = Document.objects.get(id=document_id)
+    except Document.DoesNotExist:
+        raise Http404
+
+    if not document.pdf_file:
+        raise Http404
+
+    response = FileResponse(document.pdf_file.open('rb'), content_type='application/pdf')
+    response['Content-Disposition'] = 'inline'
+    return response
 
 
 @api_view(['GET'])
