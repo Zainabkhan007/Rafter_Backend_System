@@ -54,6 +54,97 @@ logger = logging.getLogger(__name__)
 stripe.api_key = settings.STRIPE_SECRET_KEY
 ALLOWED_FILE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif']
 
+
+def check_and_apply_promotions(user, user_type, school_id=None, school_type=None):
+    """
+    Check if user qualifies for any active promotions.
+    Returns a list of dicts with promotion reward info, or empty list.
+    """
+    from django.db.models import Sum
+    today = date.today()
+    active_promotions = Promotion.objects.filter(
+        is_active=True,
+        start_date__lte=today,
+        end_date__gte=today
+    )
+
+    rewards = []
+    for promotion in active_promotions:
+        # ── Already received? ──
+        already_received = UserPromotion.objects.filter(
+            promotion=promotion,
+            user_id=user.id,
+            user_type=user_type
+        ).exists()
+        if already_received:
+            continue
+
+        # ── Max redemptions across all users ──
+        if promotion.max_redemptions is not None:
+            total_redeemed = UserPromotion.objects.filter(promotion=promotion).count()
+            if total_redeemed >= promotion.max_redemptions:
+                continue
+
+        # ── School restriction ──
+        if promotion.schools:  # empty list = all schools
+            if school_id is None or school_type is None:
+                continue
+            school_match = any(
+                s.get('id') == school_id and s.get('type') == school_type
+                for s in promotion.schools
+            )
+            if not school_match:
+                continue
+
+        # ── Build base order queryset (non-cancelled) ──
+        orders_qs = Order.objects.filter(
+            user_id=user.id,
+            user_type=user_type
+        ).exclude(status='cancelled')
+
+        if promotion.exclude_primary_orders:
+            orders_qs = orders_qs.filter(primary_school__isnull=True)
+
+        # ── Min order count ──
+        if promotion.min_order_count is not None:
+            if orders_qs.count() < promotion.min_order_count:
+                continue
+
+        # ── Spending threshold ──
+        if promotion.spending_threshold is not None:
+            total_spent = orders_qs.aggregate(total=Sum('total_price'))['total'] or 0
+            if float(total_spent) < float(promotion.spending_threshold):
+                continue
+
+        # ── All conditions passed — award credits ──
+        user.credits += float(promotion.credit_reward)
+        user.save()
+
+        UserPromotion.objects.create(
+            promotion=promotion,
+            user_id=user.id,
+            user_type=user_type
+        )
+
+        Transaction.objects.create(
+            user_id=user.id,
+            user_type=user_type,
+            transaction_type='credit',
+            payment_method='credits',
+            amount=float(promotion.credit_reward),
+            description=f"Promotion reward: {promotion.name}",
+            parent=user if user_type == 'parent' else None,
+            staff=user if user_type == 'staff' else None,
+            student=user if user_type == 'student' else None
+        )
+
+        rewards.append({
+            'promotion_name': promotion.name,
+            'credit_reward': float(promotion.credit_reward),
+        })
+
+    return rewards
+
 APPLE_KEYS_URL = "https://appleid.apple.com/auth/keys"
 APPLE_AUDIENCE = "app.raftersfoodservices.ie"
 
@@ -2987,11 +3078,15 @@ class CreateOrderAndPaymentAPIView(APIView):
                             student=user if user_type == 'student' else None
                         )
 
-                    return Response({
+                    promotion_rewards = check_and_apply_promotions(user, user_type, school_id=school_id, school_type=school_type)
+                    response_data = {
                         'message': 'Orders created successfully with free meal for child.',
                         'orders': OrderSerializer(created_orders, many=True).data,
                         'total_orders': len(created_orders)
-                    }, status=status.HTTP_201_CREATED)
+                    }
+                    if promotion_rewards:
+                        response_data['promotion_rewards'] = promotion_rewards
+                    return Response(response_data, status=status.HTTP_201_CREATED)
 
                 # ---------------------------
                 # Handle credits (secondary without payment_id)
@@ -3028,13 +3123,17 @@ class CreateOrderAndPaymentAPIView(APIView):
                             student=user if user_type == 'student' else None
                         )
 
-                    return Response({
+                    promotion_rewards = check_and_apply_promotions(user, user_type, school_id=school_id, school_type=school_type)
+                    response_data = {
                         'message': 'Orders created and credits deducted successfully!',
                         'orders': OrderSerializer(created_orders, many=True).data,
                         'total_orders': len(created_orders),
                         'credits_deducted': calculated_total_price,
                         'remaining_credits': user.credits
-                    }, status=status.HTTP_201_CREATED)
+                    }
+                    if promotion_rewards:
+                        response_data['promotion_rewards'] = promotion_rewards
+                    return Response(response_data, status=status.HTTP_201_CREATED)
 
                 # ---------------------------
                 # Handle Stripe payment (secondary with payment_id)
@@ -3091,13 +3190,17 @@ class CreateOrderAndPaymentAPIView(APIView):
                         student=user if user_type == 'student' else None
                     )
 
-                return Response({
+                promotion_rewards = check_and_apply_promotions(user, user_type, school_id=school_id, school_type=school_type)
+                response_data = {
                     'message': 'Orders and payment intent created successfully!',
                     'orders': OrderSerializer(created_orders, many=True).data,
                     'payment_intent': payment_intent.client_secret,
                     'total_orders': len(created_orders),
                     'total_paid': calculated_total_price
-                }, status=status.HTTP_201_CREATED)
+                }
+                if promotion_rewards:
+                    response_data['promotion_rewards'] = promotion_rewards
+                return Response(response_data, status=status.HTTP_201_CREATED)
 
         except stripe.error.CardError as e:
             return Response({"error": f"Card Error: {e.user_message}"}, status=status.HTTP_400_BAD_REQUEST)
@@ -6099,3 +6202,98 @@ def get_orders_over_time(request):
         
     except Exception as e:
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ------------------------------
+# Promotion Management Views
+# ------------------------------
+
+def _serialize_promotion(promotion):
+    return {
+        'id': promotion.id,
+        'name': promotion.name,
+        'start_date': str(promotion.start_date),
+        'end_date': str(promotion.end_date),
+        'spending_threshold': float(promotion.spending_threshold) if promotion.spending_threshold is not None else None,
+        'credit_reward': float(promotion.credit_reward),
+        'is_active': promotion.is_active,
+        'created_at': str(promotion.created_at),
+        'schools': promotion.schools or [],
+        'min_order_count': promotion.min_order_count,
+        'exclude_primary_orders': promotion.exclude_primary_orders,
+        'max_redemptions': promotion.max_redemptions,
+    }
+
+
+@api_view(['GET', 'POST'])
+def promotions(request):
+    if request.method == 'GET':
+        all_promotions = Promotion.objects.all().order_by('-created_at')
+        return Response([_serialize_promotion(p) for p in all_promotions], status=status.HTTP_200_OK)
+
+    elif request.method == 'POST':
+        name = request.data.get('name')
+        start_date = request.data.get('start_date')
+        end_date = request.data.get('end_date')
+        credit_reward = request.data.get('credit_reward')
+        is_active = request.data.get('is_active', True)
+        # Optional fields
+        spending_threshold = request.data.get('spending_threshold') or None
+        min_order_count = request.data.get('min_order_count') or None
+        exclude_primary_orders = request.data.get('exclude_primary_orders', False)
+        schools = request.data.get('schools', [])
+        max_redemptions = request.data.get('max_redemptions') or None
+
+        if not all([name, start_date, end_date, credit_reward]):
+            return Response({'error': 'Name, start date, end date, and credit reward are required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        promotion = Promotion.objects.create(
+            name=name,
+            start_date=start_date,
+            end_date=end_date,
+            credit_reward=credit_reward,
+            is_active=is_active,
+            spending_threshold=spending_threshold,
+            min_order_count=min_order_count,
+            exclude_primary_orders=exclude_primary_orders,
+            schools=schools,
+            max_redemptions=max_redemptions,
+        )
+        promotion.refresh_from_db()
+        return Response(_serialize_promotion(promotion), status=status.HTTP_201_CREATED)
+
+
+@api_view(['GET', 'PUT', 'DELETE'])
+def promotion_detail(request, pk):
+    try:
+        promotion = Promotion.objects.get(pk=pk)
+    except Promotion.DoesNotExist:
+        return Response({'error': 'Promotion not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == 'GET':
+        return Response(_serialize_promotion(promotion))
+
+    elif request.method == 'PUT':
+        promotion.name = request.data.get('name', promotion.name)
+        promotion.start_date = request.data.get('start_date', promotion.start_date)
+        promotion.end_date = request.data.get('end_date', promotion.end_date)
+        promotion.credit_reward = request.data.get('credit_reward', promotion.credit_reward)
+        promotion.is_active = request.data.get('is_active', promotion.is_active)
+        # Optional fields — use sentinel to distinguish "not provided" from explicit null
+        if 'spending_threshold' in request.data:
+            promotion.spending_threshold = request.data.get('spending_threshold') or None
+        if 'min_order_count' in request.data:
+            promotion.min_order_count = request.data.get('min_order_count') or None
+        if 'exclude_primary_orders' in request.data:
+            promotion.exclude_primary_orders = request.data.get('exclude_primary_orders', False)
+        if 'schools' in request.data:
+            promotion.schools = request.data.get('schools', [])
+        if 'max_redemptions' in request.data:
+            promotion.max_redemptions = request.data.get('max_redemptions') or None
+        promotion.save()
+        promotion.refresh_from_db()
+        return Response(_serialize_promotion(promotion))
+
+    elif request.method == 'DELETE':
+        promotion.delete()
+        return Response({'message': 'Promotion deleted successfully.'}, status=status.HTTP_200_OK)

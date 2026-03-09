@@ -126,6 +126,10 @@ urlpatterns = [
     path('documents/report/', views.export_worker_document_status),
     path('documents/pdf/<int:document_id>/', views.serve_document_pdf),
 
+    # Promotions
+    path('promotions/', views.promotions, name='promotions'),
+    path('promotions/<int:pk>/', views.promotion_detail, name='promotion_detail'),
+
     # Admin Dashboard Analytics
     path('dashboard/analytics/', views.get_dashboard_analytics, name='dashboard_analytics'),
     path('dashboard/schools/', views.get_school_analytics, name='school_analytics'),  # Changed to GET

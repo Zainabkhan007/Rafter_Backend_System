@@ -494,3 +494,60 @@ class AppVersion(models.Model):
 
     def __str__(self):
         return f"{self.platform} - {self.latest_version}"
+
+
+# ------------------------------
+# Promotion Models
+# ------------------------------
+class Promotion(models.Model):
+    # Required
+    name = models.CharField(max_length=100)
+    start_date = models.DateField()
+    end_date = models.DateField()
+    credit_reward = models.DecimalField(max_digits=10, decimal_places=2, help_text="Credits to award when all conditions are met")
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    # Optional conditions
+    spending_threshold = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True,
+        help_text="Minimum total spending required"
+    )
+    min_order_count = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text="Minimum number of orders user must have placed"
+    )
+    exclude_primary_orders = models.BooleanField(
+        default=False,
+        help_text="Exclude primary school (free) orders from spending and count checks"
+    )
+    # [{"id": 1, "type": "primary"}, {"id": 2, "type": "secondary"}] — empty = all schools
+    schools = models.JSONField(
+        default=list, blank=True,
+        help_text="Schools this promotion applies to. Empty = all schools."
+    )
+    max_redemptions = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text="Max total redemptions across all users. Null = unlimited."
+    )
+
+    def __str__(self):
+        return f"{self.name} ({self.start_date} - {self.end_date})"
+
+
+class UserPromotion(models.Model):
+    USER_TYPE_CHOICES = [
+        ('parent', 'Parent'),
+        ('staff', 'Staff'),
+        ('student', 'Student'),
+    ]
+    promotion = models.ForeignKey(Promotion, on_delete=models.CASCADE, related_name='user_promotions')
+    user_id = models.IntegerField()
+    user_type = models.CharField(max_length=20, choices=USER_TYPE_CHOICES)
+    credited_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('promotion', 'user_id', 'user_type')
+
+    def __str__(self):
+        return f"{self.user_type} {self.user_id} - {self.promotion.name}"
