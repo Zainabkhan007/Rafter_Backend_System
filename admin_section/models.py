@@ -364,33 +364,23 @@ class CanteenStaff(models.Model):
 class Manager(models.Model):
     username = models.CharField(max_length=30, unique=True)
     password = models.CharField(max_length=128)
-    school_type = models.CharField(max_length=20, choices=[('primary', 'Primary'), ('secondary', 'Secondary')])
-    primary_school = models.ForeignKey('PrimarySchool', on_delete=models.SET_NULL, null=True, blank=True)
-    secondary_school = models.ForeignKey('SecondarySchool', on_delete=models.SET_NULL, null=True, blank=True)
 
     def save(self, *args, **kwargs):
-        # ✅ Always lowercase username
         if self.username:
             self.username = self.username.lower()
-
-        # ✅ Hash password if not already hashed
         if self.password and not self.password.startswith('pbkdf2_'):
             self.password = make_password(self.password)
-
-        # ✅ Keep only relevant school
-        if self.school_type == 'primary':
-            self.secondary_school = None
-        elif self.school_type == 'secondary':
-            self.primary_school = None
-
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return f'{self.username} - {self.school_type} Manager'
+        return f'{self.username} - Manager'
 
 class ManagerOrder(models.Model):
     manager = models.ForeignKey('Manager', on_delete=models.CASCADE, related_name='orders')
-    order_date = models.DateField(null=True, blank=True) 
+    manager_name = models.CharField(max_length=100, blank=True, null=True)
+    school_type = models.CharField(max_length=20, blank=True, null=True)
+    school_id = models.PositiveIntegerField(null=True, blank=True)
+    order_date = models.DateField(null=True, blank=True)
     week_number = models.PositiveIntegerField(null=True, blank=True)
     year = models.PositiveIntegerField(null=True, blank=True)
     status = models.CharField(max_length=20, default='pending')

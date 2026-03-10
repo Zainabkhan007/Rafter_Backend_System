@@ -71,27 +71,10 @@ class CanteenStaffSerializer(serializers.ModelSerializer):
             validated_data['password'] = instance.password
         return super().update(instance, validated_data)
 class ManagerSerializer(serializers.ModelSerializer):
-    school_name = serializers.SerializerMethodField()
-
     class Meta:
         model = Manager
-        fields = [
-            'id',
-            'username',
-            'password',
-            'school_type',
-            'primary_school',
-            'secondary_school',
-            'school_name',
-        ]
+        fields = ['id', 'username', 'password']
         extra_kwargs = {'password': {'write_only': True}}
-
-    def get_school_name(self, obj):
-        if obj.school_type == 'primary' and obj.primary_school:
-            return obj.primary_school.school_name
-        elif obj.school_type == 'secondary' and obj.secondary_school:
-            return obj.secondary_school.secondary_school_name
-        return 'Unknown School'
 
 class ManagerOrderItemSerializer(serializers.ModelSerializer):
     menu_item_id = serializers.PrimaryKeyRelatedField(

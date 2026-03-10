@@ -104,6 +104,8 @@ urlpatterns = [
 
    path('payment/', views.CreateOrderAndPaymentAPIView.as_view(), name='create-payment-intent'),
    path('manager/orders/create/', views.CreateManagerOrderAPIView.as_view(), name='manager-order-create'),
+   path('manager/orders/', views.manager_orders_dashboard, name='manager-orders-dashboard'),
+   path('manager/school-menus/', views.manager_school_menus, name='manager-school-menus'),
    path('top_up_payment/', views.top_up_payment, name='top_up_payment'),
    path('transactions/', views.get_user_transactions, name='get_user_transactions'),
    path('update_user_version/', views.update_user_version, name='update_user_version'),

@@ -55,10 +55,14 @@ stripe.api_key = settings.STRIPE_SECRET_KEY
 ALLOWED_FILE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif']
 
 
-def check_and_apply_promotions(user, user_type, school_id=None, school_type=None):
+def check_and_apply_promotions(user, user_type, school_id=None, school_type=None, current_order_total=0):
     """
     Check if user qualifies for any active promotions.
-    Returns a list of dicts with promotion reward info, or empty list.
+    - min_order_count is checked against orders placed within the promotion's date range.
+    - spending_threshold is checked against the current order total only.
+    Returns:
+      - rewards: list of awarded promotions
+      - pending: list of promotions user hasn't qualified for yet, with orders_remaining
     """
     from django.db.models import Sum
     today = date.today()
@@ -69,7 +73,13 @@ def check_and_apply_promotions(user, user_type, school_id=None, school_type=None
     )
 
     rewards = []
+    pending_promotions = []
+
+    print(f"[PROMO] user_id={user.id}, user_type={user_type}, active_promotions={active_promotions.count()}")
+
     for promotion in active_promotions:
+        print(f"[PROMO] Checking promotion: '{promotion.name}' (id={promotion.id})")
+
         # ── Already received? ──
         already_received = UserPromotion.objects.filter(
             promotion=promotion,
@@ -77,43 +87,62 @@ def check_and_apply_promotions(user, user_type, school_id=None, school_type=None
             user_type=user_type
         ).exists()
         if already_received:
+            print(f"[PROMO] SKIP '{promotion.name}' — already received")
             continue
 
         # ── Max redemptions across all users ──
         if promotion.max_redemptions is not None:
             total_redeemed = UserPromotion.objects.filter(promotion=promotion).count()
             if total_redeemed >= promotion.max_redemptions:
+                print(f"[PROMO] SKIP '{promotion.name}' — max redemptions reached ({total_redeemed}/{promotion.max_redemptions})")
                 continue
 
         # ── School restriction ──
-        if promotion.schools:  # empty list = all schools
+        if promotion.schools:  # empty list / None = all schools
             if school_id is None or school_type is None:
+                print(f"[PROMO] SKIP '{promotion.name}' — school restriction but no school_id/school_type provided")
                 continue
             school_match = any(
                 s.get('id') == school_id and s.get('type') == school_type
                 for s in promotion.schools
             )
             if not school_match:
+                print(f"[PROMO] SKIP '{promotion.name}' — school {school_id} ({school_type}) not in promotion schools")
                 continue
 
-        # ── Build base order queryset (non-cancelled) ──
+        # ── Build base order queryset within promotion date range (non-cancelled) ──
         orders_qs = Order.objects.filter(
             user_id=user.id,
-            user_type=user_type
+            user_type=user_type,
+            order_date__date__gte=promotion.start_date,
+            order_date__date__lte=promotion.end_date,
         ).exclude(status='cancelled')
 
         if promotion.exclude_primary_orders:
             orders_qs = orders_qs.filter(primary_school__isnull=True)
 
-        # ── Min order count ──
+        print(f"[PROMO] '{promotion.name}' — orders in range ({promotion.start_date} to {promotion.end_date}): {orders_qs.count()}, min_order_count={promotion.min_order_count}")
+
+        # ── Min order count within promotion date range ──
         if promotion.min_order_count is not None:
-            if orders_qs.count() < promotion.min_order_count:
+            orders_in_range = orders_qs.count()
+            if orders_in_range < promotion.min_order_count:
+                orders_remaining = promotion.min_order_count - orders_in_range
+                print(f"[PROMO] PENDING '{promotion.name}' — {orders_in_range}/{promotion.min_order_count} orders, {orders_remaining} remaining")
+                pending_promotions.append({
+                    'promotion_name': promotion.name,
+                    'credit_reward': float(promotion.credit_reward),
+                    'orders_remaining': orders_remaining,
+                    'orders_placed': orders_in_range,
+                    'min_order_count': promotion.min_order_count,
+                    'promotion_ends': str(promotion.end_date),
+                })
                 continue
 
-        # ── Spending threshold ──
+        # ── Spending threshold — checked against current order total only ──
         if promotion.spending_threshold is not None:
-            total_spent = orders_qs.aggregate(total=Sum('total_price'))['total'] or 0
-            if float(total_spent) < float(promotion.spending_threshold):
+            if float(current_order_total) < float(promotion.spending_threshold):
+                print(f"[PROMO] SKIP '{promotion.name}' — current order €{current_order_total} < min spending €{promotion.spending_threshold}")
                 continue
 
         # ── All conditions passed — award credits ──
@@ -143,7 +172,7 @@ def check_and_apply_promotions(user, user_type, school_id=None, school_type=None
             'credit_reward': float(promotion.credit_reward),
         })
 
-    return rewards
+    return rewards, pending_promotions
 
 APPLE_KEYS_URL = "https://appleid.apple.com/auth/keys"
 APPLE_AUDIENCE = "app.raftersfoodservices.ie"
@@ -198,35 +227,16 @@ def register(request):
             if password != confirm_password:
                 return Response({"error": "Passwords do not match."}, status=400)
 
-
-            primary_school_id = school_id if school_type == "primary" else None
-            secondary_school_id = school_id if school_type == "secondary" else None
             manager = Manager.objects.create(
                 username=username,
                 password=make_password(password),
-                school_type=school_type,
-                primary_school_id=primary_school_id,
-                secondary_school_id=secondary_school_id,
             )
-
-            # Optional: return school name in response
-            school_name = None
-            if school_type == "primary" and primary_school_id:
-                school_name = PrimarySchool.objects.filter(id=primary_school_id).first()
-                school_name = school_name.school_name if school_name else "Unknown School"
-            elif school_type == "secondary" and secondary_school_id:
-                school_name = SecondarySchool.objects.filter(id=secondary_school_id).first()
-                school_name = school_name.secondary_school_name if school_name else "Unknown School"
 
             return Response(
                 {
                     "message": "Manager account created successfully.",
                     "user_type": "manager",
                     "id": manager.id,
-                    "school_name": school_name or "Unknown School",
-                    "school_type": school_type,
-                    "primary_school": primary_school_id,
-                    "secondary_school": secondary_school_id,
                 },
                 status=201,
             )
@@ -3078,7 +3088,7 @@ class CreateOrderAndPaymentAPIView(APIView):
                             student=user if user_type == 'student' else None
                         )
 
-                    promotion_rewards = check_and_apply_promotions(user, user_type, school_id=school_id, school_type=school_type)
+                    promotion_rewards, pending_promotions = check_and_apply_promotions(user, user_type, school_id=school_id, school_type=school_type, current_order_total=calculated_total_price)
                     response_data = {
                         'message': 'Orders created successfully with free meal for child.',
                         'orders': OrderSerializer(created_orders, many=True).data,
@@ -3086,6 +3096,7 @@ class CreateOrderAndPaymentAPIView(APIView):
                     }
                     if promotion_rewards:
                         response_data['promotion_rewards'] = promotion_rewards
+                    response_data['pending_promotions'] = pending_promotions
                     return Response(response_data, status=status.HTTP_201_CREATED)
 
                 # ---------------------------
@@ -3123,7 +3134,7 @@ class CreateOrderAndPaymentAPIView(APIView):
                             student=user if user_type == 'student' else None
                         )
 
-                    promotion_rewards = check_and_apply_promotions(user, user_type, school_id=school_id, school_type=school_type)
+                    promotion_rewards, pending_promotions = check_and_apply_promotions(user, user_type, school_id=school_id, school_type=school_type, current_order_total=calculated_total_price)
                     response_data = {
                         'message': 'Orders created and credits deducted successfully!',
                         'orders': OrderSerializer(created_orders, many=True).data,
@@ -3133,6 +3144,7 @@ class CreateOrderAndPaymentAPIView(APIView):
                     }
                     if promotion_rewards:
                         response_data['promotion_rewards'] = promotion_rewards
+                    response_data['pending_promotions'] = pending_promotions
                     return Response(response_data, status=status.HTTP_201_CREATED)
 
                 # ---------------------------
@@ -3190,7 +3202,7 @@ class CreateOrderAndPaymentAPIView(APIView):
                         student=user if user_type == 'student' else None
                     )
 
-                promotion_rewards = check_and_apply_promotions(user, user_type, school_id=school_id, school_type=school_type)
+                promotion_rewards, pending_promotions = check_and_apply_promotions(user, user_type, school_id=school_id, school_type=school_type, current_order_total=calculated_total_price)
                 response_data = {
                     'message': 'Orders and payment intent created successfully!',
                     'orders': OrderSerializer(created_orders, many=True).data,
@@ -3200,6 +3212,7 @@ class CreateOrderAndPaymentAPIView(APIView):
                 }
                 if promotion_rewards:
                     response_data['promotion_rewards'] = promotion_rewards
+                response_data['pending_promotions'] = pending_promotions
                 return Response(response_data, status=status.HTTP_201_CREATED)
 
         except stripe.error.CardError as e:
@@ -4464,21 +4477,20 @@ def generate_manager_workbook(target_day):
     day_totals = []
 
     for order in manager_orders.prefetch_related('items', 'manager'):
-        school = None
         school_name = "Unknown School"
-        
-        # Determine school
-        if hasattr(order.manager, 'primary_school') and order.manager.primary_school:
-            school = order.manager.primary_school
-            school_name = school.school_name
-        elif hasattr(order.manager, 'secondary_school') and order.manager.secondary_school:
-            school = order.manager.secondary_school
-            school_name = school.secondary_school_name
-        
+
+        # Determine school from ManagerOrder fields
+        if order.school_type == 'primary' and order.school_id:
+            school_obj = PrimarySchool.objects.filter(id=order.school_id).first()
+            school_name = school_obj.school_name if school_obj else "Unknown School"
+        elif order.school_type == 'secondary' and order.school_id:
+            school_obj = SecondarySchool.objects.filter(id=order.school_id).first()
+            school_name = school_obj.secondary_school_name if school_obj else "Unknown School"
+
         # Process order items
         for item in order.items.all():
             order_data = {
-                'manager_name': order.manager.username,
+                'manager_name': order.manager_name or order.manager.username,
                 'item_name': item.item,
                 'quantity': item.quantity,
                 'remarks': item.remarks or "",
@@ -4591,21 +4603,20 @@ def generate_combined_manager_workbook(day_filter=None):
         day_totals = []
 
         for order in manager_orders.prefetch_related('items', 'manager'):
-            school = None
             school_name = "Unknown School"
 
-            # Determine school
-            if hasattr(order.manager, 'primary_school') and order.manager.primary_school:
-                school = order.manager.primary_school
-                school_name = school.school_name
-            elif hasattr(order.manager, 'secondary_school') and order.manager.secondary_school:
-                school = order.manager.secondary_school
-                school_name = school.secondary_school_name
+            # Determine school from ManagerOrder fields
+            if order.school_type == 'primary' and order.school_id:
+                school_obj = PrimarySchool.objects.filter(id=order.school_id).first()
+                school_name = school_obj.school_name if school_obj else "Unknown School"
+            elif order.school_type == 'secondary' and order.school_id:
+                school_obj = SecondarySchool.objects.filter(id=order.school_id).first()
+                school_name = school_obj.secondary_school_name if school_obj else "Unknown School"
 
             # Process order items
             for item in order.items.all():
                 order_data = {
-                    'manager_name': order.manager.username,
+                    'manager_name': order.manager_name or order.manager.username,
                     'item_name': item.item,
                     'quantity': item.quantity,
                     'remarks': item.remarks or "",
@@ -5330,9 +5341,6 @@ def manager_login(request):
     data = {
         "id": manager.id,
         "username": manager.username,
-        "school_type": manager.school_type,
-        "primary_school": manager.primary_school.id if manager.primary_school else None,
-        "secondary_school": manager.secondary_school.id if manager.secondary_school else None,
     }
 
     return Response({"detail": "Login successful!", "manager": data}, status=status.HTTP_200_OK)
@@ -5365,90 +5373,134 @@ def worker_login(request):
 
 class CreateManagerOrderAPIView(APIView):
     """
-    Create an order for Managers.
-    This view takes:
-      - manager_id
-      - cart (list of {day, item, quantity, remarks})
+    Create orders for Managers.
+    Payload: { manager_id, manager_name, school_id, school_type, cart: [{day, item, quantity, remarks}] }
+    Applies same ordering window as secondary schools (Friday 2pm cutoff; 2pm per-day cutoff).
     """
 
     def post(self, request, *args, **kwargs):
         try:
+            import pytz
+            from datetime import date as date_class
+
             data = request.data
             manager_id = data.get("manager_id")
             cart_items = data.get("cart", [])
+            manager_name = (data.get("manager_name") or "").strip()
+            school_id = data.get("school_id")
+            school_type = (data.get("school_type") or "").strip().lower()
 
             if not manager_id:
                 return Response({"error": "Manager ID is required."}, status=status.HTTP_400_BAD_REQUEST)
-
             if not cart_items:
                 return Response({"error": "Cart cannot be empty."}, status=status.HTTP_400_BAD_REQUEST)
+            if not school_id or not school_type:
+                return Response({"error": "school_id and school_type are required."}, status=status.HTTP_400_BAD_REQUEST)
 
             manager = Manager.objects.filter(id=manager_id).first()
             if not manager:
                 return Response({"error": "Manager not found."}, status=status.HTTP_404_NOT_FOUND)
+
+            display_name = manager_name or manager.username
+
+            # Ordering window — Ireland timezone, same as secondary schools
+            ireland_tz = pytz.timezone('Europe/Dublin')
+            current_time = datetime.now(ireland_tz)
+            current_week_number = current_time.isocalendar()[1]
+            current_year = current_time.year
+            cutoff_hour = 14  # 2pm
+
+            # Friday 2pm cutoff: before → current week, after → next week
+            is_past_friday_cutoff = (
+                current_time.weekday() > 4 or
+                (current_time.weekday() == 4 and current_time.hour >= cutoff_hour)
+            )
+            target_week = current_week_number + 1 if is_past_friday_cutoff else current_week_number
+            target_year = current_year
+            if target_week > 52:
+                target_week = 1
+                target_year += 1
+
+            # Calculate Monday of the target week
+            jan4 = date_class(target_year, 1, 4)
+            week1_monday = jan4 - timedelta(days=jan4.weekday())
+            target_monday = week1_monday + timedelta(weeks=target_week - 1)
+
+            DAY_NAMES = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
 
             grouped_items = {}
             for item in cart_items:
                 day = item.get("day")
                 if not day:
                     return Response({"error": "Each item must include a day."}, status=status.HTTP_400_BAD_REQUEST)
-                grouped_items.setdefault(day, []).append(item)
+                grouped_items.setdefault(day.lower(), []).append(item)
 
             created_orders = []
             with transaction.atomic():
                 for day, items in grouped_items.items():
-                    today = datetime.now()
-
                     try:
-                        target_day_index = [
-                            "monday", "tuesday", "wednesday", "thursday",
-                            "friday", "saturday", "sunday"
-                        ].index(day.lower())
+                        target_day_index = DAY_NAMES.index(day.lower())
                     except ValueError:
                         return Response({"error": f"Invalid day '{day}'."}, status=status.HTTP_400_BAD_REQUEST)
 
-                    # ✅ Same calculation as user orders
-                    days_ahead = (target_day_index - today.weekday() + 7) % 7
-                    order_date = today + timedelta(days=days_ahead)
-                    week_number = order_date.isocalendar()[1]
-                    year = order_date.year
+                    if target_day_index > 4:
+                        return Response({"error": "Orders can only be placed for Monday to Friday."}, status=status.HTTP_400_BAD_REQUEST)
 
-                    # ✅ Create ManagerOrder with correct order_date
+                    order_date = target_monday + timedelta(days=target_day_index)
+                    today_date = current_time.date()
+
+                    # Must order for a future date
+                    if order_date <= today_date:
+                        return Response(
+                            {"error": f"Cannot order for {day.capitalize()} — that date has already passed."},
+                            status=status.HTTP_400_BAD_REQUEST
+                        )
+
+                    # If ordering for tomorrow, must be before 2pm today
+                    if order_date == today_date + timedelta(days=1):
+                        if current_time.hour >= cutoff_hour:
+                            return Response(
+                                {"error": f"Ordering window for {day.capitalize()} has closed (cutoff: 2pm the day before)."},
+                                status=status.HTTP_400_BAD_REQUEST
+                            )
+
                     order = ManagerOrder.objects.create(
                         manager=manager,
-                        week_number=week_number,
-                        year=year,
-                        selected_day=day,
-                        order_date=order_date.date(),  # <-- Added line
+                        manager_name=display_name,
+                        school_id=school_id,
+                        school_type=school_type,
+                        week_number=target_week,
+                        year=target_year,
+                        selected_day=day.capitalize(),
+                        order_date=order_date,
                         status="pending",
                         is_delivered=False,
                     )
 
                     for cart_item in items:
-                        item_name = cart_item.get("item")
+                        item_name = (cart_item.get("item") or "").strip()
                         quantity = int(cart_item.get("quantity", 1))
                         remarks = cart_item.get("remarks", "")
 
+                        if not item_name:
+                            return Response({"error": "Item name is required for each cart item."}, status=status.HTTP_400_BAD_REQUEST)
+
+                        # Try to match to a MenuItems record (optional — custom names are allowed)
                         menu_item = MenuItems.objects.filter(item_name__iexact=item_name).first()
-                        if not menu_item:
-                            return Response(
-                                {"error": f"Menu item '{item_name}' not found."},
-                                status=status.HTTP_404_NOT_FOUND
-                            )
 
                         ManagerOrderItem.objects.create(
                             order=order,
-                            day=day,
+                            day=day.capitalize(),
                             item=item_name,
                             quantity=quantity,
                             remarks=remarks,
-                            menu_item=menu_item
+                            menu_item=menu_item,
                         )
 
                     created_orders.append(order)
 
             serializer = ManagerOrderSerializer(created_orders, many=True)
-            orders_data = serializer.data
+            orders_data = list(serializer.data)
 
             for order in orders_data:
                 order["order_id"] = f"m_{order['id']}"
@@ -6297,3 +6349,111 @@ def promotion_detail(request, pk):
     elif request.method == 'DELETE':
         promotion.delete()
         return Response({'message': 'Promotion deleted successfully.'}, status=status.HTTP_200_OK)
+
+
+# ------------------------------
+# Manager Dashboard Orders
+# ------------------------------
+@api_view(['GET'])
+def manager_orders_dashboard(request):
+    """
+    Returns manager orders for the current target week.
+    Query params: manager_id (required), day (optional), school_id (optional)
+    """
+    import pytz
+    manager_id = request.GET.get('manager_id')
+    day_filter = request.GET.get('day')
+    school_id_filter = request.GET.get('school_id')
+
+    if not manager_id:
+        return Response({'error': 'manager_id is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    ireland_tz = pytz.timezone('Europe/Dublin')
+    current_time = datetime.now(ireland_tz)
+    current_week_number = current_time.isocalendar()[1]
+    current_year = current_time.year
+
+    is_past_cutoff = (
+        current_time.weekday() > 4 or
+        (current_time.weekday() == 4 and current_time.hour >= 14)
+    )
+    target_week = current_week_number + 1 if is_past_cutoff else current_week_number
+    target_year = current_year
+    if target_week > 52:
+        target_week = 1
+        target_year += 1
+
+    qs = ManagerOrder.objects.filter(
+        manager_id=manager_id,
+        week_number=target_week,
+        year=target_year,
+    ).exclude(status__iexact='cancelled').prefetch_related('items')
+
+    if day_filter:
+        qs = qs.filter(selected_day__iexact=day_filter)
+    if school_id_filter:
+        try:
+            qs = qs.filter(school_id=int(school_id_filter))
+        except ValueError:
+            pass
+
+    orders_data = []
+    for order in qs.order_by('order_date', 'selected_day'):
+        school_name = "Unknown School"
+        if order.school_type == 'primary' and order.school_id:
+            school_obj = PrimarySchool.objects.filter(id=order.school_id).first()
+            school_name = school_obj.school_name if school_obj else "Unknown School"
+        elif order.school_type == 'secondary' and order.school_id:
+            school_obj = SecondarySchool.objects.filter(id=order.school_id).first()
+            school_name = school_obj.secondary_school_name if school_obj else "Unknown School"
+
+        items = [
+            {'item': i.item, 'quantity': i.quantity, 'remarks': i.remarks or ''}
+            for i in order.items.all()
+        ]
+        orders_data.append({
+            'order_id': f'm_{order.id}',
+            'manager_name': order.manager_name or order.manager.username,
+            'school_name': school_name,
+            'school_id': order.school_id,
+            'school_type': order.school_type,
+            'selected_day': order.selected_day,
+            'order_date': str(order.order_date) if order.order_date else None,
+            'status': order.status,
+            'is_delivered': order.is_delivered,
+            'items': items,
+            'item_count': sum(i['quantity'] for i in items),
+        })
+
+    return Response(orders_data, status=status.HTTP_200_OK)
+
+
+# ------------------------------
+# Active Menu Items for a School
+# ------------------------------
+@api_view(['GET'])
+def manager_school_menus(request):
+    """
+    Returns active menu item names for a given school.
+    Query params: school_id, school_type (primary|secondary)
+    """
+    school_id = request.GET.get('school_id')
+    school_type = (request.GET.get('school_type') or '').strip().lower()
+
+    if not school_id or not school_type:
+        return Response({'error': 'school_id and school_type are required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        school_id = int(school_id)
+    except ValueError:
+        return Response({'error': 'Invalid school_id.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if school_type == 'primary':
+        menus = Menu.objects.filter(primary_schools__id=school_id, is_active=True, is_deleted=False)
+    elif school_type == 'secondary':
+        menus = Menu.objects.filter(secondary_schools__id=school_id, is_active=True, is_deleted=False)
+    else:
+        return Response({'error': 'Invalid school_type. Use primary or secondary.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    item_names = list(menus.values_list('name', flat=True).distinct())
+    return Response({'items': item_names}, status=status.HTTP_200_OK)
