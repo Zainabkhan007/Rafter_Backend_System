@@ -135,6 +135,7 @@ urlpatterns = [
     # Admin Dashboard Analytics
     path('dashboard/analytics/', views.get_dashboard_analytics, name='dashboard_analytics'),
     path('dashboard/schools/', views.get_school_analytics, name='school_analytics'),  # Changed to GET
+    path('dashboard/schools/stream/', views.stream_school_analytics, name='school_analytics_stream'),
     path('dashboard/school/<int:school_id>/', analytics_views.get_school_summary, name='school_summary'),
     path('dashboard/school/<int:school_id>/filter-options/', analytics_views.get_filter_options, name='filter_options'),
     path('dashboard/school/<int:school_id>/generate-report/', analytics_views.generate_school_report, name='generate_report'),
