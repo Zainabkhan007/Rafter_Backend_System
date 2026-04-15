@@ -7,7 +7,7 @@ from admin_section.models import Order
 
 
 class Command(BaseCommand):
-    help = "Delete all orders older than 8 weeks (keeps the last 8 weeks)"
+    help = "Delete all orders older than 4 weeks (keeps the last 4 weeks)"
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -18,8 +18,8 @@ class Command(BaseCommand):
         parser.add_argument(
             "--weeks",
             type=int,
-            default=6,
-            help="Number of weeks to keep (default: 6).",
+            default=4,
+            help="Number of weeks to keep (default: 4).",
         )
 
     def handle(self, *args, **options):
