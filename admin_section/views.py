@@ -4477,20 +4477,21 @@ def generate_manager_workbook(target_day):
     day_totals = []
 
     for order in manager_orders.prefetch_related('items', 'manager'):
-        school_name = "Unknown School"
-
-        # Determine school from ManagerOrder fields
-        if order.school_type == 'primary' and order.school_id:
+        if order.custom_school_name:
+            school_name = order.custom_school_name
+        elif order.school_type == 'primary' and order.school_id:
             school_obj = PrimarySchool.objects.filter(id=order.school_id).first()
             school_name = school_obj.school_name if school_obj else "Unknown School"
         elif order.school_type == 'secondary' and order.school_id:
             school_obj = SecondarySchool.objects.filter(id=order.school_id).first()
             school_name = school_obj.secondary_school_name if school_obj else "Unknown School"
+        else:
+            school_name = "Unknown School"
 
         # Process order items
         for item in order.items.all():
             order_data = {
-                'manager_name': order.manager_name or order.manager.username,
+                'manager_name': order.manager_name or (order.manager.username if order.manager else 'Unknown'),
                 'item_name': item.item,
                 'quantity': item.quantity,
                 'remarks': item.remarks or "",
@@ -4603,20 +4604,21 @@ def generate_combined_manager_workbook(day_filter=None):
         day_totals = []
 
         for order in manager_orders.prefetch_related('items', 'manager'):
-            school_name = "Unknown School"
-
-            # Determine school from ManagerOrder fields
-            if order.school_type == 'primary' and order.school_id:
+            if order.custom_school_name:
+                school_name = order.custom_school_name
+            elif order.school_type == 'primary' and order.school_id:
                 school_obj = PrimarySchool.objects.filter(id=order.school_id).first()
                 school_name = school_obj.school_name if school_obj else "Unknown School"
             elif order.school_type == 'secondary' and order.school_id:
                 school_obj = SecondarySchool.objects.filter(id=order.school_id).first()
                 school_name = school_obj.secondary_school_name if school_obj else "Unknown School"
+            else:
+                school_name = "Unknown School"
 
             # Process order items
             for item in order.items.all():
                 order_data = {
-                    'manager_name': order.manager_name or order.manager.username,
+                    'manager_name': order.manager_name or (order.manager.username if order.manager else 'Unknown'),
                     'item_name': item.item,
                     'quantity': item.quantity,
                     'remarks': item.remarks or "",
@@ -4637,23 +4639,45 @@ def generate_combined_manager_workbook(day_filter=None):
         columns = ["School", "Manager", "Item", "Quantity", "Remarks", "Production Price", "Total Price"]
         apply_header_styling(sheet, title, columns)
 
+        school_header_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
+        school_header_font = Font(bold=True, size=13, color="000000")
+
         row_num = 3
+        school_header_rows = []
         if not day_totals:
             sheet.cell(row=3, column=1, value="No manager orders for this day")
             sheet.merge_cells(start_row=3, end_row=3, start_column=1, end_column=7)
         else:
-            # Add all orders for this day
-            for order_data in day_totals:
-                sheet.cell(row=row_num, column=1, value=order_data['school_name'])
-                sheet.cell(row=row_num, column=2, value=order_data['manager_name'])
-                sheet.cell(row=row_num, column=3, value=order_data['item_name'])
-                sheet.cell(row=row_num, column=4, value=order_data['quantity'])
-                sheet.cell(row=row_num, column=5, value=order_data['remarks'])
-                sheet.cell(row=row_num, column=6, value=order_data['production_price'])
-                sheet.cell(row=row_num, column=7, value=order_data['total_price'])
+            school_names_ordered = list(dict.fromkeys(o['school_name'] for o in day_totals))
+            for school_idx, school_name in enumerate(school_names_ordered):
+                # Merged school name header row
+                sheet.merge_cells(start_row=row_num, end_row=row_num, start_column=1, end_column=7)
+                sheet.cell(row=row_num, column=1, value=school_name)
+                school_header_rows.append(row_num)
                 row_num += 1
 
+                school_orders = [o for o in day_totals if o['school_name'] == school_name]
+                for order_data in school_orders:
+                    sheet.cell(row=row_num, column=1, value=order_data['school_name'])
+                    sheet.cell(row=row_num, column=2, value=order_data['manager_name'])
+                    sheet.cell(row=row_num, column=3, value=order_data['item_name'])
+                    sheet.cell(row=row_num, column=4, value=order_data['quantity'])
+                    sheet.cell(row=row_num, column=5, value=order_data['remarks'])
+                    sheet.cell(row=row_num, column=6, value=order_data['production_price'])
+                    sheet.cell(row=row_num, column=7, value=order_data['total_price'])
+                    row_num += 1
+                # 3 blank separator rows between schools (not after the last)
+                if school_idx < len(school_names_ordered) - 1:
+                    row_num += 3
+
         apply_data_styling(sheet, 3)
+
+        # Re-apply school header styling after apply_data_styling (which overrides alignment/font)
+        for hr in school_header_rows:
+            cell = sheet.cell(row=hr, column=1)
+            cell.font = school_header_font
+            cell.fill = school_header_fill
+            cell.alignment = center_align
 
     return workbook
 
@@ -5380,24 +5404,20 @@ class CreateManagerOrderAPIView(APIView):
             from datetime import date as date_class
 
             data = request.data
-            manager_id = data.get("manager_id")
             cart_items = data.get("cart", [])
             manager_name = (data.get("manager_name") or "").strip()
             school_id = data.get("school_id")
-            school_type = (data.get("school_type") or "").strip().lower()
+            school_type = (data.get("school_type") or "").strip().lower() or None
+            custom_school_name = (data.get("custom_school_name") or "").strip() or None
 
-            if not manager_id:
-                return Response({"error": "Manager ID is required."}, status=status.HTTP_400_BAD_REQUEST)
+            if not manager_name:
+                return Response({"error": "Manager name is required."}, status=status.HTTP_400_BAD_REQUEST)
             if not cart_items:
                 return Response({"error": "Cart cannot be empty."}, status=status.HTTP_400_BAD_REQUEST)
-            if not school_id or not school_type:
-                return Response({"error": "school_id and school_type are required."}, status=status.HTTP_400_BAD_REQUEST)
+            if not custom_school_name and (not school_id or not school_type):
+                return Response({"error": "Either a school must be selected or a custom school name provided."}, status=status.HTTP_400_BAD_REQUEST)
 
-            manager = Manager.objects.filter(id=manager_id).first()
-            if not manager:
-                return Response({"error": "Manager not found."}, status=status.HTTP_404_NOT_FOUND)
-
-            display_name = manager_name or manager.username
+            display_name = manager_name
 
             # Ordering window — Ireland timezone, same as secondary schools
             ireland_tz = pytz.timezone('Europe/Dublin')
@@ -5461,10 +5481,10 @@ class CreateManagerOrderAPIView(APIView):
                             )
 
                     order = ManagerOrder.objects.create(
-                        manager=manager,
                         manager_name=display_name,
-                        school_id=school_id,
-                        school_type=school_type,
+                        school_id=school_id if not custom_school_name else None,
+                        school_type=school_type if not custom_school_name else None,
+                        custom_school_name=custom_school_name,
                         week_number=target_week,
                         year=target_year,
                         selected_day=day.capitalize(),
@@ -6428,15 +6448,12 @@ def promotion_detail(request, pk):
 def manager_orders_dashboard(request):
     """
     Returns manager orders for the current target week.
-    Query params: manager_id (required), day (optional), school_id (optional)
+    Query params: manager_id (optional - if omitted returns all managers), day (optional), school_id (optional)
     """
     import pytz
     manager_id = request.GET.get('manager_id')
     day_filter = request.GET.get('day')
     school_id_filter = request.GET.get('school_id')
-
-    if not manager_id:
-        return Response({'error': 'manager_id is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
     ireland_tz = pytz.timezone('Europe/Dublin')
     current_time = datetime.now(ireland_tz)
@@ -6454,10 +6471,12 @@ def manager_orders_dashboard(request):
         target_year += 1
 
     qs = ManagerOrder.objects.filter(
-        manager_id=manager_id,
         week_number=target_week,
         year=target_year,
     ).exclude(status__iexact='cancelled').prefetch_related('items')
+
+    if manager_id:
+        qs = qs.filter(manager_id=manager_id)
 
     if day_filter:
         qs = qs.filter(selected_day__iexact=day_filter)
@@ -6469,13 +6488,16 @@ def manager_orders_dashboard(request):
 
     orders_data = []
     for order in qs.order_by('order_date', 'selected_day'):
-        school_name = "Unknown School"
-        if order.school_type == 'primary' and order.school_id:
+        if order.custom_school_name:
+            school_name = order.custom_school_name
+        elif order.school_type == 'primary' and order.school_id:
             school_obj = PrimarySchool.objects.filter(id=order.school_id).first()
             school_name = school_obj.school_name if school_obj else "Unknown School"
         elif order.school_type == 'secondary' and order.school_id:
             school_obj = SecondarySchool.objects.filter(id=order.school_id).first()
             school_name = school_obj.secondary_school_name if school_obj else "Unknown School"
+        else:
+            school_name = "Unknown School"
 
         items = [
             {'item': i.item, 'quantity': i.quantity, 'remarks': i.remarks or ''}
@@ -6483,7 +6505,7 @@ def manager_orders_dashboard(request):
         ]
         orders_data.append({
             'order_id': f'm_{order.id}',
-            'manager_name': order.manager_name or order.manager.username,
+            'manager_name': order.manager_name or (order.manager.username if order.manager else 'Unknown'),
             'school_name': school_name,
             'school_id': order.school_id,
             'school_type': order.school_type,

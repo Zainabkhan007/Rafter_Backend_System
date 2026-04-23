@@ -376,10 +376,11 @@ class Manager(models.Model):
         return f'{self.username} - Manager'
 
 class ManagerOrder(models.Model):
-    manager = models.ForeignKey('Manager', on_delete=models.CASCADE, related_name='orders')
+    manager = models.ForeignKey('Manager', on_delete=models.SET_NULL, null=True, blank=True, related_name='orders')
     manager_name = models.CharField(max_length=100, blank=True, null=True)
     school_type = models.CharField(max_length=20, blank=True, null=True)
     school_id = models.PositiveIntegerField(null=True, blank=True)
+    custom_school_name = models.CharField(max_length=200, blank=True, null=True)
     order_date = models.DateField(null=True, blank=True)
     week_number = models.PositiveIntegerField(null=True, blank=True)
     year = models.PositiveIntegerField(null=True, blank=True)
@@ -388,7 +389,7 @@ class ManagerOrder(models.Model):
     is_delivered = models.BooleanField(default=False)
 
     def __str__(self):
-        return f"ManagerOrder {self.id} - {self.manager.username}"
+        return f"ManagerOrder {self.id} - {self.manager_name or (self.manager.username if self.manager else 'Unknown')}"
 
     @property
     def total_production_price(self):
