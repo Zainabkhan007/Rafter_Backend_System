@@ -4476,7 +4476,7 @@ def generate_manager_workbook(target_day):
     orders_by_school = defaultdict(list)
     day_totals = []
 
-    for order in manager_orders.prefetch_related('items', 'manager'):
+    for order in manager_orders.prefetch_related('items__menu_item', 'manager'):
         if order.custom_school_name:
             school_name = order.custom_school_name
         elif order.school_type == 'primary' and order.school_id:
@@ -4490,13 +4490,17 @@ def generate_manager_workbook(target_day):
 
         # Process order items
         for item in order.items.all():
+            # Always use the live price from MenuItems so updates are reflected
+            live_price = float(
+                item.menu_item.production_price if item.menu_item and item.menu_item.production_price else item.production_price or 0
+            )
             order_data = {
                 'manager_name': order.manager_name or (order.manager.username if order.manager else 'Unknown'),
                 'item_name': item.item,
                 'quantity': item.quantity,
                 'remarks': item.remarks or "",
-                'production_price': float(item.production_price or 0),
-                'total_price': float(item.quantity) * float(item.production_price or 0),
+                'production_price': live_price,
+                'total_price': float(item.quantity) * live_price,
                 'order_id': order.id,
                 'school_name': school_name
             }
@@ -4603,7 +4607,7 @@ def generate_combined_manager_workbook(day_filter=None):
         orders_by_school = defaultdict(list)
         day_totals = []
 
-        for order in manager_orders.prefetch_related('items', 'manager'):
+        for order in manager_orders.prefetch_related('items__menu_item', 'manager'):
             if order.custom_school_name:
                 school_name = order.custom_school_name
             elif order.school_type == 'primary' and order.school_id:
@@ -4617,13 +4621,17 @@ def generate_combined_manager_workbook(day_filter=None):
 
             # Process order items
             for item in order.items.all():
+                # Always use the live price from MenuItems so updates are reflected
+                live_price = float(
+                    item.menu_item.production_price if item.menu_item and item.menu_item.production_price else item.production_price or 0
+                )
                 order_data = {
                     'manager_name': order.manager_name or (order.manager.username if order.manager else 'Unknown'),
                     'item_name': item.item,
                     'quantity': item.quantity,
                     'remarks': item.remarks or "",
-                    'production_price': float(item.production_price or 0),
-                    'total_price': float(item.quantity) * float(item.production_price or 0),
+                    'production_price': live_price,
+                    'total_price': float(item.quantity) * live_price,
                     'order_id': order.id,
                     'school_name': school_name
                 }
