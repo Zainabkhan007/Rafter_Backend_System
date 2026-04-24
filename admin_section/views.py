@@ -4382,7 +4382,7 @@ def fetch_manager_orders(target_day=None):
     current_year = current_time.year
 
     cutoff_day = 4  # Friday
-    cutoff_hour = 14  # 2PM
+    cutoff_hour = 12  # 12pm — matches frontend ordering window open time
 
     is_past_cutoff = (
         current_time.weekday() > cutoff_day or
@@ -5432,9 +5432,9 @@ class CreateManagerOrderAPIView(APIView):
             current_time = datetime.now(ireland_tz)
             current_week_number = current_time.isocalendar()[1]
             current_year = current_time.year
-            cutoff_hour = 14  # 2pm
+            cutoff_hour = 12  # 12pm — matches frontend ordering window open time
 
-            # Friday 2pm cutoff: before → current week, after → next week
+            # Friday 12pm cutoff: before → current week, after → next week
             is_past_friday_cutoff = (
                 current_time.weekday() > 4 or
                 (current_time.weekday() == 4 and current_time.hour >= cutoff_hour)
@@ -6470,7 +6470,7 @@ def manager_orders_dashboard(request):
 
     is_past_cutoff = (
         current_time.weekday() > 4 or
-        (current_time.weekday() == 4 and current_time.hour >= 14)
+        (current_time.weekday() == 4 and current_time.hour >= 12)
     )
     target_week = current_week_number + 1 if is_past_cutoff else current_week_number
     target_year = current_year
