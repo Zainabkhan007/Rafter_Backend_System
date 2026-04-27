@@ -5432,12 +5432,14 @@ class CreateManagerOrderAPIView(APIView):
             current_time = datetime.now(ireland_tz)
             current_week_number = current_time.isocalendar()[1]
             current_year = current_time.year
-            cutoff_hour = 12  # 12pm — matches frontend ordering window open time
+            friday_cutoff_hour = 12   # 12pm — week selection (matches frontend)
+            daily_cutoff_hour = 14    # 2pm
+            daily_cutoff_minute = 30  # :30 → 2:30pm cutoff for next-day orders
 
             # Friday 12pm cutoff: before → current week, after → next week
             is_past_friday_cutoff = (
                 current_time.weekday() > 4 or
-                (current_time.weekday() == 4 and current_time.hour >= cutoff_hour)
+                (current_time.weekday() == 4 and current_time.hour >= friday_cutoff_hour)
             )
             target_week = current_week_number + 1 if is_past_friday_cutoff else current_week_number
             target_year = current_year
@@ -5473,18 +5475,22 @@ class CreateManagerOrderAPIView(APIView):
                     order_date = target_monday + timedelta(days=target_day_index)
                     today_date = current_time.date()
 
-                    # Must order for a future date
+                    # Must order for a strictly future date (today is not orderable)
                     if order_date <= today_date:
                         return Response(
                             {"error": f"Cannot order for {day.capitalize()} — that date has already passed."},
                             status=status.HTTP_400_BAD_REQUEST
                         )
 
-                    # If ordering for tomorrow, must be before 2pm today
+                    # If ordering for tomorrow, must be before 2:30pm today
                     if order_date == today_date + timedelta(days=1):
-                        if current_time.hour >= cutoff_hour:
+                        past_daily_cutoff = (
+                            current_time.hour > daily_cutoff_hour or
+                            (current_time.hour == daily_cutoff_hour and current_time.minute >= daily_cutoff_minute)
+                        )
+                        if past_daily_cutoff:
                             return Response(
-                                {"error": f"Ordering window for {day.capitalize()} has closed (cutoff: 2pm the day before)."},
+                                {"error": f"Ordering window for {day.capitalize()} has closed (cutoff: 2:30pm the day before)."},
                                 status=status.HTTP_400_BAD_REQUEST
                             )
 
